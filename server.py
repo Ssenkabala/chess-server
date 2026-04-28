@@ -240,6 +240,7 @@ def register(req: RegisterRequest):
 def health():
     return {"status": "ok"}
 
+app.mount("/img", StaticFiles(directory="img"), name="img")
 app.mount("/static", StaticFiles(directory="."), name="static")
 
 @app.get("/")

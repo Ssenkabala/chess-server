@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chess— | Play. Analyse. Improve.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --black:   #0a0a0a;
+      --white:   #f0ede6;
+      --green:   #00ff9d;
+      --green2:  #00c97a;
+      --grey:    #1a1a1a;
+      --mid:     #2e2e2e;
+      --muted:   #555;
+      --text:    #ccc8be;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--black);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-weight: 300;
+      overflow-x: hidden;
+      cursor: none;
+    }
+
+    /* ── Custom cursor ── */
+    .cursor {
+      position: fixed;
+      width: 10px; height: 10px;
+      background: var(--green);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9999;
+      transition: transform 0.15s ease, opacity 0.2s;
+      transform: translate(-50%, -50%);
+    }
+    .cursor-ring {
+      position: fixed;
+      width: 36px; height: 36px;
+      border: 1px solid var(--green);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9998;
+      opacity: 0.4;
+      transform: translate(-50%, -50%);
+      transition: transform 0.35s ease, width 0.2s, height 0.2s, opacity 0.2s;
+    }
+    body:hover .cursor { opacity: 1; }
+
+    /* ── Noise overlay ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 100;
+      opacity: 0.5;
+    }
+
+    /* ── Nav ── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 60px;
+      border-bottom: 1px solid #ffffff08;
+      background: linear-gradient(to bottom, #0a0a0aee, transparent);
+      backdrop-filter: blur(6px);
+    }
+    .nav-logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 24px;
+      font-weight: 900;
+      color: var(--white);
+      letter-spacing: -0.02em;
+    }
+    .nav-logo span { color: var(--green); }
+    .nav-links { display: flex; gap: 36px; align-items: center; }
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--green); }
+    .nav-cta {
+      padding: 9px 22px;
+      border: 1px solid var(--green);
+      color: var(--green) !important;
+      border-radius: 1px;
+      transition: all 0.2s !important;
+    }
+    .nav-cta:hover { background: var(--green) !important; color: var(--black) !important; }
+
+    /* ── Hero ── */
+    .hero {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: center;
+      padding: 120px 60px 60px;
+      gap: 60px;
+      position: relative;
+    }
+
+    /* Chessboard grid background */
+    .hero::after {
+      content: '';
+      position: absolute;
+      right: 0; top: 0; bottom: 0;
+      width: 55%;
+      background-image:
+        linear-gradient(var(--grey) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grey) 1px, transparent 1px);
+      background-size: 60px 60px;
+      opacity: 0.18;
+      mask-image: linear-gradient(to left, transparent 0%, black 60%);
+    }
+
+    .hero-left { z-index: 2; }
+
+    .hero-eyebrow {
+      font-size: 10px;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--green);
+      margin-bottom: 28px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .hero-eyebrow::before {
+      content: '';
+      display: inline-block;
+      width: 28px; height: 1px;
+      background: var(--green);
+    }
+
+    h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(56px, 6vw, 88px);
+      font-weight: 900;
+      line-height: 1.0;
+      color: var(--white);
+      letter-spacing: -0.03em;
+      margin-bottom: 28px;
+    }
+    h1 em {
+      font-style: italic;
+      color: var(--green);
+    }
+
+    .hero-sub {
+      font-size: 14px;
+      line-height: 1.8;
+      color: var(--muted);
+      max-width: 420px;
+      margin-bottom: 48px;
+    }
+
+    .hero-ctas { display: flex; gap: 16px; flex-wrap: wrap; }
+
+    .btn-primary {
+      padding: 14px 32px;
+      background: var(--green);
+      color: var(--black);
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      text-decoration: none;
+      border: none;
+      cursor: none;
+      transition: background 0.2s, transform 0.15s;
+      display: inline-block;
+    }
+    .btn-primary:hover { background: var(--green2); transform: translateY(-2px); }
+
+    .btn-secondary {
+      padding: 14px 32px;
+      background: transparent;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      text-decoration: none;
+      border: 1px solid var(--mid);
+      cursor: none;
+      transition: border-color 0.2s, color 0.2s, transform 0.15s;
+      display: inline-block;
+    }
+    .btn-secondary:hover { border-color: var(--text); color: var(--white); transform: translateY(-2px); }
+
+    /* Chess board visual */
+    .hero-board {
+      z-index: 2;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      width: min(420px, 45vw);
+      aspect-ratio: 1;
+      border: 1px solid #ffffff10;
+      box-shadow: 0 40px 120px #00000088, 0 0 0 1px #ffffff05;
+      animation: float 6s ease-in-out infinite;
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0px) rotate(-1deg); }
+      50% { transform: translateY(-12px) rotate(-1deg); }
+    }
+    .hero-board .sq {
+      aspect-ratio: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: clamp(18px, 2.5vw, 28px);
+      transition: background 0.3s;
+    }
+    .sq.light { background: #1e1e1e; }
+    .sq.dark  { background: #141414; }
+    .sq.accent { background: #00ff9d15; }
+    .sq.accent2 { background: #00ff9d08; }
+
+    /* ── Elo badge ── */
+    .elo-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 40px;
+      padding: 10px 18px;
+      border: 1px solid #2a2a2a;
+      background: #111;
+    }
+    .elo-num {
+      font-family: 'Playfair Display', serif;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--green);
+    }
+    .elo-label { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); line-height: 1.4; }
+
+    /* ── Section base ── */
+    section { padding: 100px 60px; }
+    .section-label {
+      font-size: 10px;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--green);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .section-label::before { content: ''; display: inline-block; width: 28px; height: 1px; background: var(--green); }
+    h2 {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(32px, 4vw, 52px);
+      font-weight: 700;
+      color: var(--white);
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+      margin-bottom: 20px;
+    }
+
+    /* ── Features ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: #1a1a1a;
+      margin-top: 60px;
+      border: 1px solid #1a1a1a;
+    }
+    .feature-card {
+      background: var(--black);
+      padding: 44px 36px;
+      transition: background 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+    .feature-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--green);
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 0.3s;
+    }
+    .feature-card:hover::before { transform: scaleX(1); }
+    .feature-card:hover { background: #0f0f0f; }
+
+    .feature-icon {
+      font-size: 28px;
+      margin-bottom: 20px;
+      display: block;
+    }
+    .feature-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 20px;
+      color: var(--white);
+      margin-bottom: 12px;
+      font-weight: 700;
+    }
+    .feature-desc { font-size: 13px; line-height: 1.8; color: var(--muted); }
+
+    /* ── Pricing ── */
+    #pricing { background: #0d0d0d; }
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 60px;
+      max-width: 900px;
+    }
+    .plan {
+      border: 1px solid #1e1e1e;
+      padding: 40px 32px;
+      position: relative;
+      transition: border-color 0.3s, transform 0.3s;
+    }
+    .plan:hover { border-color: #333; transform: translateY(-4px); }
+    .plan.featured {
+      border-color: var(--green);
+      background: #0f1a14;
+    }
+    .plan.featured::before {
+      content: 'MOST POPULAR';
+      position: absolute;
+      top: -1px; left: 50%;
+      transform: translateX(-50%);
+      background: var(--green);
+      color: var(--black);
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      padding: 4px 14px;
+      white-space: nowrap;
+    }
+    .plan-name {
+      font-size: 10px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+    .plan-price {
+      font-family: 'Playfair Display', serif;
+      font-size: 48px;
+      font-weight: 900;
+      color: var(--white);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .plan-price sup { font-size: 20px; vertical-align: super; }
+    .plan-price sub { font-size: 14px; color: var(--muted); font-family: 'DM Mono', monospace; font-weight: 300; }
+    .plan-desc { font-size: 12px; color: var(--muted); margin-bottom: 28px; line-height: 1.7; }
+    .plan-divider { height: 1px; background: #1e1e1e; margin-bottom: 28px; }
+    .plan-features { list-style: none; margin-bottom: 32px; display: flex; flex-direction: column; gap: 10px; }
+    .plan-features li { font-size: 12px; color: var(--text); display: flex; gap: 10px; align-items: flex-start; line-height: 1.5; }
+    .plan-features li::before { content: '—'; color: var(--green); flex-shrink: 0; }
+    .plan-features li.muted::before { color: var(--muted); }
+    .plan-features li.muted { color: var(--muted); }
+
+    .btn-plan {
+      display: block;
+      text-align: center;
+      padding: 13px;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      text-decoration: none;
+      cursor: none;
+      transition: all 0.2s;
+    }
+    .btn-plan-outline {
+      border: 1px solid #2e2e2e;
+      color: var(--text);
+    }
+    .btn-plan-outline:hover { border-color: var(--green); color: var(--green); }
+    .btn-plan-filled {
+      background: var(--green);
+      color: var(--black);
+      font-weight: 500;
+    }
+    .btn-plan-filled:hover { background: var(--green2); }
+
+    /* ── API section ── */
+    .api-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      align-items: center;
+    }
+    .code-block {
+      background: #0d0d0d;
+      border: 1px solid #1e1e1e;
+      border-left: 3px solid var(--green);
+      padding: 32px;
+      font-size: 12px;
+      line-height: 2;
+      overflow-x: auto;
+    }
+    .code-block .c-dim   { color: #3a3a3a; }
+    .code-block .c-key   { color: #7ec8a0; }
+    .code-block .c-str   { color: #e8d5a0; }
+    .code-block .c-num   { color: #a0c4e8; }
+    .code-block .c-green { color: var(--green); }
+
+    /* ── Testimonials / stats ── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1px;
+      background: #1a1a1a;
+      border: 1px solid #1a1a1a;
+      margin-top: 60px;
+    }
+    .stat {
+      background: var(--black);
+      padding: 40px;
+      text-align: center;
+    }
+    .stat-num {
+      font-family: 'Playfair Display', serif;
+      font-size: 48px;
+      font-weight: 900;
+      color: var(--green);
+      display: block;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+    .stat-label { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid #1a1a1a;
+      padding: 40px 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .footer-logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 18px;
+      font-weight: 900;
+      color: var(--white);
+    }
+    .footer-logo span { color: var(--green); }
+    footer p { font-size: 11px; color: var(--muted); }
+    .footer-links { display: flex; gap: 28px; }
+    .footer-links a { font-size: 11px; color: var(--muted); text-decoration: none; transition: color 0.2s; }
+    .footer-links a:hover { color: var(--green); }
+
+    /* ── Animations ── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 900px) {
+      nav { padding: 20px 24px; }
+      .hero { grid-template-columns: 1fr; padding: 100px 24px 60px; }
+      .hero-board { display: none; }
+      section { padding: 70px 24px; }
+      .features-grid, .pricing-grid, .stats-row { grid-template-columns: 1fr; }
+      .api-section { grid-template-columns: 1fr; }
+      footer { flex-direction: column; gap: 20px; text-align: center; padding: 30px 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="cursor" id="cursor"></div>
+<div class="cursor-ring" id="cursor-ring"></div>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">Chess<span>—</span></div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#api">API</a>
+    <a href="/index.html" class="nav-cta">Play Now</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-left">
+    <div class="hero-eyebrow">2050 ELO Engine</div>
+    <h1>Chess<em>—</em><br>Think<br>deeper.</h1>
+    <p class="hero-sub">
+      A tournament-strength engine with an AI coach built in.
+      Play, analyse any position, and understand exactly why each move matters.
+    </p>
+    <div class="hero-ctas">
+      <a href="/index.html" class="btn-primary">Play for Free</a>
+      <a href="#pricing" class="btn-secondary">Get Coach Access</a>
+    </div>
+    <div class="elo-badge">
+      <span class="elo-num">2050</span>
+      <span class="elo-label">Lichess<br>Rated ELO</span>
+    </div>
+  </div>
+
+  <!-- Mini chess board -->
+  <div class="hero-board" id="hero-board"></div>
+</section>
+
+<!-- STATS -->
+<section style="padding: 0 60px 80px;">
+  <div class="stats-row reveal">
+    <div class="stat"><span class="stat-num">2050</span><span class="stat-label">Peak ELO</span></div>
+    <div class="stat"><span class="stat-num">∞</span><span class="stat-label">Positions Analysed</span></div>
+    <div class="stat"><span class="stat-num">3</span><span class="stat-label">Coach Tiers</span></div>
+    <div class="stat"><span class="stat-num">$5</span><span class="stat-label">Per Month</span></div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="reveal">
+    <div class="section-label">What it does</div>
+    <h2>Your engine.<br>Your coach.</h2>
+    <p style="font-size:13px;color:var(--muted);max-width:500px;line-height:1.9;">
+      Chess— combines a battle-tested 2050 ELO engine with a natural language coaching layer.
+      Not just the best move — but <em>why</em> it's best.
+    </p>
+  </div>
+  <div class="features-grid reveal">
+    <div class="feature-card">
+      <span class="feature-icon">♟</span>
+      <div class="feature-title">Play Mode</div>
+      <p class="feature-desc">Go head-to-head against the engine. Drag and drop pieces, play as White or Black, flip the board. A genuine challenge for club players.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">⊞</span>
+      <div class="feature-title">Analysis Board</div>
+      <p class="feature-desc">Paste any FEN and see the engine's best move highlighted instantly. Use it to study openings, middlegames, or endgame studies.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">◈</span>
+      <div class="feature-title">AI Coach</div>
+      <p class="feature-desc">Every position comes with a full breakdown: assessment, best move explained in plain English, strategic plan, and a key chess principle.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">≈</span>
+      <div class="feature-title">Eval Bar</div>
+      <p class="feature-desc">Real-time centipawn evaluation. Know exactly who's winning and by how much — the same data grandmasters use to study.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">⟳</span>
+      <div class="feature-title">Game Analysis</div>
+      <p class="feature-desc">Submit your full PGN and get a coaching report identifying the turning point, the critical mistake, and how to fix it.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">◻</span>
+      <div class="feature-title">API Access</div>
+      <p class="feature-desc">Integrate the engine into your own apps. REST API with simple key auth. Ideal for developers building chess tools or bots.</p>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section id="pricing">
+  <div class="reveal">
+    <div class="section-label">Pricing</div>
+    <h2>Simple.<br>No surprises.</h2>
+  </div>
+  <div class="pricing-grid reveal">
+
+    <div class="plan">
+      <div class="plan-name">Free</div>
+      <div class="plan-price"><sup>$</sup>0</div>
+      <div class="plan-desc">Get started. No card needed.</div>
+      <div class="plan-divider"></div>
+      <ul class="plan-features">
+        <li>Play vs engine (unlimited)</li>
+        <li>Analysis board (unlimited)</li>
+        <li>10 coached analyses / day</li>
+        <li class="muted">PGN game analysis</li>
+        <li class="muted">API access</li>
+      </ul>
+      <a href="/index.html" class="btn-plan btn-plan-outline">Start Playing</a>
+    </div>
+
+    <div class="plan featured">
+      <div class="plan-name">Club</div>
+      <div class="plan-price"><sup>$</sup>5<sub>/mo</sub></div>
+      <div class="plan-desc">For serious club players who want to improve.</div>
+      <div class="plan-divider"></div>
+      <ul class="plan-features">
+        <li>Everything in Free</li>
+        <li>200 coached analyses / day</li>
+        <li>PGN full game analysis</li>
+        <li>Opening & endgame lessons</li>
+        <li class="muted">API access</li>
+      </ul>
+      <a href="#subscribe" class="btn-plan btn-plan-filled">Get Club — $5/mo</a>
+    </div>
+
+    <div class="plan">
+      <div class="plan-name">Pro / API</div>
+      <div class="plan-price"><sup>$</sup>12<sub>/mo</sub></div>
+      <div class="plan-desc">Unlimited access + API for developers.</div>
+      <div class="plan-divider"></div>
+      <ul class="plan-features">
+        <li>Everything in Club</li>
+        <li>Unlimited analyses</li>
+        <li>REST API access</li>
+        <li>Priority engine time</li>
+        <li>Higher rate limits</li>
+      </ul>
+      <a href="#subscribe" class="btn-plan btn-plan-outline">Get Pro — $12/mo</a>
+    </div>
+
+  </div>
+</section>
+
+<!-- API -->
+<section id="api">
+  <div class="api-section reveal">
+    <div>
+      <div class="section-label">Developer API</div>
+      <h2>Build on<br>Chess—</h2>
+      <p style="font-size:13px;color:var(--muted);line-height:1.9;margin-bottom:28px;">
+        A clean REST API. Send a FEN, get back the best move, evaluation, and an AI coaching explanation. Integrate it in minutes.
+      </p>
+      <a href="#pricing" class="btn-secondary">Get API Access</a>
+    </div>
+    <div class="code-block">
+      <span class="c-dim"># Analyse any position</span><br>
+      POST /coach<br>
+      <span class="c-key">x-api-key</span>: <span class="c-str">your_key</span><br><br>
+      {<br>
+      &nbsp;&nbsp;<span class="c-key">"fen"</span>: <span class="c-str">"rnbqkb1r/pp2pppp/..."</span>,<br>
+      &nbsp;&nbsp;<span class="c-key">"played_move"</span>: <span class="c-str">"e2e4"</span><br>
+      }<br><br>
+      <span class="c-dim">← 200 OK</span><br>
+      {<br>
+      &nbsp;&nbsp;<span class="c-key">"best_move"</span>: <span class="c-str">"<span class="c-green">d2d4</span>"</span>,<br>
+      &nbsp;&nbsp;<span class="c-key">"eval_pawns"</span>: <span class="c-num">+0.45</span>,<br>
+      &nbsp;&nbsp;<span class="c-key">"coaching"</span>: <span class="c-str">"White stands better..."</span><br>
+      }
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-logo">Chess<span>—</span></div>
+  <p>© 2026 Chess—. Built on a 2050 ELO engine.</p>
+  <div class="footer-links">
+    <a href="/index.html">Play</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#api">API Docs</a>
+  </div>
+</footer>
+
+<script>
+  // Custom cursor
+  const cursor = document.getElementById('cursor');
+  const ring   = document.getElementById('cursor-ring');
+  document.addEventListener('mousemove', e => {
+    cursor.style.left = e.clientX + 'px';
+    cursor.style.top  = e.clientY + 'px';
+    ring.style.left   = e.clientX + 'px';
+    ring.style.top    = e.clientY + 'px';
+  });
+  document.querySelectorAll('a, button').forEach(el => {
+    el.addEventListener('mouseenter', () => {
+      cursor.style.transform = 'translate(-50%,-50%) scale(2)';
+      ring.style.width = '56px'; ring.style.height = '56px'; ring.style.opacity = '0.2';
+    });
+    el.addEventListener('mouseleave', () => {
+      cursor.style.transform = 'translate(-50%,-50%) scale(1)';
+      ring.style.width = '36px'; ring.style.height = '56px'; ring.style.opacity = '0.4';
+      ring.style.height = '36px';
+    });
+  });
+
+  // Mini chess board
+  const pieces = {
+    0: '♜', 1: '♞', 2: '♝', 3: '♛', 4: '♚', 5: '♝', 6: '♞', 7: '♜',
+    8: '♟', 9: '♟', 10: '♟', 11: '♟', 12: '♟', 13: '♟', 14: '♟', 15: '♟',
+    48: '♙', 49: '♙', 50: '♙', 51: '♙', 52: '♙', 53: '♙', 54: '♙', 55: '♙',
+    56: '♖', 57: '♘', 58: '♗', 59: '♕', 60: '♔', 61: '♗', 62: '♘', 63: '♖'
+  };
+  const accents = new Set([36, 44, 20, 28]); // e5, e4 area
+  const board = document.getElementById('hero-board');
+  for (let i = 0; i < 64; i++) {
+    const sq = document.createElement('div');
+    const row = Math.floor(i / 8), col = i % 8;
+    const isLight = (row + col) % 2 === 0;
+    sq.className = 'sq ' + (accents.has(i) ? 'accent' : (isLight ? 'light' : 'dark'));
+    sq.textContent = pieces[i] || '';
+    board.appendChild(sq);
+  }
+
+  // Scroll reveal
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>

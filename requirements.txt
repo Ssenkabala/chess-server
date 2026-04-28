@@ -1,0 +1,6 @@
+﻿fastapi
+uvicorn
+chess
+anthropic
+python-dotenv
+httpx

@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Senkabalabot</title>
+  <link rel="stylesheet" href="chessboard-1.0.0.min.css">
+  <script src="jquery.min.js"></script>
+  <script src="chessboard-1.0.0.min.js"></script>
+  <script src="chess.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Georgia', serif;
+      color: #e8e6e0;
+      gap: 20px;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 400;
+      letter-spacing: 0.15em;
+      color: #888;
+      text-transform: uppercase;
+    }
+
+    /* ── Tab navigation ── */
+    .tabs {
+      display: flex;
+      gap: 0;
+      border: 1px solid #333;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .tab-btn {
+      padding: 9px 28px;
+      background: transparent;
+      color: #666;
+      border: none;
+      border-right: 1px solid #333;
+      font-size: 13px;
+      font-family: 'Georgia', serif;
+      letter-spacing: 0.12em;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: all 0.2s;
+    }
+    .tab-btn:last-child { border-right: none; }
+    .tab-btn:hover { color: #00ff9d; background: #1a1a1a; }
+    .tab-btn.active { background: #00ff9d22; color: #00ff9d; }
+
+    /* ── Panels ── */
+    .panel { display: none; flex-direction: column; align-items: center; gap: 20px; width: 100%; }
+    .panel.active { display: flex; }
+
+    /* ── Board ── */
+    #board, #analysis-board { width: 480px; }
+
+    .highlight-square {
+      background: radial-gradient(circle, rgba(0,255,157,0.55) 25%, transparent 27%) !important;
+    }
+    .highlight-capture {
+      background: radial-gradient(circle, transparent 55%, rgba(0,255,157,0.55) 57%) !important;
+    }
+    .highlight-selected { background: rgba(0,255,157,0.2) !important; }
+    .highlight-best { background: rgba(0,255,157,0.35) !important; box-shadow: inset 0 0 0 3px #00ff9d88; }
+
+    #status, #analysis-status {
+      font-size: 16px;
+      color: #aaa;
+      letter-spacing: 0.05em;
+      min-height: 24px;
+      text-align: center;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    button {
+      padding: 10px 24px;
+      background: transparent;
+      color: #00ff9d;
+      border: 1px solid #00ff9d;
+      font-size: 14px;
+      font-family: 'Georgia', serif;
+      letter-spacing: 0.1em;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: all 0.2s;
+    }
+    button:hover, button.active { background: #00ff9d; color: #111; }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* ── Analysis panel extras ── */
+    .analysis-input-row {
+      display: flex;
+      gap: 10px;
+      width: 480px;
+    }
+    #fen-input {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #e8e6e0;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-family: monospace;
+      border-radius: 2px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #fen-input:focus { border-color: #00ff9d55; }
+    #fen-input::placeholder { color: #444; }
+
+    /* API key row */
+    .api-row {
+      display: flex;
+      gap: 10px;
+      width: 480px;
+      align-items: center;
+    }
+    #api-key-input {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #e8e6e0;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-family: monospace;
+      border-radius: 2px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #api-key-input:focus { border-color: #00ff9d55; }
+    #api-key-input::placeholder { color: #444; }
+    .api-label {
+      font-size: 11px;
+      color: #555;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    /* Eval bar */
+    .eval-bar-wrap {
+      width: 480px;
+      height: 6px;
+      background: #222;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .eval-bar-fill {
+      height: 100%;
+      width: 50%;
+      background: #00ff9d;
+      transition: width 0.6s ease;
+      border-radius: 3px;
+    }
+    .eval-label {
+      font-size: 12px;
+      color: #555;
+      letter-spacing: 0.08em;
+      width: 480px;
+      text-align: right;
+    }
+
+    /* Coach card */
+    #coach-card {
+      width: 480px;
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-left: 3px solid #00ff9d44;
+      border-radius: 2px;
+      padding: 18px 20px;
+      display: none;
+      gap: 14px;
+      flex-direction: column;
+    }
+    #coach-card.visible { display: flex; }
+
+    .coach-section { display: flex; flex-direction: column; gap: 5px; }
+    .coach-label {
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #00ff9d88;
+    }
+    .coach-text {
+      font-size: 14px;
+      color: #ccc;
+      line-height: 1.65;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #333;
+      border-top-color: #00ff9d;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .best-move-badge {
+      display: inline-block;
+      background: #00ff9d18;
+      border: 1px solid #00ff9d44;
+      color: #00ff9d;
+      font-family: monospace;
+      font-size: 13px;
+      padding: 2px 10px;
+      border-radius: 2px;
+      letter-spacing: 0.05em;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Senkabalabot</h1>
+
+  <!-- Tab switcher -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('play')">Play</button>
+    <button class="tab-btn" onclick="switchTab('analysis')">Analysis</button>
+  </div>
+
+  <!-- ══════════════════ PLAY PANEL ══════════════════ -->
+  <div id="panel-play" class="panel active">
+    <div id="status">Choose your color to begin.</div>
+    <div class="controls">
+      <button id="btn-white" onclick="startGame('white')">Play as White</button>
+      <button id="btn-black" onclick="startGame('black')">Play as Black</button>
+    </div>
+    <div id="board"></div>
+    <div class="controls">
+      <button onclick="resetGame()">New Game</button>
+      <button onclick="if(board) board.flip()">Flip Board</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════ ANALYSIS PANEL ══════════════════ -->
+  <div id="panel-analysis" class="panel">
+
+    <!-- API key input -->
+    <div class="api-row">
+      <span class="api-label">API Key</span>
+      <input id="api-key-input" type="password" placeholder="Your Senkabalabot API key (required for coaching)" />
+    </div>
+
+    <!-- FEN input -->
+    <div class="analysis-input-row">
+      <input id="fen-input" type="text" placeholder="Paste FEN  —  or leave blank for starting position" />
+      <button onclick="loadFen()">Load</button>
+    </div>
+
+    <div id="analysis-status">Paste a FEN and press Load, or click Analyse.</div>
+
+    <div id="analysis-board"></div>
+
+    <!-- Eval bar -->
+    <div class="eval-bar-wrap">
+      <div class="eval-bar-fill" id="eval-bar"></div>
+    </div>
+    <div class="eval-label" id="eval-label">—</div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <button onclick="analysePosition()">Analyse</button>
+      <button onclick="getCoaching()" id="btn-coach">Coach Me</button>
+      <button onclick="resetAnalysis()">Reset</button>
+      <button onclick="if(analysisBoard) analysisBoard.flip()">Flip</button>
+    </div>
+
+    <!-- Coach card -->
+    <div id="coach-card">
+      <div class="coach-section">
+        <span class="coach-label">Assessment</span>
+        <span class="coach-text" id="c-assessment">—</span>
+      </div>
+      <div class="coach-section">
+        <span class="coach-label">Best Move</span>
+        <span class="coach-text" id="c-bestmove">—</span>
+      </div>
+      <div class="coach-section">
+        <span class="coach-label">Plan</span>
+        <span class="coach-text" id="c-plan">—</span>
+      </div>
+      <div class="coach-section">
+        <span class="coach-label">Tip</span>
+        <span class="coach-text" id="c-tip">—</span>
+      </div>
+    </div>
+
+  </div><!-- /panel-analysis -->
+
+<!-- ══════════════════ SCRIPTS ══════════════════ -->
+<script>
+// ─── Tab switching ─────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + tab).classList.add('active');
+  event.target.classList.add('active');
+
+  if (tab === 'analysis' && !analysisBoard) initAnalysisBoard();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PLAY MODE  (original code, untouched)
+// ══════════════════════════════════════════════════════════════
+var game = new Chess();
+var board = null;
+var playerColor = 'w';
+var engineThinking = false;
+var selectedSquare = null;
+var gameStarted = false;
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+
+function clearHighlights() {
+  $('#board .square-55d63').removeClass('highlight-square highlight-capture highlight-selected');
+}
+
+function highlightMoves(square) {
+  clearHighlights();
+  var moves = game.moves({ square: square, verbose: true });
+  if (!moves.length) return;
+  $('#board .square-' + square).addClass('highlight-selected');
+  moves.forEach(function(m) {
+    var isCapture = !!game.get(m.to) || m.flags.indexOf('e') > -1;
+    $('#board .square-' + m.to).addClass(isCapture ? 'highlight-capture' : 'highlight-square');
+  });
+}
+
+function onDragStart(source, piece) {
+  if (!gameStarted) return false;
+  if (engineThinking || game.game_over()) return false;
+  if (game.turn() !== playerColor) return false;
+  if (playerColor === 'w' && piece.search(/^b/) !== -1) return false;
+  if (playerColor === 'b' && piece.search(/^w/) !== -1) return false;
+  highlightMoves(source);
+  selectedSquare = source;
+  return true;
+}
+
+function onDrop(source, target) {
+  clearHighlights();
+  selectedSquare = null;
+  var move = game.move({ from: source, to: target, promotion: 'q' });
+  if (move === null) return 'snapback';
+  if (game.game_over()) { showResult(); return; }
+  setStatus('Engine thinking...');
+  engineThinking = true;
+  setTimeout(getEngineMove, 150);
+}
+
+function onSnapEnd() { board.position(game.fen()); }
+
+function onSquareClick(square) {
+  if (!gameStarted || engineThinking || game.game_over()) return;
+  if (game.turn() !== playerColor) return;
+  var piece = game.get(square);
+  if (piece && piece.color === playerColor) {
+    highlightMoves(square);
+    selectedSquare = square;
+    return;
+  }
+  if (selectedSquare) {
+    var move = game.move({ from: selectedSquare, to: square, promotion: 'q' });
+    clearHighlights();
+    selectedSquare = null;
+    if (move === null) return;
+    board.position(game.fen());
+    if (game.game_over()) { showResult(); return; }
+    setStatus('Engine thinking...');
+    engineThinking = true;
+    setTimeout(getEngineMove, 150);
+  }
+}
+
+function getEngineMove() {
+  fetch('/move', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fen: game.fen(), think_time: 1.0 })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    game.load(data.fen);
+    board.position(data.fen);
+    engineThinking = false;
+    if (data.is_game_over) { showResult(); return; }
+    setStatus('Your move.');
+  })
+  .catch(function() {
+    engineThinking = false;
+    setStatus('Engine error — is the server running?');
+  });
+}
+
+function showResult() {
+  if (game.in_checkmate()) {
+    setStatus(game.turn() === playerColor ? 'Engine wins by checkmate.' : 'You win by checkmate!');
+  } else if (game.in_draw()) {
+    setStatus('Game drawn.');
+  } else {
+    setStatus('Game over.');
+  }
+}
+
+function startGame(color) {
+  playerColor = (color === 'white') ? 'w' : 'b';
+  gameStarted = true;
+  engineThinking = false;
+  selectedSquare = null;
+  game = new Chess();
+  document.getElementById('btn-white').classList.toggle('active', color === 'white');
+  document.getElementById('btn-black').classList.toggle('active', color === 'black');
+  $('#board').empty();
+  board = Chessboard('board', {
+    draggable: true,
+    position: 'start',
+    orientation: color,
+    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
+    onDragStart: onDragStart,
+    onDrop: onDrop,
+    onSnapEnd: onSnapEnd,
+    onSquareClick: onSquareClick
+  });
+  if (playerColor === 'b') {
+    setStatus('Engine thinking...');
+    engineThinking = true;
+    setTimeout(getEngineMove, 500);
+  } else {
+    setStatus('Your move.');
+  }
+}
+
+function resetGame() {
+  if (!gameStarted) return;
+  startGame(playerColor === 'w' ? 'white' : 'black');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  ANALYSIS MODE
+// ══════════════════════════════════════════════════════════════
+var analysisGame = new Chess();
+var analysisBoard = null;
+
+function setAnalysisStatus(msg) {
+  document.getElementById('analysis-status').textContent = msg;
+}
+
+function initAnalysisBoard() {
+  analysisGame = new Chess();
+  analysisBoard = Chessboard('analysis-board', {
+    draggable: false,
+    position: 'start',
+    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png'
+  });
+}
+
+function loadFen() {
+  var fen = document.getElementById('fen-input').value.trim();
+  if (!fen) {
+    analysisGame = new Chess();
+    analysisBoard.position('start');
+    setAnalysisStatus('Starting position loaded.');
+    resetCoachCard();
+    updateEvalBar(0);
+    return;
+  }
+  var test = new Chess();
+  if (!test.load(fen)) {
+    setAnalysisStatus('Invalid FEN — please check and try again.');
+    return;
+  }
+  analysisGame = test;
+  analysisBoard.position(fen);
+  setAnalysisStatus('Position loaded. Press Analyse or Coach Me.');
+  resetCoachCard();
+  updateEvalBar(0);
+  clearBestMoveHighlight();
+}
+
+function analysePosition() {
+  var fen = analysisGame.fen();
+  setAnalysisStatus('⏳ Engine analysing...');
+  document.getElementById('btn-coach').disabled = true;
+
+  fetch('/move', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fen: fen, think_time: 2.0 })
+  })
+  .then(r => r.json())
+  .then(data => {
+    var from = data.move.slice(0, 2);
+    var to   = data.move.slice(2, 4);
+    highlightBestMove(from, to);
+    setAnalysisStatus('Best move: ' + data.move + '  |  Use Coach Me for a full explanation.');
+    document.getElementById('btn-coach').disabled = false;
+  })
+  .catch(() => {
+    setAnalysisStatus('Engine error — is the server running?');
+    document.getElementById('btn-coach').disabled = false;
+  });
+}
+
+function getCoaching() {
+  var apiKey = document.getElementById('api-key-input').value.trim();
+  if (!apiKey) {
+    setAnalysisStatus('Enter your API key above to use coaching.');
+    return;
+  }
+  var fen = analysisGame.fen();
+  setAnalysisStatus('<span class="spinner"></span> Coach thinking...');
+  document.getElementById('analysis-status').innerHTML =
+    '<span class="spinner"></span> Coach thinking...';
+  document.getElementById('btn-coach').disabled = true;
+  resetCoachCard();
+
+  fetch('/coach', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey
+    },
+    body: JSON.stringify({ fen: fen, think_time: 2.0 })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.detail) {
+      setAnalysisStatus('Error: ' + data.detail);
+      document.getElementById('btn-coach').disabled = false;
+      return;
+    }
+
+    // Highlight best move on board
+    if (data.best_move) {
+      highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
+    }
+
+    // Update eval bar
+    updateEvalBar(data.eval_pawns || 0);
+
+    // Parse coaching text into sections
+    parseAndRenderCoaching(data.coaching, data.best_move, data.eval_pawns);
+
+    setAnalysisStatus('Analysis complete.');
+    document.getElementById('btn-coach').disabled = false;
+  })
+  .catch(() => {
+    setAnalysisStatus('Coach unavailable — check server and API key.');
+    document.getElementById('btn-coach').disabled = false;
+  });
+}
+
+function parseAndRenderCoaching(text, bestMove, evalPawns) {
+  // Extract sections from formatted coach response
+  var sections = { assessment: '', bestmove: '', plan: '', tip: '' };
+
+  var assessMatch = text.match(/ASSESSMENT:\s*(.+?)(?=BEST MOVE:|PLAN:|TIP:|$)/si);
+  var bestMatch   = text.match(/BEST MOVE:\s*(.+?)(?=PLAN:|TIP:|$)/si);
+  var planMatch   = text.match(/PLAN:\s*(.+?)(?=TIP:|$)/si);
+  var tipMatch    = text.match(/TIP:\s*(.+?)$/si);
+
+  if (assessMatch) sections.assessment = assessMatch[1].trim();
+  if (bestMatch)   sections.bestmove   = bestMatch[1].trim();
+  if (planMatch)   sections.plan       = planMatch[1].trim();
+  if (tipMatch)    sections.tip        = tipMatch[1].trim();
+
+  // Fallback: show raw text if parsing failed
+  if (!sections.assessment && !sections.bestmove) {
+    sections.assessment = text;
+  }
+
+  // Add eval to assessment
+  if (evalPawns !== undefined) {
+    var sign = evalPawns >= 0 ? '+' : '';
+    var evalStr = ' [Eval: ' + sign + evalPawns + ']';
+    sections.assessment = (sections.assessment || '') + evalStr;
+  }
+
+  document.getElementById('c-assessment').textContent = sections.assessment || '—';
+  document.getElementById('c-bestmove').textContent   = sections.bestmove   || (bestMove || '—');
+  document.getElementById('c-plan').textContent       = sections.plan       || '—';
+  document.getElementById('c-tip').textContent        = sections.tip        || '—';
+
+  document.getElementById('coach-card').classList.add('visible');
+}
+
+function updateEvalBar(evalPawns) {
+  // Convert eval to 0-100 range. +5 pawns = ~90%, -5 = ~10%
+  var clamped = Math.max(-5, Math.min(5, evalPawns || 0));
+  var pct = 50 + (clamped / 5) * 40;
+  document.getElementById('eval-bar').style.width = pct + '%';
+  var sign = evalPawns >= 0 ? '+' : '';
+  document.getElementById('eval-label').textContent =
+    'Eval: ' + sign + (evalPawns || 0).toFixed(2);
+}
+
+function highlightBestMove(from, to) {
+  clearBestMoveHighlight();
+  $('#analysis-board .square-' + from).addClass('highlight-best');
+  $('#analysis-board .square-' + to).addClass('highlight-best');
+}
+
+function clearBestMoveHighlight() {
+  $('#analysis-board .square-55d63').removeClass('highlight-best');
+}
+
+function resetCoachCard() {
+  document.getElementById('coach-card').classList.remove('visible');
+  ['c-assessment','c-bestmove','c-plan','c-tip'].forEach(function(id) {
+    document.getElementById(id).textContent = '—';
+  });
+  document.getElementById('eval-label').textContent = '—';
+  document.getElementById('eval-bar').style.width = '50%';
+}
+
+function resetAnalysis() {
+  document.getElementById('fen-input').value = '';
+  analysisGame = new Chess();
+  if (analysisBoard) analysisBoard.position('start');
+  setAnalysisStatus('Paste a FEN and press Load, or click Analyse.');
+  resetCoachCard();
+  clearBestMoveHighlight();
+}
+</script>
+</body>
+</html>

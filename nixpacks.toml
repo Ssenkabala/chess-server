@@ -1,5 +1,5 @@
 ﻿[phases.setup]
-nixPkgs = ["gcc", "g++"]
+nixPkgs = ["gcc"]
 
 [phases.build]
 cmds = ["bash build.sh"]

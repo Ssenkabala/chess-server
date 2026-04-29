@@ -10,4 +10,4 @@ RUN g++ -O3 -std=c++17 -o engines/engine engine_src/engine.cpp -lpthread
 RUN chmod +x engines/engine
 
 EXPOSE 8080
-CMD ["python3", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "python3 -m uvicorn server:app --host 0.0.0.0 --port ${PORT:-8080}"]

@@ -22,7 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ENGINE_PATH = "./engines/engine.exe"
+ENGINE_PATH = "./engines/engine.exe" if os.name == "nt" else "./engines/engine"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
 
 # ─── Database setup ───────────────────────────────────────────────────────────
@@ -250,3 +250,8 @@ def root():
 @app.get("/landing")
 def landing():
     return FileResponse("landing.html")
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)

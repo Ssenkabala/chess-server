@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Senkabalabot</title>
+  <title>Chess-</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
@@ -229,7 +229,7 @@
 </head>
 <body>
 
-  <h1>Senkabalabot</h1>
+  <h1>Chess-</h1>
 
   <!-- Tab switcher -->
   <div class="tabs">
@@ -257,7 +257,7 @@
     <!-- API key input -->
     <div class="api-row">
       <span class="api-label">API Key</span>
-      <input id="api-key-input" type="password" placeholder="Your Senkabalabot API key (required for coaching)" />
+      <input id="api-key-input" type="password" placeholder="Your Chess- API key (required for coaching)" />
     </div>
 
     <!-- FEN input -->
@@ -467,9 +467,19 @@ function setAnalysisStatus(msg) {
 function initAnalysisBoard() {
   analysisGame = new Chess();
   analysisBoard = Chessboard('analysis-board', {
-    draggable: false,
+    draggable: true,
     position: 'start',
-    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png'
+    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
+    onDragStart: function(source, piece) { return true; },
+    onDrop: function(source, target) {
+        var move = analysisGame.move({ from: source, to: target, promotion: 'q' });
+        if (move === null) return 'snapback';
+        analysisBoard.position(analysisGame.fen());
+        setAnalysisStatus('Position updated. Press Analyse or Coach Me.');
+        resetCoachCard();
+        clearBestMoveHighlight();
+    },
+    onSnapEnd: function() { analysisBoard.position(analysisGame.fen()); }
   });
 }
 

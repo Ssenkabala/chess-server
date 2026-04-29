@@ -96,7 +96,9 @@
 #include <fstream>
 #include <thread>
 #include <atomic>
+#ifdef _WIN32
 #include <intrin.h>
+#endif
 
 using namespace std;
 

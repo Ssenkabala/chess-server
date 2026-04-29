@@ -1,5 +1,5 @@
 ﻿#!/bin/bash
-echo "Compiling engine..."
-g++ -O3 -o engines/engine engine_src/engine.cpp
+echo "Compiling SenkabalaIII for Linux..."
+g++ -O3 -std=c++17 -o engines/engine engine_src/engine.cpp -lpthread
 chmod +x engines/engine
 echo "Done."

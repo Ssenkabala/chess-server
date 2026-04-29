@@ -100,22 +100,6 @@
 
 using namespace std;
 
-// ============================================================
-// SYZYGY TABLEBASE INTERFACE
-// Uses Fathom — a standalone Syzygy probe library
-// 
-// SETUP INSTRUCTIONS:
-// 1. Download Fathom from: https://github.com/jdart1/Fathom
-//    (just tbprobe.h and tbprobe.c are needed)
-// 2. Place tbprobe.h + tbprobe.c in same folder as this file
-// 3. Download Syzygy .rtbw files from: https://syzygy-tables.info
-//    (3-4-5 piece = ~1GB, place in a folder e.g. C:/syzygy)
-// 4. Compile: cl /O2 /EHsc /DUSE_SYZYGY tbprobe.c engine_v10.cpp /Fe:engine.exe
-// 5. Set SyzygyPath in config.yml or pass via UCI setoption
-//
-// Without Fathom, compile normally and TB probing is silently disabled:
-//    cl /O2 /EHsc engine_v10.cpp /Fe:engine.exe
-// ============================================================
 #ifdef USE_SYZYGY
 extern "C" {
 #include "tbprobe.h"
@@ -163,20 +147,27 @@ typedef unsigned long long U64;
 typedef int Square;
 
 
-inline int lsb(U64 bb) {
-    unsigned long idx;
-    if (bb & 0xFFFFFFFFULL) { _BitScanForward(&idx, (unsigned)bb); return (int)idx; }
-    _BitScanForward(&idx, (unsigned)(bb >> 32)); return (int)idx + 32;
-}
-inline int msb(U64 bb) {
-    unsigned long idx;
-    if (bb >> 32) { _BitScanReverse(&idx, (unsigned)(bb>>32)); return (int)idx+32; }
-    _BitScanReverse(&idx, (unsigned)bb); return (int)idx;
-}
+#ifdef _WIN32
+  #include <intrin.h>
+  inline int lsb(U64 bb) {
+      unsigned long idx;
+      if (bb & 0xFFFFFFFFULL) { _BitScanForward(&idx, (unsigned)bb); return (int)idx; }
+      _BitScanForward(&idx, (unsigned)(bb >> 32)); return (int)idx + 32;
+  }
+  inline int msb(U64 bb) {
+      unsigned long idx;
+      if (bb >> 32) { _BitScanReverse(&idx, (unsigned)(bb>>32)); return (int)idx+32; }
+      _BitScanReverse(&idx, (unsigned)bb); return (int)idx;
+  }
+  inline int popcnt(U64 bb) {
+      return (int)(__popcnt((unsigned)(bb&0xFFFFFFFF)) + __popcnt((unsigned)(bb>>32)));
+  }
+#else
+  inline int lsb(U64 bb)   { return __builtin_ctzll(bb); }
+  inline int msb(U64 bb)   { return 63 - __builtin_clzll(bb); }
+  inline int popcnt(U64 bb){ return __builtin_popcountll(bb); }
+#endif
 inline int popLSB(U64& bb) { int s=lsb(bb); bb&=bb-1; return s; }
-inline int popcnt(U64 bb) {
-    return (int)(__popcnt((unsigned)(bb&0xFFFFFFFF)) + __popcnt((unsigned)(bb>>32)));
-}
 
 // ============================================================
 // SQUARES

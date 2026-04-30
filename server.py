@@ -139,14 +139,18 @@ def analyse_position(fen: str, think_time: float):
 def get_move(req: MoveRequest):
     board = chess.Board(req.fen)
     with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-        result = engine.play(board, chess.engine.Limit(time=req.think_time))
+        info = engine.analyse(board, chess.engine.Limit(time=req.think_time))
+        result = engine.play(board, chess.engine.Limit(time=0.1))
         move = result.move.uci()
+        score_cp = info["score"].white().score(mate_score=10000)
     board.push(result.move)
     return {
         "move": move,
         "fen": board.fen(),
         "is_game_over": board.is_game_over(),
-        "outcome": str(board.outcome()) if board.is_game_over() else None
+        "outcome": str(board.outcome()) if board.is_game_over() else None,
+        "score_cp": score_cp,
+        "eval_pawns": round(score_cp / 100, 2) if score_cp is not None else 0
     }
 
 # ─── /coach endpoint ──────────────────────────────────────────────────────────
@@ -250,6 +254,10 @@ def root():
 @app.get("/landing")
 def landing():
     return FileResponse("landing.html")
+
+@app.get("/logo.png")
+def logo():
+    return FileResponse("logo.png")
 
 if __name__ == "__main__":
     import uvicorn

@@ -229,7 +229,10 @@
 </head>
 <body>
 
-  <h1>Africhess</h1>
+  <div class="nav-logo" style="display:flex;align-items:center;gap:10px;justify-content:center;">
+    <img src="/logo.png" height="38" alt="AfriChess logo">
+    <span style="font-size:22px;font-weight:400;letter-spacing:0.15em;color:#888;text-transform:uppercase;">Afri<span style="color:#00d98b">Chess</span></span>
+  </div>
 
   <!-- Tab switcher -->
   <div class="tabs">
@@ -621,11 +624,12 @@ function analysePosition() {
   })
   .then(r => r.json())
   .then(data => {
-    var from = data.move.slice(0, 2);
-    var to   = data.move.slice(2, 4);
-    highlightBestMove(from, to);
-    setAnalysisStatus('Best move: ' + data.move + '  |  Use Coach Me for a full explanation.');
-    document.getElementById('btn-coach').disabled = false;
+      var from = data.move.slice(0, 2);
+      var to   = data.move.slice(2, 4);
+      highlightBestMove(from, to);
+      updateEvalBar(data.eval_pawns || 0);  // add this line
+      setAnalysisStatus('Best move: ' + data.move + '  |  Use Coach Me for a full explanation.');
+      document.getElementById('btn-coach').disabled = false;
   })
   .catch(() => {
     setAnalysisStatus('Engine error — is the server running?');

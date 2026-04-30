@@ -316,6 +316,11 @@ function switchTab(tab) {
   event.target.classList.add('active');
 
   if (tab === 'analysis' && !analysisBoard) initAnalysisBoard();
+  setTimeout(function() {
+  $('#analysis-board').on('click', '.square-55d63', function() {
+    console.log('Square clicked:', $(this).attr('data-square'));
+  });
+  }, 500);
 }
 
 // ══════════════════════════════════════════════════════════════

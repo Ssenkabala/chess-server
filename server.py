@@ -141,9 +141,11 @@ def get_move(req: MoveRequest):
     with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
         info = engine.analyse(board, chess.engine.Limit(time=req.think_time))
         best_move = info["pv"][0] if info.get("pv") else None
-        score_cp = info["score"].white().score(mate_score=10000)
         if best_move is None:
             raise HTTPException(status_code=500, detail="Engine returned no move")
+        score_cp = None
+        if "score" in info:
+            score_cp = info["score"].white().score(mate_score=10000)
         board.push(best_move)
     return {
         "move": best_move.uci(),

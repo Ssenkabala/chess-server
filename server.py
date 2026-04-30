@@ -139,13 +139,14 @@ def analyse_position(fen: str, think_time: float):
 def get_move(req: MoveRequest):
     board = chess.Board(req.fen)
     with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-        result = engine.play(board, chess.engine.Limit(time=req.think_time))
-        move = result.move.uci()
-        board.push(result.move)
-        info = engine.analyse(board, chess.engine.Limit(time=0.5))
+        info = engine.analyse(board, chess.engine.Limit(time=req.think_time))
+        best_move = info["pv"][0] if info.get("pv") else None
         score_cp = info["score"].white().score(mate_score=10000)
+        if best_move is None:
+            raise HTTPException(status_code=500, detail="Engine returned no move")
+        board.push(best_move)
     return {
-        "move": move,
+        "move": best_move.uci(),
         "fen": board.fen(),
         "is_game_over": board.is_game_over(),
         "outcome": str(board.outcome()) if board.is_game_over() else None,

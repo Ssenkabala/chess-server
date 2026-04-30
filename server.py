@@ -139,11 +139,11 @@ def analyse_position(fen: str, think_time: float):
 def get_move(req: MoveRequest):
     board = chess.Board(req.fen)
     with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-        info = engine.analyse(board, chess.engine.Limit(time=req.think_time))
-        result = engine.play(board, chess.engine.Limit(time=0.1))
+        result = engine.play(board, chess.engine.Limit(time=req.think_time))
         move = result.move.uci()
+        board.push(result.move)
+        info = engine.analyse(board, chess.engine.Limit(time=0.5))
         score_cp = info["score"].white().score(mate_score=10000)
-    board.push(result.move)
     return {
         "move": move,
         "fen": board.fen(),

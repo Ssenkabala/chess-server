@@ -490,23 +490,25 @@ function initAnalysisBoard() {
     onSnapEnd: function() { analysisBoard.position(analysisGame.fen()); }
   });
 
-  // Manual click-to-move
-  $('#analysis-board').on('click', '.square-55d63', function() {
-    var square = $(this).attr('data-square');
-    if (!square) return;
-
+  // Manual click-to-move — use native DOM, not jQuery
+  document.getElementById('analysis-board').addEventListener('click', function(e) {
+    var squareEl = e.target.closest('[data-square]');
+    if (!squareEl) return;
+    var square = squareEl.getAttribute('data-square');
+    console.log('clicked:', square); // remove after testing
+    
     var piece = analysisGame.get(square);
 
     if (selectedAnalysisSquare) {
-      // Try to move
       var move = analysisGame.move({ from: selectedAnalysisSquare, to: square, promotion: 'q' });
-      $('#analysis-board .square-55d63').removeClass('highlight-selected highlight-square highlight-capture');
+      document.querySelectorAll('#analysis-board [data-square]').forEach(function(el) {
+        el.classList.remove('highlight-selected', 'highlight-square', 'highlight-capture');
+      });
       selectedAnalysisSquare = null;
       if (move === null) {
-        // Not a valid move — maybe selecting a new piece
         if (piece) {
           selectedAnalysisSquare = square;
-          $('#analysis-board .square-' + square).addClass('highlight-selected');
+          squareEl.classList.add('highlight-selected');
         }
         return;
       }
@@ -517,10 +519,12 @@ function initAnalysisBoard() {
     } else {
       if (!piece) return;
       selectedAnalysisSquare = square;
-      $('#analysis-board .square-55d63').removeClass('highlight-selected highlight-square highlight-capture');
-      $('#analysis-board .square-' + square).addClass('highlight-selected');
+      document.querySelectorAll('#analysis-board [data-square]').forEach(function(el) {
+        el.classList.remove('highlight-selected');
+      });
+      squareEl.classList.add('highlight-selected');
     }
-  });
+  }, true); // <-- true = capture phase, fires before chessboard.js can swallow it
 }
 
 function loadFen() {

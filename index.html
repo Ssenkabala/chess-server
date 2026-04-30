@@ -466,20 +466,55 @@ function setAnalysisStatus(msg) {
 
 function initAnalysisBoard() {
   analysisGame = new Chess();
+  var selectedAnalysisSquare = null;
+
   analysisBoard = Chessboard('analysis-board', {
     draggable: true,
     position: 'start',
     pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
     onDragStart: function(source, piece) { return true; },
     onDrop: function(source, target) {
-        var move = analysisGame.move({ from: source, to: target, promotion: 'q' });
-        if (move === null) return 'snapback';
-        analysisBoard.position(analysisGame.fen());
-        setAnalysisStatus('Position updated. Press Analyse or Coach Me.');
-        resetCoachCard();
-        clearBestMoveHighlight();
+      var move = analysisGame.move({ from: source, to: target, promotion: 'q' });
+      if (move === null) return 'snapback';
+      analysisBoard.position(analysisGame.fen());
+      setAnalysisStatus('Position updated. Press Analyse or Coach Me.');
+      resetCoachCard();
+      clearBestMoveHighlight();
+      selectedAnalysisSquare = null;
     },
     onSnapEnd: function() { analysisBoard.position(analysisGame.fen()); }
+  });
+
+  // Manual click-to-move
+  $('#analysis-board').on('click', '.square-55d63', function() {
+    var square = $(this).attr('data-square');
+    if (!square) return;
+
+    var piece = analysisGame.get(square);
+
+    if (selectedAnalysisSquare) {
+      // Try to move
+      var move = analysisGame.move({ from: selectedAnalysisSquare, to: square, promotion: 'q' });
+      $('#analysis-board .square-55d63').removeClass('highlight-selected highlight-square highlight-capture');
+      selectedAnalysisSquare = null;
+      if (move === null) {
+        // Not a valid move — maybe selecting a new piece
+        if (piece) {
+          selectedAnalysisSquare = square;
+          $('#analysis-board .square-' + square).addClass('highlight-selected');
+        }
+        return;
+      }
+      analysisBoard.position(analysisGame.fen());
+      setAnalysisStatus('Position updated. Press Analyse or Coach Me.');
+      resetCoachCard();
+      clearBestMoveHighlight();
+    } else {
+      if (!piece) return;
+      selectedAnalysisSquare = square;
+      $('#analysis-board .square-55d63').removeClass('highlight-selected highlight-square highlight-capture');
+      $('#analysis-board .square-' + square).addClass('highlight-selected');
+    }
   });
 }
 

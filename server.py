@@ -144,26 +144,33 @@ def analyse_position(fen: str, think_time: float):
 def get_move(req: MoveRequest):
     try:
         board = chess.Board(req.fen)
+
+        # Instance 1: get the best move
         with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
             result = engine.play(board, chess.engine.Limit(time=req.think_time))
             move = result.move
 
-            # Get top 5 candidate moves with evals
-            infos = engine.analyse(
-                board,
-                chess.engine.Limit(time=0.5),  # give it more time
-                multipv=5
-            )
-            candidates = []
-            for info in infos if isinstance(infos, list) else [infos]:
-                if info.get("pv"):
-                    cp = info["score"].white().score(mate_score=10000)
-                    candidates.append({
-                        "move": info["pv"][0].uci(),
-                        "eval_pawns": round(cp / 100, 2) if cp is not None else 0
-                    })
+        # Instance 2: get candidates separately
+        candidates = []
+        try:
+            with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine2:
+                infos = engine2.analyse(
+                    board,
+                    chess.engine.Limit(time=0.5),
+                    multipv=5
+                )
+                info_list = infos if isinstance(infos, list) else [infos]
+                for info in info_list:
+                    if info.get("pv"):
+                        cp = info["score"].white().score(mate_score=10000)
+                        candidates.append({
+                            "move": info["pv"][0].uci(),
+                            "eval_pawns": round(cp / 100, 2) if cp is not None else 0
+                        })
+        except Exception:
+            pass  # candidates are optional, don't break the move if this fails
 
-            score_cp = candidates[0]["eval_pawns"] * 100 if candidates else 0
+        score_cp = candidates[0]["eval_pawns"] * 100 if candidates else 0
 
         board.push(move)
         return {
@@ -177,7 +184,6 @@ def get_move(req: MoveRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 # ─── /coach endpoint ──────────────────────────────────────────────────────────
 
 @app.post("/coach")

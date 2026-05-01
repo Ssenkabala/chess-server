@@ -225,6 +225,86 @@
       border-radius: 2px;
       letter-spacing: 0.05em;
     }
+    /* ── Candidate moves ── */
+    .candidates-wrap {
+      width: 480px;
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 2px;
+      padding: 12px 14px;
+      display: none;
+    }
+    .candidates-wrap.visible { display: block; }
+    .candidates-label {
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #444;
+      margin-bottom: 10px;
+    }
+    .candidate-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 5px 0;
+      border-bottom: 1px solid #1e1e1e;
+    }
+    .candidate-row:last-child { border-bottom: none; }
+    .candidate-rank {
+      font-size: 10px;
+      color: #444;
+      width: 16px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+    .candidate-move {
+      font-family: monospace;
+      font-size: 14px;
+      color: #00ff9d;
+      width: 56px;
+      flex-shrink: 0;
+    }
+    .candidate-bar-wrap {
+      flex: 1;
+      height: 4px;
+      background: #222;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .candidate-bar {
+      height: 100%;
+      background: #00ff9d;
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+    .candidate-eval {
+      font-family: monospace;
+      font-size: 12px;
+      color: #666;
+      width: 48px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* ── Captured pieces ── */
+    .captured-bar {
+      width: 480px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 22px;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .captured-pieces { display: flex; flex-wrap: wrap; gap: 1px; }
+    .material-score {
+      font-size: 12px;
+      font-family: monospace;
+      color: #555;
+      margin-left: 4px;
+    }
+    .material-score.ahead { color: #00ff9d; }
+
   </style>
 </head>
 <body>
@@ -247,9 +327,21 @@
       <button id="btn-white" onclick="startGame('white')">Play as White</button>
       <button id="btn-black" onclick="startGame('black')">Play as Black</button>
     </div>
-    <div id="captured-top" style="height:24px;display:flex;align-items:center;gap:2px;width:480px;font-size:18px;"></div>
+
+    <!-- Opponent captured pieces (shown above board) -->
+    <div class="captured-bar" id="captured-opponent">
+      <div class="captured-pieces" id="pieces-opponent"></div>
+      <span class="material-score" id="score-opponent"></span>
+    </div>
+
     <div id="board"></div>
-    <div id="captured-bottom" style="height:24px;display:flex;align-items:center;gap:2px;width:480px;font-size:18px;"></div>
+
+    <!-- Player captured pieces (shown below board) -->
+    <div class="captured-bar" id="captured-player">
+      <div class="captured-pieces" id="pieces-player"></div>
+      <span class="material-score" id="score-player"></span>
+    </div>
+
     <div class="controls">
       <button onclick="resetGame()">New Game</button>
       <button onclick="if(board) board.flip()">Flip Board</button>
@@ -280,6 +372,12 @@
       <div class="eval-bar-fill" id="eval-bar"></div>
     </div>
     <div class="eval-label" id="eval-label">—</div>
+
+    <!-- Candidate moves -->
+    <div class="candidates-wrap" id="candidates-wrap">
+      <div class="candidates-label">Candidate Moves</div>
+      <div id="candidates-list"></div>
+    </div>
 
     <!-- Controls -->
     <div class="controls">
@@ -319,6 +417,28 @@ const API_BASE = location.hostname === 'localhost' || location.hostname === '127
   ? 'http://127.0.0.1:8000'
   : 'https://' + location.hostname;
 
+function renderCandidates(candidates) {
+  if (!candidates || !candidates.length) return;
+  var wrap = document.getElementById('candidates-wrap');
+  var list = document.getElementById('candidates-list');
+  if (!wrap || !list) return;
+  wrap.classList.add('visible');
+  list.innerHTML = '';
+  var maxEval = Math.max.apply(null, candidates.map(function(c) { return Math.abs(c.eval_pawns); }));
+  if (maxEval === 0) maxEval = 1;
+  candidates.forEach(function(c, i) {
+    var sign   = c.eval_pawns >= 0 ? '+' : '';
+    var barPct = Math.min(100, (Math.abs(c.eval_pawns) / maxEval) * 100);
+    var row    = document.createElement('div');
+    row.className = 'candidate-row';
+    row.innerHTML =
+      '<span class="candidate-rank">' + (i+1) + '</span>' +
+      '<span class="candidate-move">' + c.move + '</span>' +
+      '<div class="candidate-bar-wrap"><div class="candidate-bar" style="width:' + barPct + '%"></div></div>' +
+      '<span class="candidate-eval">' + sign + c.eval_pawns.toFixed(2) + '</span>';
+    list.appendChild(row);
+  });
+}  
 
 // ─── Tab switching ─────────────────────────────────────────────
 function switchTab(tab) {
@@ -414,6 +534,7 @@ function getEngineMove() {
     game.load(data.fen);
     board.position(data.fen);
     updateCapturedPieces();
+    renderCandidates(data.candidates);
     engineThinking = false;
     if (data.is_game_over) { showResult(); return; }
     setStatus('Your move.');
@@ -522,8 +643,8 @@ function updateCapturedPieces() {
     el.innerHTML = html;
   }
 
-renderBar('captured-top',    captured[topColor],    diff > 0 ? diff : 0,    topColor);
-renderBar('captured-bottom', captured[bottomColor], diffOpp > 0 ? diffOpp : 0, bottomColor);
+renderBar('pieces-opponent', captured[topColor],    diff > 0 ? diff : 0,    topColor);
+renderBar('pieces-player',   captured[bottomColor], diffOpp > 0 ? diffOpp : 0, bottomColor);
 
 
 }

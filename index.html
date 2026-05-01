@@ -627,8 +627,8 @@ function updateCapturedPieces() {
   // Render — opponent's captures show above, player's below
   // "opponent captured white pieces" shows above board
   // "player captured black pieces" shows below board
-  var topColor   = playerColor === 'w' ? 'w' : 'b'; // pieces player lost
-  var bottomColor = playerColor === 'w' ? 'b' : 'w'; // pieces opponent lost
+  var topColor    = playerColor === 'w' ? 'b' : 'w'; // opponent's pieces player captured → show above
+  var bottomColor = playerColor === 'w' ? 'w' : 'b'; // player's pieces opponent captured → show below
 
   function renderBar(elId, capturedPieces, netDiff, pieceColor) {
     var el = document.getElementById(elId);

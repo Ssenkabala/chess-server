@@ -145,13 +145,25 @@ def get_move(req: MoveRequest):
     try:
         board = chess.Board(req.fen)
         with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-            # Use play() for the move, analyse() separately for eval
             result = engine.play(board, chess.engine.Limit(time=req.think_time))
             move = result.move
-            
-            # Get eval separately
-            info = engine.analyse(board, chess.engine.Limit(time=0.1))
-            score_cp = info["score"].white().score(mate_score=10000) if "score" in info else 0
+
+            # Get top 5 candidate moves with evals
+            infos = engine.analyse(
+                board,
+                chess.engine.Limit(time=0.5),  # give it more time
+                multipv=5
+            )
+            candidates = []
+            for info in infos if isinstance(infos, list) else [infos]:
+                if info.get("pv"):
+                    cp = info["score"].white().score(mate_score=10000)
+                    candidates.append({
+                        "move": info["pv"][0].uci(),
+                        "eval_pawns": round(cp / 100, 2) if cp is not None else 0
+                    })
+
+            score_cp = candidates[0]["eval_pawns"] * 100 if candidates else 0
 
         board.push(move)
         return {
@@ -160,7 +172,8 @@ def get_move(req: MoveRequest):
             "is_game_over": board.is_game_over(),
             "outcome": str(board.outcome()) if board.is_game_over() else None,
             "score_cp": score_cp,
-            "eval_pawns": round(score_cp / 100, 2) if score_cp is not None else 0
+            "eval_pawns": round(score_cp / 100, 2),
+            "candidates": candidates
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

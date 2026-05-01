@@ -543,6 +543,18 @@ def landing():
 def logo():
     return FileResponse("logo.png")
 
+@app.get("/debug/engine")
+def debug_engine():
+    import os, subprocess
+    path = ENGINE_PATH
+    return {
+        "path": path,
+        "exists": os.path.exists(path),
+        "cwd": os.getcwd(),
+        "files_in_engines": os.listdir("./engines") if os.path.exists("./engines") else "folder missing",
+        "is_executable": os.access(path, os.X_OK) if os.path.exists(path) else False
+    }
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8080))

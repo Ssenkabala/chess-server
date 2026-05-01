@@ -4,3 +4,4 @@ chess
 anthropic
 python-dotenv
 httpx
+websockets

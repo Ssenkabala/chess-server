@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Africhess — Play</title>
+  <link rel="stylesheet" href="chessboard-1.0.0.min.css">
+  <script src="jquery.min.js"></script>
+  <script src="chessboard-1.0.0.min.js"></script>
+  <script src="chess.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --green:   #00ff9d;
+      --green2:  #00cc7a;
+      --bg:      #0d0d0d;
+      --bg2:     #161616;
+      --bg3:     #1e1e1e;
+      --border:  #2a2a2a;
+      --text:    #e8e6e0;
+      --muted:   #666;
+      --danger:  #ff4d4d;
+    }
+
+    body {
+      background: var(--bg);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: 'Georgia', serif;
+      color: var(--text);
+      padding: 24px 16px;
+      gap: 0;
+    }
+
+    /* ── Header ── */
+    .header {
+      width: 100%;
+      max-width: 520px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .logo {
+      font-size: 18px;
+      letter-spacing: 0.2em;
+      color: var(--green);
+      text-transform: uppercase;
+      text-decoration: none;
+    }
+    .header-right {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+
+    /* ── Screens ── */
+    .screen { display: none; flex-direction: column; align-items: center; gap: 20px; width: 100%; max-width: 520px; }
+    .screen.active { display: flex; }
+
+    /* ── Lobby screen ── */
+    .lobby-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 48px 40px;
+      text-align: center;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+    }
+    .lobby-title {
+      font-size: 13px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .lobby-status {
+      font-size: 20px;
+      color: var(--text);
+      letter-spacing: 0.05em;
+    }
+
+    /* Pulsing dots */
+    .dots {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.2; transform: scale(0.8); }
+      50%       { opacity: 1;   transform: scale(1.1); }
+    }
+
+    .guest-id {
+      font-size: 11px;
+      color: #444;
+      font-family: monospace;
+      letter-spacing: 0.1em;
+    }
+
+    /* ── Game screen ── */
+    .game-wrap {
+      width: 100%;
+      max-width: 520px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* Player bar */
+    .player-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+    }
+    .player-name {
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .player-name.active-turn { color: var(--green); }
+
+    .clock {
+      font-family: monospace;
+      font-size: 22px;
+      font-weight: bold;
+      letter-spacing: 0.05em;
+      color: var(--text);
+      min-width: 60px;
+      text-align: right;
+    }
+    .clock.low { color: var(--danger); animation: flash 1s step-end infinite; }
+    @keyframes flash { 50% { opacity: 0.4; } }
+    .clock.active-clock { color: var(--green); }
+
+    /* Board */
+    #board { width: 480px; }
+    @media (max-width: 520px) {
+      #board { width: calc(100vw - 32px); }
+    }
+
+    /* Status bar */
+    .status-bar {
+      width: 100%;
+      text-align: center;
+      font-size: 14px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      padding: 6px 0;
+      min-height: 28px;
+    }
+    .status-bar.highlight { color: var(--green); }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    button {
+      padding: 9px 22px;
+      background: transparent;
+      color: var(--green);
+      border: 1px solid var(--green);
+      font-size: 13px;
+      font-family: 'Georgia', serif;
+      letter-spacing: 0.1em;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: all 0.18s;
+      text-transform: uppercase;
+    }
+    button:hover { background: var(--green); color: #111; }
+    button.danger { color: var(--danger); border-color: var(--danger); }
+    button.danger:hover { background: var(--danger); color: #fff; }
+    button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    /* Move list */
+    .move-list-wrap {
+      width: 100%;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 12px 14px;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    .move-list-label {
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #444;
+      margin-bottom: 8px;
+    }
+    .move-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 8px;
+      font-family: monospace;
+      font-size: 13px;
+      color: #aaa;
+    }
+    .move-list span { color: #555; margin-right: 2px; }
+
+    /* Game over overlay */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .overlay.active { display: flex; }
+    .result-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--green);
+      border-radius: 4px;
+      padding: 40px 48px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 280px;
+    }
+    .result-title {
+      font-size: 28px;
+      letter-spacing: 0.1em;
+      color: var(--green);
+      text-transform: uppercase;
+    }
+    .result-title.lose { color: var(--danger); }
+    .result-title.draw { color: #aaa; }
+    .result-reason {
+      font-size: 13px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+    }
+
+    /* Highlight */
+    .highlight-move {
+      background: rgba(0,255,157,0.22) !important;
+    }
+    .highlight-selected { background: rgba(0,255,157,0.18) !important; }
+    .highlight-square {
+      background: radial-gradient(circle, rgba(0,255,157,0.55) 25%, transparent 27%) !important;
+    }
+    .highlight-capture {
+      background: radial-gradient(circle, transparent 55%, rgba(0,255,157,0.55) 57%) !important;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <a class="logo" href="/">Africhess</a>
+    <span class="header-right">5+0 · Blitz</span>
+  </div>
+
+  <!-- ══ LOBBY SCREEN ══ -->
+  <div id="screen-lobby" class="screen active">
+    <div class="lobby-box">
+      <div class="lobby-title">Finding opponent</div>
+      <div class="dots">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+      </div>
+      <div class="lobby-status" id="lobby-status">Connecting...</div>
+      <div class="guest-id" id="guest-label"></div>
+    </div>
+    <div class="controls">
+      <button onclick="cancelLobby()">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ══ GAME SCREEN ══ -->
+  <div id="screen-game" class="screen">
+    <div class="game-wrap">
+
+      <!-- Opponent bar (top) -->
+      <div class="player-bar" id="bar-opponent">
+        <span class="player-name" id="name-opponent">Opponent</span>
+        <span class="clock" id="clock-opponent">5:00</span>
+      </div>
+
+      <!-- Board -->
+      <div id="board"></div>
+
+      <!-- My bar (bottom) -->
+      <div class="player-bar" id="bar-me">
+        <span class="player-name" id="name-me">You</span>
+        <span class="clock" id="clock-me">5:00</span>
+      </div>
+
+      <div class="status-bar" id="game-status">Waiting for game to start...</div>
+
+      <div class="controls">
+        <button onclick="offerDraw()">Draw</button>
+        <button class="danger" onclick="resign()">Resign</button>
+        <button onclick="goToLobby()">New Game</button>
+      </div>
+
+      <!-- Move list -->
+      <div class="move-list-wrap">
+        <div class="move-list-label">Moves</div>
+        <div class="move-list" id="move-list"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ══ GAME OVER OVERLAY ══ -->
+  <div class="overlay" id="overlay">
+    <div class="result-card">
+      <div class="result-title" id="result-title">Draw</div>
+      <div class="result-reason" id="result-reason">by agreement</div>
+      <div class="controls" style="justify-content:center; margin-top:8px;">
+        <button onclick="goToLobby()">Play Again</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════════════════════════════
+const WS_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+  ? 'ws://127.0.0.1:8000'
+  : 'wss://' + location.hostname;
+
+// ═══════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════
+let lobbyWs   = null;
+let gameWs    = null;
+let myColor   = null;   // 'white' | 'black'
+let myId      = null;
+let gameId    = null;
+let game      = new Chess();
+let board     = null;
+let selectedSq = null;
+let myTurn    = false;
+let gameOver  = false;
+
+// Clock state
+let clocks = { white: 300, black: 300 };
+let clockInterval = null;
+
+// ═══════════════════════════════════════════════════════════════
+//  SCREENS
+// ═══════════════════════════════════════════════════════════════
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + id).classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LOBBY
+// ═══════════════════════════════════════════════════════════════
+function connectLobby() {
+  showScreen('lobby');
+  setLobbyStatus('Connecting...');
+  lobbyWs = new WebSocket(WS_BASE + '/ws/lobby');
+
+  lobbyWs.onopen = () => setLobbyStatus('Searching for opponent...');
+
+  lobbyWs.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === 'waiting') {
+      myId = msg.guest_id;
+      document.getElementById('guest-label').textContent = myId;
+      setLobbyStatus('Searching for opponent...');
+    }
+
+    if (msg.type === 'matched') {
+      gameId   = msg.game_id;
+      myColor  = msg.color;
+      setLobbyStatus('Opponent found! Starting game...');
+      setTimeout(() => startGame(), 400);
+    }
+  };
+
+  lobbyWs.onclose = () => {
+    if (!gameId) setLobbyStatus('Connection lost. Retrying...');
+  };
+
+  lobbyWs.onerror = () => setLobbyStatus('Connection error. Check server.');
+}
+
+function setLobbyStatus(msg) {
+  document.getElementById('lobby-status').textContent = msg;
+}
+
+function cancelLobby() {
+  if (lobbyWs) lobbyWs.close();
+  gameId = null;
+  location.href = '/';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GAME INIT
+// ═══════════════════════════════════════════════════════════════
+function startGame() {
+  showScreen('game');
+  game     = new Chess();
+  gameOver = false;
+  selectedSq = null;
+  myTurn   = myColor === 'white';
+
+  // Player labels
+  const opponentColor = myColor === 'white' ? 'black' : 'white';
+  document.getElementById('name-me').textContent       = myId + ' (' + myColor + ')';
+  document.getElementById('name-opponent').textContent = 'Opponent (' + opponentColor + ')';
+
+  // Board orientation
+  board = Chessboard('board', {
+    draggable: true,
+    position: 'start',
+    orientation: myColor,
+    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
+    onDragStart: onDragStart,
+    onDrop: onDrop,
+    onSnapEnd: () => board.position(game.fen()),
+    onSquareClick: onSquareClick,
+  });
+
+  resetClockDisplay();
+  updateTurnIndicator();
+  startClockTick();
+
+  // Connect game websocket
+  gameWs = new WebSocket(WS_BASE + '/ws/game/' + gameId);
+  gameWs.onmessage = onGameMessage;
+  gameWs.onclose   = () => {
+    if (!gameOver) showGameStatus('Connection lost.');
+  };
+
+  // Close lobby socket
+  if (lobbyWs) { lobbyWs.close(); lobbyWs = null; }
+
+  document.getElementById('move-list').innerHTML = '';
+  document.getElementById('overlay').classList.remove('active');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  WEBSOCKET MESSAGES
+// ═══════════════════════════════════════════════════════════════
+function onGameMessage(e) {
+  const msg = JSON.parse(e.data);
+
+  if (msg.type === 'move') {
+    game.load(msg.fen);
+    board.position(msg.fen, false);
+    highlightLastMove(msg.move);
+    updateClocks(msg.clock);
+    myTurn = msg.turn === myColor;
+    updateTurnIndicator();
+    appendMove(msg.move);
+    clearHighlights();
+  }
+
+  if (msg.type === 'clock') {
+    clocks.white = msg.white;
+    clocks.black = msg.black;
+    renderClocks();
+  }
+
+  if (msg.type === 'gameover') {
+    gameOver = true;
+    stopClockTick();
+    showOverlay(msg.result, msg.reason);
+  }
+
+  if (msg.type === 'draw_offer') {
+    if (confirm('Opponent offers a draw. Accept?')) {
+      sendGame({ type: 'draw_accept' });
+    }
+  }
+
+  if (msg.type === 'error') {
+    showGameStatus('⚠ ' + msg.detail);
+  }
+}
+
+function sendGame(obj) {
+  if (gameWs && gameWs.readyState === WebSocket.OPEN) {
+    gameWs.send(JSON.stringify(obj));
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BOARD INTERACTION
+// ═══════════════════════════════════════════════════════════════
+function onDragStart(source, piece) {
+  if (!myTurn || gameOver) return false;
+  if (myColor === 'white' && piece.startsWith('b')) return false;
+  if (myColor === 'black' && piece.startsWith('w')) return false;
+  clearHighlights();
+  highlightMoves(source);
+  selectedSq = source;
+  return true;
+}
+
+function onDrop(source, target) {
+  clearHighlights();
+  selectedSq = null;
+
+  // Optimistic local move
+  const move = game.move({ from: source, to: target, promotion: 'q' });
+  if (!move) return 'snapback';
+
+  myTurn = false;
+  updateTurnIndicator();
+
+  // Send to server
+  sendGame({ type: 'move', move: move.from + move.to + (move.promotion || '') });
+
+  if (game.game_over()) {
+    // Server will send gameover message
+    return;
+  }
+}
+
+function onSquareClick(square) {
+  if (!myTurn || gameOver) return;
+
+  const piece = game.get(square);
+  const myPieceColor = myColor === 'white' ? 'w' : 'b';
+
+  if (piece && piece.color === myPieceColor) {
+    clearHighlights();
+    highlightMoves(square);
+    selectedSq = square;
+    return;
+  }
+
+  if (selectedSq) {
+    const move = game.move({ from: selectedSq, to: square, promotion: 'q' });
+    clearHighlights();
+    selectedSq = null;
+    if (!move) return;
+    board.position(game.fen());
+    myTurn = false;
+    updateTurnIndicator();
+    sendGame({ type: 'move', move: move.from + move.to + (move.promotion || '') });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HIGHLIGHTS
+// ═══════════════════════════════════════════════════════════════
+function highlightMoves(square) {
+  const moves = game.moves({ square, verbose: true });
+  $('#board .square-' + square).addClass('highlight-selected');
+  moves.forEach(m => {
+    const isCapture = !!game.get(m.to) || m.flags.includes('e');
+    $('#board .square-' + m.to).addClass(isCapture ? 'highlight-capture' : 'highlight-square');
+  });
+}
+
+function clearHighlights() {
+  $('#board .square-55d63').removeClass(
+    'highlight-selected highlight-square highlight-capture highlight-move'
+  );
+}
+
+function highlightLastMove(uci) {
+  if (!uci || uci.length < 4) return;
+  $('#board .square-' + uci.slice(0,2)).addClass('highlight-move');
+  $('#board .square-' + uci.slice(2,4)).addClass('highlight-move');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CLOCKS
+// ═══════════════════════════════════════════════════════════════
+function resetClockDisplay() {
+  clocks = { white: 300, black: 300 };
+  renderClocks();
+}
+
+function updateClocks(serverClock) {
+  if (!serverClock) return;
+  clocks.white = serverClock.w;
+  clocks.black = serverClock.b;
+  renderClocks();
+}
+
+function renderClocks() {
+  const myC   = myColor === 'white' ? clocks.white : clocks.black;
+  const oppC  = myColor === 'white' ? clocks.black : clocks.white;
+
+  document.getElementById('clock-me').textContent       = formatClock(myC);
+  document.getElementById('clock-opponent').textContent = formatClock(oppC);
+
+  // Color feedback
+  const meEl  = document.getElementById('clock-me');
+  const oppEl = document.getElementById('clock-opponent');
+  meEl.className  = 'clock' + (myTurn ? ' active-clock' : '') + (myC  < 30 ? ' low' : '');
+  oppEl.className = 'clock' + (!myTurn ? ' active-clock' : '') + (oppC < 30 ? ' low' : '');
+}
+
+function formatClock(secs) {
+  const s = Math.max(0, Math.floor(secs));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+function startClockTick() {
+  stopClockTick();
+  clockInterval = setInterval(() => {
+    if (gameOver) return stopClockTick();
+    if (myTurn) {
+      clocks[myColor] = Math.max(0, clocks[myColor] - 0.1);
+    } else {
+      const oppColor = myColor === 'white' ? 'black' : 'white';
+      clocks[oppColor] = Math.max(0, clocks[oppColor] - 0.1);
+    }
+    renderClocks();
+  }, 100);
+}
+
+function stopClockTick() {
+  if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UI HELPERS
+// ═══════════════════════════════════════════════════════════════
+function updateTurnIndicator() {
+  const myNameEl  = document.getElementById('name-me');
+  const oppNameEl = document.getElementById('name-opponent');
+  if (myTurn) {
+    myNameEl.classList.add('active-turn');
+    oppNameEl.classList.remove('active-turn');
+    showGameStatus('Your move.');
+  } else {
+    oppNameEl.classList.add('active-turn');
+    myNameEl.classList.remove('active-turn');
+    showGameStatus('Opponent thinking...');
+  }
+}
+
+function showGameStatus(msg, highlight) {
+  const el = document.getElementById('game-status');
+  el.textContent = msg;
+  el.className = 'status-bar' + (highlight ? ' highlight' : '');
+}
+
+function appendMove(uci) {
+  if (!uci) return;
+  const list = document.getElementById('move-list');
+  const moveNum = Math.ceil(game.history().length / 2);
+  if (game.history().length % 2 === 1) {
+    const num = document.createElement('span');
+    num.textContent = moveNum + '.';
+    list.appendChild(num);
+  }
+  const mv = document.createElement('span');
+  mv.textContent = uci + ' ';
+  list.appendChild(mv);
+  list.scrollTop = list.scrollHeight;
+}
+
+function showOverlay(result, reason) {
+  const overlay = document.getElementById('overlay');
+  const title   = document.getElementById('result-title');
+  const reasonEl = document.getElementById('result-reason');
+
+  overlay.classList.add('active');
+
+  const reasonText = {
+    checkmate:   'by checkmate',
+    timeout:     'on time',
+    resignation: 'by resignation',
+    disconnect:  'opponent disconnected',
+    stalemate:   'stalemate',
+    agreement:   'by agreement',
+    insufficient_material: 'insufficient material',
+    seventyfive_moves:     '75-move rule',
+    fivefold_repetition:   'fivefold repetition',
+  }[reason] || reason;
+
+  if (result === 'draw') {
+    title.className = 'result-title draw';
+    title.textContent = 'Draw';
+  } else if (result === myColor) {
+    title.className = 'result-title';
+    title.textContent = 'You Win';
+  } else {
+    title.className = 'result-title lose';
+    title.textContent = 'You Lose';
+  }
+  reasonEl.textContent = reasonText;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ACTIONS
+// ═══════════════════════════════════════════════════════════════
+function resign() {
+  if (gameOver || !gameWs) return;
+  if (confirm('Resign this game?')) {
+    sendGame({ type: 'resign' });
+  }
+}
+
+function offerDraw() {
+  if (gameOver || !gameWs) return;
+  sendGame({ type: 'draw_offer' });
+  showGameStatus('Draw offered.');
+}
+
+function goToLobby() {
+  gameOver = true;
+  stopClockTick();
+  if (gameWs) { gameWs.close(); gameWs = null; }
+  gameId = null; myColor = null;
+  document.getElementById('overlay').classList.remove('active');
+  connectLobby();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════════════
+connectLobby();
+</script>
+</body>
+</html>

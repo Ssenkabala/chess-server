@@ -314,6 +314,12 @@
 
 <!-- ══════════════════ SCRIPTS ══════════════════ -->
 <script>
+  
+const API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+  ? 'http://127.0.0.1:8000'
+  : 'https://' + location.hostname;
+
+
 // ─── Tab switching ─────────────────────────────────────────────
 function switchTab(tab) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -398,7 +404,7 @@ function onSquareClick(square) {
 }
 
 function getEngineMove() {
-  fetch('/move', {
+  fetch(API_BASE + '/move', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fen: game.fen(), think_time: 1.0 })
@@ -617,7 +623,7 @@ function analysePosition() {
   setAnalysisStatus('⏳ Engine analysing...');
   document.getElementById('btn-coach').disabled = true;
 
-  fetch('/move', {
+  fetch(API_BASE + '/move', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fen: fen, think_time: 2.0 })
@@ -650,7 +656,7 @@ function getCoaching() {
   document.getElementById('btn-coach').disabled = true;
   resetCoachCard();
 
-  fetch('/coach', {
+  fetch(API_BASE + '/coach', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

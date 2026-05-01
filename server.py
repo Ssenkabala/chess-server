@@ -12,6 +12,11 @@ from typing import Optional
 import sqlite3
 import secrets
 from datetime import datetime, timedelta
+import asyncio
+import uuid
+import time
+from fastapi import WebSocket, WebSocketDisconnect
+import asyncio, uuid, time
 
 app = FastAPI()
 
@@ -241,6 +246,274 @@ def register(req: RegisterRequest):
     conn.close()
     return {"api_key": api_key, "tier": req.tier, "expires_at": expires}
 
+
+# ── In-memory game state ──────────────────────────────────────────────────────
+
+lobby_queue: list = []          # waiting players: [{"ws": ws, "guest_id": id}]
+active_games: dict = {}         # game_id → game state dict
+
+CLOCK_SECONDS = 300             # 5 minutes each side
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
+             white_id: str, black_id: str) -> dict:
+    return {
+        "id":           game_id,
+        "board":        chess.Board(),
+        "white_ws":     white_ws,
+        "black_ws":     black_ws,
+        "white_id":     white_id,
+        "black_id":     black_id,
+        "clock":        {"w": CLOCK_SECONDS, "b": CLOCK_SECONDS},
+        "last_move_ts": time.time(),
+        "over":         False,
+    }
+
+
+async def send(ws: WebSocket, msg: dict):
+    """Safe send — ignores errors if socket already closed."""
+    try:
+        await ws.send_json(msg)
+    except Exception:
+        pass
+
+
+async def broadcast(game: dict, msg: dict):
+    await send(game["white_ws"], msg)
+    await send(game["black_ws"], msg)
+
+
+def deduct_clock(game: dict) -> float:
+    """Deduct elapsed time from the side that just moved, return remaining."""
+    now = time.time()
+    elapsed = now - game["last_move_ts"]
+    # The side that just moved is the OPPOSITE of board.turn (move already pushed)
+    just_moved = "b" if game["board"].turn == chess.WHITE else "w"
+    game["clock"][just_moved] = max(0, game["clock"][just_moved] - elapsed)
+    game["last_move_ts"] = now
+    return game["clock"][just_moved]
+
+
+async def clock_loop(game_id: str):
+    """Background task — checks for flag fall every second."""
+    while True:
+        await asyncio.sleep(1)
+        game = active_games.get(game_id)
+        if not game or game["over"]:
+            return
+
+        now = time.time()
+        elapsed = now - game["last_move_ts"]
+        turn = "w" if game["board"].turn == chess.WHITE else "b"
+        remaining = game["clock"][turn] - elapsed
+
+        if remaining <= 0:
+            game["over"] = True
+            loser = "white" if turn == "w" else "black"
+            winner = "black" if loser == "white" else "white"
+            await broadcast(game, {
+                "type":   "gameover",
+                "result": winner,
+                "reason": "timeout",
+                "clock":  game["clock"],
+            })
+            active_games.pop(game_id, None)
+            return
+
+        # Send clock tick to both players
+        await broadcast(game, {
+            "type":  "clock",
+            "white": round(game["clock"]["w"] - (elapsed if turn == "w" else 0), 1),
+            "black": round(game["clock"]["b"] - (elapsed if turn == "b" else 0), 1),
+        })
+
+
+def validate_and_push(game: dict, uci_move: str) -> chess.Move | None:
+    """Validate UCI move against current board state. Returns move or None."""
+    try:
+        move = chess.Move.from_uci(uci_move)
+        if move in game["board"].legal_moves:
+            game["board"].push(move)
+            return move
+    except Exception:
+        pass
+    return None
+
+
+# ── WebSocket: Lobby (matchmaking) ────────────────────────────────────────────
+
+@app.websocket("/ws/lobby")
+async def lobby(ws: WebSocket):
+    await ws.accept()
+    guest_id = "guest_" + uuid.uuid4().hex[:8]
+
+    await send(ws, {"type": "waiting", "guest_id": guest_id})
+
+    # Check if someone is already waiting
+    if lobby_queue:
+        opponent = lobby_queue.pop(0)
+        game_id  = uuid.uuid4().hex[:12]
+
+        # Randomly assign colors (first in queue gets white)
+        white_ws, white_id = opponent["ws"], opponent["guest_id"]
+        black_ws, black_id = ws, guest_id
+
+        game = new_game(game_id, white_ws, black_ws, white_id, black_id)
+        active_games[game_id] = game
+
+        await send(white_ws, {
+            "type":    "matched",
+            "game_id": game_id,
+            "color":   "white",
+            "opponent": black_id,
+        })
+        await send(black_ws, {
+            "type":    "matched",
+            "game_id": game_id,
+            "color":   "black",
+            "opponent": white_id,
+        })
+
+        # Start clock loop
+        asyncio.create_task(clock_loop(game_id))
+    else:
+        lobby_queue.append({"ws": ws, "guest_id": guest_id})
+
+    # Keep lobby socket alive until matched or disconnected
+    try:
+        while True:
+            await ws.receive_text()   # just keep connection open
+    except WebSocketDisconnect:
+        # Remove from queue if still waiting
+        lobby_queue[:] = [p for p in lobby_queue if p["guest_id"] != guest_id]
+
+
+# ── WebSocket: Active game ─────────────────────────────────────────────────────
+
+@app.websocket("/ws/game/{game_id}")
+async def game_ws(ws: WebSocket, game_id: str):
+    await ws.accept()
+
+    game = active_games.get(game_id)
+    if not game:
+        await send(ws, {"type": "error", "detail": "Game not found."})
+        await ws.close()
+        return
+
+    # Identify which player this is
+    if   ws == game["white_ws"]: color = "w"
+    elif ws == game["black_ws"]: color = "b"
+    else:
+        await send(ws, {"type": "error", "detail": "Not a player in this game."})
+        await ws.close()
+        return
+
+    try:
+        while True:
+            data = await ws.receive_json()
+
+            if game["over"]:
+                await send(ws, {"type": "error", "detail": "Game is over."})
+                continue
+
+            msg_type = data.get("type")
+
+            # ── Move ──────────────────────────────────────────────────────────
+            if msg_type == "move":
+                # Only the player whose turn it is can move
+                expected = "w" if game["board"].turn == chess.WHITE else "b"
+                if color != expected:
+                    await send(ws, {"type": "error", "detail": "Not your turn."})
+                    continue
+
+                uci = data.get("move", "")
+                move = validate_and_push(game, uci)
+                if move is None:
+                    await send(ws, {"type": "error", "detail": "Illegal move."})
+                    continue
+
+                # Deduct clock
+                remaining = deduct_clock(game)
+                fen = game["board"].fen()
+
+                # Check game over conditions
+                if game["board"].is_game_over():
+                    game["over"] = True
+                    outcome = game["board"].outcome()
+                    result = (
+                        "white" if outcome.winner == chess.WHITE else
+                        "black" if outcome.winner == chess.BLACK else
+                        "draw"
+                    )
+                    reason = outcome.termination.name.lower()
+                    await broadcast(game, {
+                        "type":   "gameover",
+                        "result": result,
+                        "reason": reason,
+                        "fen":    fen,
+                        "clock":  game["clock"],
+                    })
+                    active_games.pop(game_id, None)
+                else:
+                    await broadcast(game, {
+                        "type":  "move",
+                        "move":  uci,
+                        "fen":   fen,
+                        "clock": game["clock"],
+                        "turn":  "white" if game["board"].turn == chess.WHITE else "black",
+                    })
+
+            # ── Resign ────────────────────────────────────────────────────────
+            elif msg_type == "resign":
+                game["over"] = True
+                winner = "black" if color == "w" else "white"
+                await broadcast(game, {
+                    "type":   "gameover",
+                    "result": winner,
+                    "reason": "resignation",
+                    "clock":  game["clock"],
+                })
+                active_games.pop(game_id, None)
+
+            # ── Draw offer (future) ───────────────────────────────────────────
+            elif msg_type == "draw_offer":
+                opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
+                await send(opponent_ws, {"type": "draw_offer"})
+
+            elif msg_type == "draw_accept":
+                game["over"] = True
+                await broadcast(game, {
+                    "type":   "gameover",
+                    "result": "draw",
+                    "reason": "agreement",
+                    "clock":  game["clock"],
+                })
+                active_games.pop(game_id, None)
+
+    except WebSocketDisconnect:
+        if not game["over"]:
+            game["over"] = True
+            winner = "black" if color == "w" else "white"
+            await broadcast(game, {
+                "type":   "gameover",
+                "result": winner,
+                "reason": "disconnect",
+                "clock":  game["clock"],
+            })
+            active_games.pop(game_id, None)
+
+
+# ── Lobby status (optional debug endpoint) ────────────────────────────────────
+
+@app.get("/lobby/status")
+def lobby_status():
+    return {
+        "waiting":      len(lobby_queue),
+        "active_games": len(active_games),
+    }
+
 # ─── Health / static ──────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -252,7 +525,15 @@ app.mount("/static", StaticFiles(directory="."), name="static")
 
 @app.get("/")
 def root():
-    return FileResponse("index.html")
+    return FileResponse("landing.html")
+
+@app.get("/play")
+def play():
+    return FileResponse("index.html")        # vs engine
+
+@app.get("/multiplayer")
+def multiplayer():
+    return FileResponse("play_multiplayer.html")   # 1v1 live
 
 @app.get("/landing")
 def landing():

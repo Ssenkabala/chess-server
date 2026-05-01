@@ -596,6 +596,8 @@ function initAnalysisBoard() {
 }
 
 function loadFen() {
+  if (!analysisBoard) initAnalysisBoard();
+
   var fen = document.getElementById('fen-input').value.trim();
   if (!fen) {
     analysisGame = new Chess();
@@ -619,6 +621,8 @@ function loadFen() {
 }
 
 function analysePosition() {
+  if (!analysisBoard) initAnalysisBoard();
+
   var fen = analysisGame.fen();
   setAnalysisStatus('⏳ Engine analysing...');
   document.getElementById('btn-coach').disabled = true;
@@ -644,6 +648,8 @@ function analysePosition() {
 }
 
 function getCoaching() {
+  if (!analysisBoard) initAnalysisBoard();
+  
   var apiKey = document.getElementById('api-key-input').value.trim();
   if (!apiKey) {
     setAnalysisStatus('Enter your API key above to use coaching.');

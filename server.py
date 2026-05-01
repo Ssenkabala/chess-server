@@ -142,24 +142,28 @@ def analyse_position(fen: str, think_time: float):
 
 @app.post("/move")
 def get_move(req: MoveRequest):
-    board = chess.Board(req.fen)
-    with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-        info = engine.analyse(board, chess.engine.Limit(time=req.think_time))
-        best_move = info["pv"][0] if info.get("pv") else None
-        if best_move is None:
-            raise HTTPException(status_code=500, detail="Engine returned no move")
-        score_cp = None
-        if "score" in info:
-            score_cp = info["score"].white().score(mate_score=10000)
-        board.push(best_move)
-    return {
-        "move": best_move.uci(),
-        "fen": board.fen(),
-        "is_game_over": board.is_game_over(),
-        "outcome": str(board.outcome()) if board.is_game_over() else None,
-        "score_cp": score_cp,
-        "eval_pawns": round(score_cp / 100, 2) if score_cp is not None else 0
-    }
+    try:
+        board = chess.Board(req.fen)
+        with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
+            # Use play() for the move, analyse() separately for eval
+            result = engine.play(board, chess.engine.Limit(time=req.think_time))
+            move = result.move
+            
+            # Get eval separately
+            info = engine.analyse(board, chess.engine.Limit(time=0.1))
+            score_cp = info["score"].white().score(mate_score=10000) if "score" in info else 0
+
+        board.push(move)
+        return {
+            "move": move.uci(),
+            "fen": board.fen(),
+            "is_game_over": board.is_game_over(),
+            "outcome": str(board.outcome()) if board.is_game_over() else None,
+            "score_cp": score_cp,
+            "eval_pawns": round(score_cp / 100, 2) if score_cp is not None else 0
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ─── /coach endpoint ──────────────────────────────────────────────────────────
 
@@ -554,6 +558,8 @@ def debug_engine():
         "files_in_engines": os.listdir("./engines") if os.path.exists("./engines") else "folder missing",
         "is_executable": os.access(path, os.X_OK) if os.path.exists(path) else False
     }
+
+
 
 if __name__ == "__main__":
     import uvicorn

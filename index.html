@@ -758,7 +758,8 @@ function analysePosition() {
       var from = data.move.slice(0, 2);
       var to   = data.move.slice(2, 4);
       highlightBestMove(from, to);
-      updateEvalBar(data.eval_pawns || 0);  // add this line
+      updateEvalBar(data.eval_pawns || 0); 
+      renderCandidates(data.candidates);
       setAnalysisStatus('Best move: ' + data.move + '  |  Use Coach Me for a full explanation.');
       document.getElementById('btn-coach').disabled = false;
   })

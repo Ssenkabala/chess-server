@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AfriChess — My Games</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      min-height: 100vh;
+      font-family: 'Georgia', serif;
+      color: #e8e6e0;
+      padding: 0;
+    }
+
+    /* ── Nav ── */
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 32px;
+      border-bottom: 1px solid #1e1e1e;
+      background: #0d0d0d;
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+    .nav-logo span {
+      font-size: 18px;
+      letter-spacing: 0.15em;
+      color: #888;
+      text-transform: uppercase;
+    }
+    .nav-logo em { color: #00d98b; font-style: normal; }
+    .nav-right { display: flex; gap: 12px; align-items: center; }
+    .nav-user {
+      font-size: 11px;
+      color: #555;
+      font-family: monospace;
+    }
+    .nav-user span { color: #00ff9d; }
+
+    nav-btn {
+      padding: 7px 18px;
+      background: transparent;
+      color: #00ff9d;
+      border: 1px solid #00ff9d33;
+      font-size: 11px;
+      font-family: 'Georgia', serif;
+      letter-spacing: 0.1em;
+      cursor: pointer;
+      border-radius: 2px;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+
+    /* ── Layout ── */
+    .layout {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      min-height: calc(100vh - 57px);
+    }
+
+    /* ── Game list ── */
+    .game-list-panel {
+      border-right: 1px solid #1e1e1e;
+      overflow-y: auto;
+      max-height: calc(100vh - 57px);
+    }
+    .game-list-header {
+      padding: 20px 20px 12px;
+      border-bottom: 1px solid #1e1e1e;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #444;
+    }
+    .game-item {
+      padding: 16px 20px;
+      border-bottom: 1px solid #181818;
+      cursor: pointer;
+      transition: background 0.15s;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .game-item:hover { background: #161616; }
+    .game-item.active { background: #0f1a14; border-left: 2px solid #00ff9d; }
+
+    .game-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .game-result-badge {
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 1px;
+    }
+    .badge-win  { background: #00ff9d18; color: #00ff9d; border: 1px solid #00ff9d33; }
+    .badge-loss { background: #ff4d4d18; color: #ff6b6b; border: 1px solid #ff4d4d33; }
+    .badge-draw { background: #44444418; color: #888;     border: 1px solid #44444433; }
+
+    .game-date {
+      font-size: 11px;
+      color: #444;
+      font-family: monospace;
+    }
+    .game-meta {
+      font-size: 11px;
+      color: #555;
+      letter-spacing: 0.05em;
+    }
+    .game-moves-preview {
+      font-size: 10px;
+      color: #333;
+      font-family: monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .empty-state {
+      padding: 48px 20px;
+      text-align: center;
+      color: #444;
+      font-size: 13px;
+      line-height: 2;
+    }
+
+    /* ── Replay panel ── */
+    .replay-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px;
+      gap: 20px;
+    }
+
+    .replay-empty {
+      margin: auto;
+      text-align: center;
+      color: #333;
+      font-size: 13px;
+      line-height: 2.2;
+    }
+    .replay-empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.3; }
+
+    #replay-board { width: 480px; }
+
+    .replay-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .replay-btn {
+      padding: 9px 20px;
+      background: transparent;
+      color: #00ff9d;
+      border: 1px solid #00ff9d33;
+      font-size: 18px;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: all 0.2s;
+      line-height: 1;
+    }
+    .replay-btn:hover { background: #00ff9d; color: #111; }
+    .replay-btn:disabled { opacity: 0.2; cursor: not-allowed; }
+
+    .move-counter {
+      font-size: 12px;
+      color: #555;
+      font-family: monospace;
+      letter-spacing: 0.1em;
+      min-width: 80px;
+      text-align: center;
+    }
+
+    /* Move list */
+    .move-list-wrap {
+      width: 480px;
+      background: #161616;
+      border: 1px solid #222;
+      border-radius: 2px;
+      padding: 14px 16px;
+      max-height: 140px;
+      overflow-y: auto;
+    }
+    .move-list-label {
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #444;
+      margin-bottom: 10px;
+    }
+    .move-list-grid {
+      display: grid;
+      grid-template-columns: 32px 1fr 1fr;
+      gap: 2px 8px;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    .move-num { color: #333; }
+    .move-san {
+      color: #888;
+      cursor: pointer;
+      padding: 1px 4px;
+      border-radius: 1px;
+      transition: all 0.15s;
+    }
+    .move-san:hover { background: #222; color: #ccc; }
+    .move-san.current { background: #00ff9d22; color: #00ff9d; }
+
+    /* PGN box */
+    .pgn-wrap {
+      width: 480px;
+      background: #0d0d0d;
+      border: 1px solid #1e1e1e;
+      border-left: 2px solid #00ff9d33;
+      border-radius: 2px;
+      padding: 14px 16px;
+    }
+    .pgn-label {
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #444;
+      margin-bottom: 8px;
+    }
+    .pgn-text {
+      font-family: monospace;
+      font-size: 11px;
+      color: #555;
+      line-height: 1.8;
+      word-break: break-all;
+      max-height: 80px;
+      overflow-y: auto;
+    }
+    .pgn-copy-btn {
+      margin-top: 8px;
+      padding: 5px 14px;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+    }
+
+    /* Loading */
+    .loading {
+      padding: 40px;
+      text-align: center;
+      color: #444;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+    }
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid #222;
+      border-top-color: #00ff9d;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<div class="nav">
+  <a class="nav-logo" href="/play">
+    <img src="/logo.png" height="32" alt="AfriChess">
+    <span>Afri<em>Chess</em></span>
+  </a>
+  <div class="nav-right">
+    <div class="nav-user" id="nav-user">Loading...</div>
+    <a href="/play" style="padding:7px 18px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">← Play</a>
+  </div>
+</div>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Game list -->
+  <div class="game-list-panel">
+    <div class="game-list-header">Game History</div>
+    <div id="game-list">
+      <div class="loading"><span class="spinner"></span>Loading games...</div>
+    </div>
+  </div>
+
+  <!-- Replay -->
+  <div class="replay-panel" id="replay-panel">
+    <div class="replay-empty" id="replay-empty">
+      <div class="replay-empty-icon">♟</div>
+      Select a game from the list<br>to replay it move by move.
+    </div>
+
+    <div id="replay-board" style="display:none;width:480px;"></div>
+
+    <div class="replay-controls" id="replay-controls" style="display:none;">
+      <button class="replay-btn" id="btn-start"  onclick="replayGoto(0)">⟨⟨</button>
+      <button class="replay-btn" id="btn-prev"   onclick="replayPrev()">⟨</button>
+      <span class="move-counter" id="move-counter">0 / 0</span>
+      <button class="replay-btn" id="btn-next"   onclick="replayNext()">⟩</button>
+      <button class="replay-btn" id="btn-end"    onclick="replayGoto(9999)">⟩⟩</button>
+    </div>
+
+    <div class="move-list-wrap" id="move-list-wrap" style="display:none;">
+      <div class="move-list-label">Moves</div>
+      <div class="move-list-grid" id="move-list-grid"></div>
+    </div>
+
+    <div class="pgn-wrap" id="pgn-wrap" style="display:none;">
+      <div class="pgn-label">PGN</div>
+      <div class="pgn-text" id="pgn-text"></div>
+      <button class="replay-btn pgn-copy-btn" onclick="copyPGN()">Copy PGN</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Supabase ──────────────────────────────────────────────────
+const SUPABASE_URL  = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
+const SUPABASE_ANON = 'sb_publishable_g5BEYnjhPatfmnHG3jNQTQ_fzgKOy4s';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+let games        = [];
+let replayMoves  = [];
+let replayIdx    = 0;
+let replayBoard  = null;
+let replayGame   = null;
+let activeGameId = null;
+
+// ── Auth check ────────────────────────────────────────────────
+sb.auth.getSession().then(({ data }) => {
+  if (!data.session) {
+    window.location.href = '/play';
+    return;
+  }
+  const user = data.session.user;
+  document.getElementById('nav-user').innerHTML =
+    '<span>' + (user.email || 'Signed in') + '</span>';
+  loadGames(user.id);
+});
+
+// ── Load games ────────────────────────────────────────────────
+async function loadGames(userId) {
+  const { data, error } = await sb
+    .from('games')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  const listEl = document.getElementById('game-list');
+
+  if (error || !data || data.length === 0) {
+    listEl.innerHTML = '<div class="empty-state">No games saved yet.<br>Play a game to see it here.</div>';
+    return;
+  }
+
+  games = data;
+  listEl.innerHTML = '';
+
+  data.forEach(function(g) {
+    const item = document.createElement('div');
+    item.className = 'game-item';
+    item.id = 'game-' + g.id;
+
+    const isWin  = g.result === g.player_color;
+    const isDraw = g.result === 'draw';
+    const badgeClass = isWin ? 'badge-win' : (isDraw ? 'badge-draw' : 'badge-loss');
+    const badgeText  = isWin ? 'Win' : (isDraw ? 'Draw' : 'Loss');
+
+    const date = new Date(g.created_at).toLocaleDateString('en-GB', {
+      day: 'numeric', month: 'short', year: 'numeric'
+    });
+
+    // Get move count from PGN
+    const moveCount = (g.pgn.match(/\d+\./g) || []).length;
+
+    item.innerHTML =
+      '<div class="game-item-header">' +
+        '<span class="game-result-badge ' + badgeClass + '">' + badgeText + '</span>' +
+        '<span class="game-date">' + date + '</span>' +
+      '</div>' +
+      '<div class="game-meta">As ' + (g.player_color || 'white') + ' vs Engine · ' + moveCount + ' moves</div>' +
+      '<div class="game-moves-preview">' + g.pgn.replace(/\[.*?\]\s*/g, '').trim().slice(0, 80) + '</div>';
+
+    item.onclick = function() { openReplay(g); };
+    listEl.appendChild(item);
+  });
+}
+
+// ── Replay ────────────────────────────────────────────────────
+function openReplay(g) {
+  // Highlight active
+  document.querySelectorAll('.game-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('game-' + g.id).classList.add('active');
+  activeGameId = g.id;
+
+  // Parse PGN
+  replayGame = new Chess();
+  replayGame.load_pgn(g.pgn);
+  replayMoves = replayGame.history();
+
+  // Show UI
+  document.getElementById('replay-empty').style.display    = 'none';
+  document.getElementById('replay-board').style.display    = 'block';
+  document.getElementById('replay-controls').style.display = 'flex';
+  document.getElementById('move-list-wrap').style.display  = 'block';
+  document.getElementById('pgn-wrap').style.display        = 'block';
+
+  // Init or reset board
+  if (replayBoard) {
+    replayBoard.destroy();
+  }
+  replayBoard = Chessboard('replay-board', {
+    draggable: false,
+    position: 'start',
+    orientation: g.player_color || 'white',
+    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png'
+  });
+
+  replayIdx = 0;
+  renderMoveList();
+  updateReplayControls();
+
+  // PGN
+  document.getElementById('pgn-text').textContent =
+    g.pgn.replace(/\[.*?\]\s*/g, '').trim();
+}
+
+function replayGoto(idx) {
+  const chess = new Chess();
+  const target = Math.min(Math.max(0, idx), replayMoves.length);
+  for (let i = 0; i < target; i++) chess.move(replayMoves[i]);
+  replayIdx = target;
+  replayBoard.position(chess.fen(), false);
+  updateReplayControls();
+  highlightCurrentMove();
+}
+
+function replayNext() { if (replayIdx < replayMoves.length) replayGoto(replayIdx + 1); }
+function replayPrev() { if (replayIdx > 0) replayGoto(replayIdx - 1); }
+
+function updateReplayControls() {
+  document.getElementById('move-counter').textContent =
+    replayIdx + ' / ' + replayMoves.length;
+  document.getElementById('btn-prev').disabled  = replayIdx === 0;
+  document.getElementById('btn-start').disabled = replayIdx === 0;
+  document.getElementById('btn-next').disabled  = replayIdx === replayMoves.length;
+  document.getElementById('btn-end').disabled   = replayIdx === replayMoves.length;
+}
+
+function renderMoveList() {
+  const grid = document.getElementById('move-list-grid');
+  grid.innerHTML = '';
+  for (let i = 0; i < replayMoves.length; i += 2) {
+    const num = document.createElement('span');
+    num.className = 'move-num';
+    num.textContent = (Math.floor(i / 2) + 1) + '.';
+    grid.appendChild(num);
+
+    const w = document.createElement('span');
+    w.className = 'move-san';
+    w.textContent = replayMoves[i];
+    w.dataset.idx = i + 1;
+    w.onclick = function() { replayGoto(parseInt(this.dataset.idx)); };
+    grid.appendChild(w);
+
+    const b = document.createElement('span');
+    b.className = 'move-san';
+    b.textContent = replayMoves[i + 1] || '';
+    b.dataset.idx = i + 2;
+    if (replayMoves[i + 1]) {
+      b.onclick = function() { replayGoto(parseInt(this.dataset.idx)); };
+    }
+    grid.appendChild(b);
+  }
+}
+
+function highlightCurrentMove() {
+  document.querySelectorAll('.move-san').forEach(function(el) {
+    el.classList.toggle('current', parseInt(el.dataset.idx) === replayIdx);
+  });
+  // Scroll current move into view
+  const cur = document.querySelector('.move-san.current');
+  if (cur) cur.scrollIntoView({ block: 'nearest' });
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', function(e) {
+  if (!replayBoard) return;
+  if (e.key === 'ArrowRight') replayNext();
+  if (e.key === 'ArrowLeft')  replayPrev();
+});
+
+function copyPGN() {
+  const text = document.getElementById('pgn-text').textContent;
+  navigator.clipboard.writeText(text).then(function() {
+    const btn = document.querySelector('.pgn-copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = 'Copy PGN'; }, 2000);
+  });
+}
+</script>
+</body>
+</html>

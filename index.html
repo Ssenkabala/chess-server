@@ -1183,7 +1183,7 @@ async function signInWithGoogle() {
   await sb.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: window.location.origin + '/play'
+      redirectTo: 'https://www.africhess.org/play'
     }
   });
 }

@@ -316,7 +316,7 @@
       z-index: 200;
       backdrop-filter: blur(4px);
     }
-    .auth-overlay.active { display: flex; }
+    .auth-overlay.active { display: flex !important; }
 
     .auth-card {
       background: #161616;
@@ -487,37 +487,7 @@
       <div class="captured-pieces" id="pieces-opponent"></div>
       <span class="material-score" id="score-opponent"></span>
     </div>
-    <!-- Auth Modal -->
-    <div class="auth-overlay" id="auth-overlay">
-      <div class="auth-card" style="position:relative;">
-        <button class="auth-close" onclick="closeAuth()">×</button>
-        <div class="auth-title" id="auth-title">Sign In</div>
-        <div class="auth-subtitle">Save your games and track your progress.</div>
-
-        <input class="auth-input" type="email" id="auth-email" placeholder="Email address" />
-        <input class="auth-input" type="password" id="auth-password" placeholder="Password" />
-
-        <div class="auth-error" id="auth-error"></div>
-
-        <button class="auth-btn" id="auth-submit-btn" onclick="handleAuth()">Sign In</button>
-
-        <div class="auth-divider">or</div>
-
-        <button class="google-btn" onclick="signInWithGoogle()">
-          <svg width="16" height="16" viewBox="0 0 24 24">
-            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-          </svg>
-          Continue with Google
-        </button>
-
-        <div class="auth-toggle" id="auth-toggle">
-          No account? <span onclick="toggleAuthMode()">Create one</span>
-        </div>
-      </div>
-    </div>
+    
 
     <div id="board"></div>
 
@@ -529,7 +499,7 @@
         <button onclick="signOut()" id="btn-signout" style="display:none">Sign Out</button>
       </div>
     </div>
-
+    
     <!-- Player captured pieces (shown below board) -->
     <div class="captured-bar" id="captured-player">
       <div class="captured-pieces" id="pieces-player"></div>
@@ -607,47 +577,7 @@
 <!-- ══════════════════ SCRIPTS ══════════════════ -->
 <script>
 
-// ═══════════════════════════════════════════════════════════════
-//  SUPABASE AUTH + GAME SAVING
-// ═══════════════════════════════════════════════════════════════
-const SUPABASE_URL  = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
-const SUPABASE_ANON = 'sb_publishable_g5BEYnjhPatfmnHG3jNQTQ_fzgKOy4s';
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-
-let currentUser = null;
-let authMode    = 'signin'; // 'signin' | 'signup'
-
-// ── Init: check if already logged in ─────────────────────────
-sb.auth.getSession().then(({ data }) => {
-  if (data.session) setUser(data.session.user);
-});
-
-sb.auth.onAuthStateChange((event, session) => {
-  if (session) setUser(session.user);
-  else clearUser();
-});
-
-// ── User state ────────────────────────────────────────────────
-function setUser(user) {
-  currentUser = user;
-  const email = user.email || 'Signed in';
-  document.getElementById('user-info').innerHTML =
-    'Signed in as <span>' + email + '</span>';
-  document.getElementById('btn-login').style.display    = 'none';
-  document.getElementById('btn-signout').style.display  = 'inline-block';
-  document.getElementById('btn-history').style.display  = 'inline-block';
-  closeAuth();
-}
-
-function clearUser() {
-  currentUser = null;
-  document.getElementById('user-info').innerHTML = 'Not signed in';
-  document.getElementById('btn-login').style.display    = 'inline-block';
-  document.getElementById('btn-signout').style.display  = 'none';
-  document.getElementById('btn-history').style.display  = 'none';
-}
-
-
+  
 const API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
   ? 'http://127.0.0.1:8000'
   : 'https://' + location.hostname;
@@ -766,12 +696,16 @@ function getEngineMove() {
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
+    if (data.is_game_over) { 
+      if (data.fen) game.load(data.fen);
+      showResult(); 
+      return; 
+    }
     game.load(data.fen);
     board.position(data.fen);
     updateCapturedPieces();
     renderCandidates(data.candidates);
     engineThinking = false;
-    if (data.is_game_over) { showResult(); return; }
     setStatus('Your move.');
   })
   .catch(function() {
@@ -1143,7 +1077,54 @@ function resetAnalysis() {
   resetCoachCard();
   clearBestMoveHighlight();
 }
-</script>
+
+
+// ═══════════════════════════════════════════════════════════════
+//  SUPABASE AUTH + GAME SAVING
+// ═══════════════════════════════════════════════════════════════
+const SUPABASE_URL  = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
+const SUPABASE_ANON = 'sb_publishable_g5BEYnjhPatfmnHG3jNQTQ_fzgKOy4s';
+let sb;
+try {
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+} catch(e) {
+  console.error('Supabase failed to load:', e);
+  sb = null;
+}
+
+let currentUser = null;
+let authMode    = 'signin'; // 'signin' | 'signup'
+
+// ── Init: check if already logged in ─────────────────────────
+sb.auth.getSession().then(({ data }) => {
+  if (data.session) setUser(data.session.user);
+});
+
+sb.auth.onAuthStateChange((event, session) => {
+  if (session) setUser(session.user);
+  else clearUser();
+});
+
+// ── User state ────────────────────────────────────────────────
+function setUser(user) {
+  currentUser = user;
+  const email = user.email || 'Signed in';
+  document.getElementById('user-info').innerHTML =
+    'Signed in as <span>' + email + '</span>';
+  document.getElementById('btn-login').style.display    = 'none';
+  document.getElementById('btn-signout').style.display  = 'inline-block';
+  document.getElementById('btn-history').style.display  = 'inline-block';
+  closeAuth();
+}
+
+function clearUser() {
+  currentUser = null;
+  document.getElementById('user-info').innerHTML = 'Not signed in';
+  document.getElementById('btn-login').style.display    = 'inline-block';
+  document.getElementById('btn-signout').style.display  = 'none';
+  document.getElementById('btn-history').style.display  = 'none';
+}
+
 // ── Auth modal ────────────────────────────────────────────────
 function openAuth() {
   document.getElementById('auth-overlay').classList.add('active');
@@ -1218,7 +1199,7 @@ function goToHistory() {
 
 // ── Game saving ───────────────────────────────────────────────
 async function saveGame(pgn, result, playerColor) {
-  if (!currentUser) return; // not logged in, skip silently
+  if (!currentUser || !sb) return; // ← add !sb here
 
   const { error } = await sb.from('games').insert({
     user_id:      currentUser.id,
@@ -1234,10 +1215,58 @@ async function saveGame(pgn, result, playerColor) {
 
 // ── PGN builder from chess.js game ───────────────────────────
 function buildPGN(chessGame, result) {
+  return chessGame.pgn({ max_width: 80, newline_char: '\n' });
+}
+
+// ── Init auth ─────────────────────────────────────────────────
+if (sb) {
+  sb.auth.getSession().then(({ data }) => {
+    if (data.session) setUser(data.session.user);
+  });
+  sb.auth.onAuthStateChange((event, session) => {
+    if (session) setUser(session.user);
+    else clearUser();
+  });
+}
+
+// ── PGN builder from chess.js game ───────────────────────────
+function buildPGN(chessGame, result) {
   // chess.js has a pgn() method built in
   return chessGame.pgn({ max_width: 80, newline_char: '\n' });
 }
-  
+</script>
+
+<!-- Auth Modal -->
+<div class="auth-overlay" id="auth-overlay">
+  <div class="auth-card" style="position:relative;">
+    <button class="auth-close" onclick="closeAuth()">×</button>
+    <div class="auth-title" id="auth-title">Sign In</div>
+    <div class="auth-subtitle">Save your games and track your progress.</div>
+
+    <input class="auth-input" type="email" id="auth-email" placeholder="Email address" />
+    <input class="auth-input" type="password" id="auth-password" placeholder="Password" />
+
+    <div class="auth-error" id="auth-error"></div>
+
+    <button class="auth-btn" id="auth-submit-btn" onclick="handleAuth()">Sign In</button>
+
+    <div class="auth-divider">or</div>
+
+    <button class="google-btn" onclick="signInWithGoogle()">
+      <svg width="16" height="16" viewBox="0 0 24 24">
+        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+      </svg>
+      Continue with Google
+    </button>
+
+    <div class="auth-toggle" id="auth-toggle">
+      No account? <span onclick="toggleAuthMode()">Create one</span>
+    </div>
+  </div>
+</div>
 </body>
 </html>
 

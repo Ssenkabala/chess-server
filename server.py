@@ -146,6 +146,17 @@ async def get_move(req: MoveRequest):
     async with engine_semaphore:
         try:
             board = chess.Board(req.fen)
+            # Don't run engine on finished positions
+            if board.is_game_over():
+                return {
+                    "move": None,
+                    "fen": req.fen,
+                    "is_game_over": True,
+                    "outcome": str(board.outcome()),
+                    "score_cp": 0,
+                    "eval_pawns": 0,
+                    "candidates": []
+                }
 
             # Instance 1: get the best move
             with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
@@ -567,6 +578,10 @@ def landing():
 @app.get("/logo.png")
 def logo():
     return FileResponse("logo.png")
+
+@app.get("/history")
+def history():
+    return FileResponse("history.html")
 
 
 

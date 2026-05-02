@@ -696,16 +696,20 @@ function getEngineMove() {
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
+    // Always update board first
+    if (data.fen) {
+      game.load(data.fen);
+      board.position(data.fen);
+      updateCapturedPieces();
+    }
+    renderCandidates(data.candidates);
+    engineThinking = false;
+    
+    // Then check game over
     if (data.is_game_over) { 
-      if (data.fen) game.load(data.fen);
       showResult(); 
       return; 
     }
-    game.load(data.fen);
-    board.position(data.fen);
-    updateCapturedPieces();
-    renderCandidates(data.candidates);
-    engineThinking = false;
     setStatus('Your move.');
   })
   .catch(function() {

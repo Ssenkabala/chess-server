@@ -459,6 +459,14 @@
       font-size: 11px;
       letter-spacing: 0.08em;
     }
+        @media (max-width: 600px) {
+      #board, #analysis-board { width: calc(100vw - 32px); }
+      .captured-bar, .user-bar, .candidates-wrap,
+      .eval-bar-wrap, .eval-label, #coach-card { width: calc(100vw - 32px); }
+      .tab-btn { padding: 9px 16px; font-size: 11px; }
+      .controls { gap: 8px; }
+      button { padding: 8px 14px; font-size: 12px; }
+    }
   </style>
 </head>
 <body>
@@ -623,6 +631,7 @@ var playerColor = 'w';
 var engineThinking = false;
 var selectedSquare = null;
 var gameStarted = false;
+var moveHistory = []; 
 
 function setStatus(msg) { document.getElementById('status').textContent = msg; }
 
@@ -657,6 +666,7 @@ function onDrop(source, target) {
   selectedSquare = null;
   var move = game.move({ from: source, to: target, promotion: 'q' });
   if (move === null) return 'snapback';
+  moveHistory.push(move.san);
   updateCapturedPieces();
   if (game.game_over()) { showResult(); return; }
   setStatus('Engine thinking...');
@@ -680,6 +690,7 @@ function onSquareClick(square) {
     clearHighlights();
     selectedSquare = null;
     if (move === null) return;
+    moveHistory.push(move.san);
     board.position(game.fen());
     if (game.game_over()) { showResult(); return; }
     setStatus('Engine thinking...');
@@ -698,6 +709,16 @@ function getEngineMove() {
   .then(function(data) {
     // Always update board first
     if (data.fen) {
+      // Get SAN before loading new position
+      if (data.move) {
+        var tempGame = new Chess(game.fen());
+        var engineMove = tempGame.move({
+          from: data.move.slice(0,2),
+          to:   data.move.slice(2,4),
+          promotion: data.move[4] || 'q'
+        });
+        if (engineMove) moveHistory.push(engineMove.san);
+      }
       game.load(data.fen);
       board.position(data.fen);
       updateCapturedPieces();
@@ -746,6 +767,7 @@ function showResult() {
 }
 
 function startGame(color) {
+  moveHistory = [];
   playerColor = (color === 'white') ? 'w' : 'b';
   gameStarted = true;
   engineThinking = false;
@@ -1099,15 +1121,6 @@ try {
 let currentUser = null;
 let authMode    = 'signin'; // 'signin' | 'signup'
 
-// ── Init: check if already logged in ─────────────────────────
-sb.auth.getSession().then(({ data }) => {
-  if (data.session) setUser(data.session.user);
-});
-
-sb.auth.onAuthStateChange((event, session) => {
-  if (session) setUser(session.user);
-  else clearUser();
-});
 
 // ── User state ────────────────────────────────────────────────
 function setUser(user) {
@@ -1219,7 +1232,13 @@ async function saveGame(pgn, result, playerColor) {
 
 // ── PGN builder from chess.js game ───────────────────────────
 function buildPGN(chessGame, result) {
-  return chessGame.pgn({ max_width: 80, newline_char: '\n' });
+  // Rebuild PGN from tracked move history
+  var pgn = '';
+  moveHistory.forEach(function(san, i) {
+    if (i % 2 === 0) pgn += (Math.floor(i/2) + 1) + '. ';
+    pgn += san + ' ';
+  });
+  return pgn.trim();
 }
 
 // ── Init auth ─────────────────────────────────────────────────
@@ -1233,11 +1252,6 @@ if (sb) {
   });
 }
 
-// ── PGN builder from chess.js game ───────────────────────────
-function buildPGN(chessGame, result) {
-  // chess.js has a pgn() method built in
-  return chessGame.pgn({ max_width: 80, newline_char: '\n' });
-}
 </script>
 
 <!-- Auth Modal -->

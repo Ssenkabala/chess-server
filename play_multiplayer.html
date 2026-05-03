@@ -8,6 +8,7 @@
   <script src="jquery.min.js"></script>
   <script src="chessboard-1.0.0.min.js"></script>
   <script src="chess.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -344,6 +345,21 @@
   </div>
 
 <script>
+const SUPABASE_URL  = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
+const SUPABASE_ANON = 'sb_publishable_g5BEYnjhPatfmnHG3jNQTQ_fzgKOy4s';
+let sb;
+try {
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+} catch(e) { sb = null; }
+
+let currentUser = null;
+let multiMoveHistory = [];
+
+if (sb) {
+  sb.auth.getSession().then(({ data }) => {
+    if (data.session) currentUser = data.session.user;
+  });
+}
 // ═══════════════════════════════════════════════════════════════
 //  CONFIG
 // ═══════════════════════════════════════════════════════════════
@@ -472,17 +488,6 @@ function startGame() {
 function onGameMessage(e) {
   const msg = JSON.parse(e.data);
 
-  if (msg.type === 'move') {
-    game.load(msg.fen);
-    board.position(msg.fen, false);
-    highlightLastMove(msg.move);
-    updateClocks(msg.clock);
-    myTurn = msg.turn === myColor;
-    updateTurnIndicator();
-    appendMove(msg.move);
-    clearHighlights();
-  }
-
   if (msg.type === 'clock') {
     clocks.white = msg.white;
     clocks.black = msg.black;
@@ -503,6 +508,17 @@ function onGameMessage(e) {
 
   if (msg.type === 'error') {
     showGameStatus('⚠ ' + msg.detail);
+  }
+  if (msg.type === 'move') {
+    game.load(msg.fen);
+    board.position(msg.fen, false);
+    highlightLastMove(msg.move);
+    updateClocks(msg.clock);
+    myTurn = msg.turn === myColor;
+    updateTurnIndicator();
+    multiMoveHistory.push(msg.move);
+    appendMove(msg.move);
+    clearHighlights();
   }
 }
 
@@ -714,6 +730,27 @@ function showOverlay(result, reason) {
     title.textContent = 'You Lose';
   }
   reasonEl.textContent = reasonText;
+
+  // Save multiplayer game
+  if (sb && currentUser && multiMoveHistory.length > 0) {
+    var pgn = '';
+    multiMoveHistory.forEach(function(uci, i) {
+      if (i % 2 === 0) pgn += (Math.floor(i/2) + 1) + '. ';
+      pgn += uci + ' ';
+    });
+    sb.from('games').insert({
+      user_id:      currentUser.id,
+      pgn:          pgn.trim(),
+      result:       result,
+      player_color: myColor,
+      opponent:     'human'
+    }).then(function(res) {
+      if (res.error) console.error('Multiplayer save failed:', res.error.message);
+      else console.log('Multiplayer game saved.');
+    });
+  }
+  // Reset for next game
+  multiMoveHistory = [];
 }
 
 // ═══════════════════════════════════════════════════════════════

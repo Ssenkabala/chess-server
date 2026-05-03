@@ -436,6 +436,15 @@ function cancelLobby() {
   gameId = null;
   location.href = '/';
 }
+// Prevent page scroll when dragging pieces on mobile
+document.addEventListener('DOMContentLoaded', function() {
+  var boardEl = document.getElementById('board');
+  if (boardEl) {
+    boardEl.addEventListener('touchmove', function(e) {
+      e.preventDefault();
+    }, { passive: false });
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  GAME INIT
@@ -454,7 +463,7 @@ function startGame() {
 
   // Board orientation
   board = Chessboard('board', {
-    draggable: true,
+    draggable: !isMobile(),
     position: 'start',
     orientation: myColor,
     pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
@@ -584,6 +593,9 @@ function onSquareClick(square) {
     updateTurnIndicator();
     sendGame({ type: 'move', move: move.from + move.to + (move.promotion || '') });
   }
+}
+function isMobile() {
+  return window.innerWidth <= 600;
 }
 
 // ═══════════════════════════════════════════════════════════════

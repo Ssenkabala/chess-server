@@ -459,13 +459,15 @@
       font-size: 11px;
       letter-spacing: 0.08em;
     }
-        @media (max-width: 600px) {
+    @media (max-width: 600px) {
       #board, #analysis-board { width: calc(100vw - 32px); }
       .captured-bar, .user-bar, .candidates-wrap,
       .eval-bar-wrap, .eval-label, #coach-card { width: calc(100vw - 32px); }
-      .tab-btn { padding: 9px 16px; font-size: 11px; }
-      .controls { gap: 8px; }
-      button { padding: 8px 14px; font-size: 12px; }
+      .tab-btn { padding: 9px 12px; font-size: 10px; letter-spacing: 0.06em; }
+      .controls { gap: 6px; }
+      button { padding: 7px 10px; font-size: 11px; letter-spacing: 0.06em; }
+      .user-actions button { padding: 4px 10px; font-size: 10px; }
+      .analysis-input-row, .api-row { width: calc(100vw - 32px); }
     }
   </style>
 </head>
@@ -585,7 +587,16 @@
 <!-- ══════════════════ SCRIPTS ══════════════════ -->
 <script>
 
-  
+// Prevent page scroll when dragging pieces on mobile
+document.addEventListener('DOMContentLoaded', function() {
+  var boardEl = document.getElementById('board');
+  if (boardEl) {
+    boardEl.addEventListener('touchmove', function(e) {
+      e.preventDefault();
+    }, { passive: false });
+  }
+});
+
 const API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
   ? 'http://127.0.0.1:8000'
   : 'https://' + location.hostname;
@@ -777,7 +788,7 @@ function startGame(color) {
   document.getElementById('btn-black').classList.toggle('active', color === 'black');
   $('#board').empty();
   board = Chessboard('board', {
-    draggable: true,
+    draggable: !isMobile(),   // ← disable drag on mobile
     position: 'start',
     orientation: color,
     pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
@@ -800,6 +811,10 @@ function startGame(color) {
 function resetGame() {
   if (!gameStarted) return;
   startGame(playerColor === 'w' ? 'white' : 'black');
+}
+
+function isMobile() {
+  return window.innerWidth <= 600;
 }
 
 function updateCapturedPieces() {

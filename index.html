@@ -459,24 +459,108 @@
       font-size: 11px;
       letter-spacing: 0.08em;
     }
+    /* ── Top bar ── */
+    .top-bar {
+      width: 100%;
+      max-width: 520px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 0 8px;
+    }
+    .top-logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: 400;
+      letter-spacing: 0.15em;
+      color: #888;
+      text-transform: uppercase;
+    }
+
+    /* ── Hamburger ── */
+    .hamburger {
+      display: none;
+      flex-direction: column;
+      gap: 5px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 6px;
+    }
+    .hamburger span {
+      display: block;
+      width: 22px;
+      height: 2px;
+      background: #555;
+      border-radius: 2px;
+      transition: all 0.3s;
+    }
+    .hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .hamburger.open span:nth-child(2) { opacity: 0; }
+    .hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+    /* ── Mobile drawer ── */
+    .mobile-menu {
+      display: none;
+      position: fixed;
+      top: 0; right: 0;
+      width: 240px;
+      height: 100vh;
+      background: #0d0d0d;
+      border-left: 1px solid #222;
+      flex-direction: column;
+      padding: 72px 28px 28px;
+      gap: 24px;
+      z-index: 55;
+    }
+    .mobile-menu.open { display: flex; }
+    .mobile-menu a {
+      color: #888;
+      text-decoration: none;
+      font-size: 13px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      transition: color 0.2s;
+    }
+    .mobile-menu a:hover { color: #00ff9d; }
+
+    .nav-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 54;
+    }
+    .nav-overlay.open { display: block; }
+
     @media (max-width: 600px) {
-      #board, #analysis-board { width: calc(100vw - 32px); }
-      .captured-bar, .user-bar, .candidates-wrap,
-      .eval-bar-wrap, .eval-label, #coach-card { width: calc(100vw - 32px); }
-      .tab-btn { padding: 9px 12px; font-size: 10px; letter-spacing: 0.06em; }
-      .controls { gap: 6px; }
-      button { padding: 7px 10px; font-size: 11px; letter-spacing: 0.06em; }
-      .user-actions button { padding: 4px 10px; font-size: 10px; }
-      .analysis-input-row, .api-row { width: calc(100vw - 32px); }
+      .hamburger { display: flex; }
     }
   </style>
 </head>
 <body>
 
-  <div class="nav-logo" style="display:flex;align-items:center;gap:10px;justify-content:center;">
-    <img src="/logo.png" height="38" alt="AfriChess logo">
-    <span style="font-size:22px;font-weight:400;letter-spacing:0.15em;color:#888;text-transform:uppercase;">Afri<span style="color:#00d98b">Chess</span></span>
+  <div class="top-bar">
+    <a href="/" class="top-logo">
+      <img src="/logo.png" height="32" alt="AfriChess">
+      <span>Afri<span style="color:#00d98b">Chess</span></span>
+    </a>
+    <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
+      <span></span><span></span><span></span>
+    </button>
   </div>
+
+<!-- Mobile menu drawer -->
+<div class="mobile-menu" id="mobile-menu">
+  <a href="/">Home</a>
+  <a href="/multiplayer">Play Live</a>
+  <a href="/history">My Games</a>
+  <a href="#" onclick="openAuth(); toggleMobileMenu();">Sign In</a>
+</div>
+<div class="nav-overlay" id="nav-overlay" onclick="toggleMobileMenu()"></div>
 
   <!-- Tab switcher -->
   <div class="tabs">
@@ -1266,7 +1350,36 @@ if (sb) {
     else clearUser();
   });
 }
+function toggleMobileMenu() {
+  document.getElementById('mobile-menu').classList.toggle('open');
+  document.getElementById('hamburger').classList.toggle('open');
+  document.getElementById('nav-overlay').classList.toggle('open');
+}
+// ── Load position from URL (from history page) ────────────────
+(function checkUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  const fen = params.get('analyse');
+  if (!fen) return;
 
+  // Switch to analysis tab
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-analysis').classList.add('active');
+  document.querySelectorAll('.tab-btn')[1].classList.add('active');
+
+  // Load the FEN
+  setTimeout(function() {
+    if (!analysisBoard) initAnalysisBoard();
+    var test = new Chess();
+    if (test.load(decodeURIComponent(fen))) {
+      analysisGame = test;
+      analysisBoard.position(decodeURIComponent(fen));
+      document.getElementById('fen-input').value = decodeURIComponent(fen);
+      document.getElementById('analysis-status').textContent =
+        'Position loaded from saved game. Press Analyse or Coach Me.';
+    }
+  }, 300);
+})();
 </script>
 
 <!-- Auth Modal -->

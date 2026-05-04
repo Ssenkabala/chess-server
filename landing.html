@@ -475,14 +475,59 @@
     }
     .reveal.visible { opacity: 1; transform: translateY(0); }
 
-    @media (max-width: 900px) {
-      nav { padding: 20px 24px; }
-      .hero { grid-template-columns: 1fr; padding: 100px 24px 60px; }
-      .hero-board { display: none; }
-      section { padding: 70px 24px; }
-      .features-grid, .pricing-grid, .stats-row { grid-template-columns: 1fr; }
-      .api-section { grid-template-columns: 1fr; }
-      footer { flex-direction: column; gap: 20px; text-align: center; padding: 30px 24px; }
+    /* ── Hamburger ── */
+    .hamburger {
+      display: none;
+      flex-direction: column;
+      gap: 5px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 8px;
+      z-index: 60;
+    }
+    .hamburger span {
+      display: block;
+      width: 24px;
+      height: 2px;
+      background: var(--text, #ccc8be);
+      border-radius: 2px;
+      transition: all 0.3s;
+    }
+    .hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .hamburger.open span:nth-child(2) { opacity: 0; }
+    .hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+    @media (max-width: 768px) {
+      .hamburger { display: flex; }
+      .nav-links {
+        display: none;
+        position: fixed;
+        top: 0; right: 0;
+        width: 260px;
+        height: 100vh;
+        background: #0d0d0d;
+        border-left: 1px solid #1a1a1a;
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 80px 32px 32px;
+        gap: 28px;
+        z-index: 55;
+        box-shadow: -8px 0 32px rgba(0,0,0,0.5);
+      }
+      .nav-links.open { display: flex; }
+      .nav-links a { font-size: 14px; letter-spacing: 0.15em; }
+      .nav-cta { width: 100%; text-align: center; margin-top: 8px; }
+
+      /* Overlay behind drawer */
+      .nav-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.6);
+        z-index: 54;
+      }
+      .nav-overlay.open { display: block; }
     }
   </style>
 </head>
@@ -497,13 +542,20 @@
     <img src="/logo.png" height="38" alt="AfriChess logo">
     <span>Afri<span style="color:#00d98b">Chess</span></span>
   </div>
-  <div class="nav-links">
+
+  <!-- Desktop links -->
+  <div class="nav-links" id="nav-links">
     <a href="#features">Features</a>
     <a href="#pricing">Pricing</a>
     <a href="#api">API</a>
     <a href="/multiplayer">Play Live</a>
     <a href="/play" class="nav-cta">Play Now</a>
   </div>
+
+  <!-- Hamburger button -->
+  <button class="hamburger" id="hamburger" onclick="toggleNav()" aria-label="Menu">
+    <span></span><span></span><span></span>
+  </button>
 </nav>
 
 <!-- HERO -->
@@ -724,6 +776,31 @@
     entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
   }, { threshold: 0.15 });
   document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+  
 </script>
+<div class="nav-overlay" id="nav-overlay" onclick="toggleNav()"></div>
+
+<script>
+function toggleNav() {
+  const links    = document.getElementById('nav-links');
+  const burger   = document.getElementById('hamburger');
+  const overlay  = document.getElementById('nav-overlay');
+  links.classList.toggle('open');
+  burger.classList.toggle('open');
+  overlay.classList.toggle('open');
+  document.body.style.overflow = links.classList.contains('open') ? 'hidden' : '';
+}
+
+// Close on link click
+document.querySelectorAll('.nav-links a').forEach(function(a) {
+  a.addEventListener('click', function() {
+    document.getElementById('nav-links').classList.remove('open');
+    document.getElementById('hamburger').classList.remove('open');
+    document.getElementById('nav-overlay').classList.remove('open');
+    document.body.style.overflow = '';
+  });
+});
+</script>
+
 </body>
 </html>

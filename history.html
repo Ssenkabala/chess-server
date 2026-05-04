@@ -316,6 +316,11 @@
       <span class="move-counter" id="move-counter">0 / 0</span>
       <button class="replay-btn" id="btn-next"   onclick="replayNext()">⟩</button>
       <button class="replay-btn" id="btn-end"    onclick="replayGoto(9999)">⟩⟩</button>
+      <button class="replay-btn" onclick="analyseCurrentPosition()" 
+        id="btn-analyse"
+        style="font-size:11px;padding:8px 14px;letter-spacing:0.1em;display:none;">
+        Analyse
+      </button>
     </div>
 
     <div class="move-list-wrap" id="move-list-wrap" style="display:none;">
@@ -407,6 +412,7 @@ async function loadGames(userId) {
 
 // ── Replay ────────────────────────────────────────────────────
 function openReplay(g) {
+  document.getElementById('btn-analyse').style.display = 'inline-block';
   // Highlight active
   document.querySelectorAll('.game-item').forEach(el => el.classList.remove('active'));
   document.getElementById('game-' + g.id).classList.add('active');
@@ -464,6 +470,12 @@ function updateReplayControls() {
   document.getElementById('btn-start').disabled = replayIdx === 0;
   document.getElementById('btn-next').disabled  = replayIdx === replayMoves.length;
   document.getElementById('btn-end').disabled   = replayIdx === replayMoves.length;
+}
+function analyseCurrentPosition() {
+  const chess = new Chess();
+  for (let i = 0; i < replayIdx; i++) chess.move(replayMoves[i]);
+  const fen = chess.fen();
+  window.location.href = '/play?analyse=' + encodeURIComponent(fen);
 }
 
 function renderMoveList() {

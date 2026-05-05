@@ -791,13 +791,29 @@ function toggleNav() {
   document.body.style.overflow = links.classList.contains('open') ? 'hidden' : '';
 }
 
-// Close on link click
+// Close menu on link click — let the navigation happen first
 document.querySelectorAll('.nav-links a').forEach(function(a) {
-  a.addEventListener('click', function() {
+  a.addEventListener('click', function(e) {
+    var href = this.getAttribute('href') || '';
+    var isAnchor = href.startsWith('#');
+
+    // Close the menu
     document.getElementById('nav-links').classList.remove('open');
     document.getElementById('hamburger').classList.remove('open');
     document.getElementById('nav-overlay').classList.remove('open');
     document.body.style.overflow = '';
+
+    if (isAnchor) {
+      // Anchor link — scroll to section manually so menu close doesn't interfere
+      e.preventDefault();
+      var target = document.querySelector(href);
+      if (target) {
+        setTimeout(function() {
+          target.scrollIntoView({ behavior: 'smooth' });
+        }, 50);
+      }
+    }
+    // Non-anchor links (e.g. /play, /multiplayer) navigate normally
   });
 });
 </script>

@@ -28,7 +28,45 @@ app.add_middleware(
 )
 
 ENGINE_PATH = "./engines/engine.exe" if os.name == "nt" else "./engines/engine"
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
+ANTHROPIC_API_KEY    = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
+SUPABASE_URL         = os.getenv("SUPABASE_URL", "https://nbskgzsvygdmlvwbetxn.supabase.co")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")  # set on Railway
+
+# ─── Supabase admin client (service role — bypasses RLS) ─────────────────────
+import httpx
+
+async def supabase_get_profile(user_id: str) -> dict | None:
+    """Fetch profile by user_id using service role key."""
+    if not SUPABASE_SERVICE_KEY:
+        return None
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{user_id}", "select": "username,elo"},
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            }
+        )
+        rows = r.json()
+        return rows[0] if rows else None
+
+async def supabase_update_elo(user_id: str, new_elo: int):
+    """Update ELO for a user using service role key."""
+    if not SUPABASE_SERVICE_KEY:
+        return
+    async with httpx.AsyncClient() as client:
+        await client.patch(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{user_id}"},
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+            json={"elo": new_elo}
+        )
 
 # ─── Database setup ───────────────────────────────────────────────────────────
 
@@ -293,6 +331,42 @@ CLOCK_SECONDS = 300             # 5 minutes each side
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+# ─── ELO calculation ──────────────────────────────────────────────────────────
+
+def calc_elo(my_elo: int, opp_elo: int, result: str, my_color: str, winner_color: str) -> int:
+    """
+    Your formula:
+    - Base ±7 for same tier (within 100 ELO)
+    - Each tier above opponent: multiply remaining by +50% (rounded up)
+    - Each tier below: multiply by -50% (rounded up)
+    Returns new ELO.
+    """
+    import math
+
+    diff   = my_elo - opp_elo
+    tiers  = diff // 100          # positive = I am higher, negative = I am lower
+    base   = 7
+
+    if result == 'draw':
+        effect = 0
+    elif winner_color == my_color:
+        # I won
+        if tiers >= 0:
+            effect = base * (1.5 ** tiers)
+        else:
+            effect = base * (0.5 ** abs(tiers))
+        effect = math.ceil(effect)
+    else:
+        # I lost
+        if tiers <= 0:
+            effect = -base * (1.5 ** abs(tiers))
+        else:
+            effect = -base * (0.5 ** tiers)
+        effect = -math.ceil(abs(effect))
+
+    return max(100, my_elo + effect)   # floor at 100
+
+
 def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
              white_id: str, black_id: str) -> dict:
     return {
@@ -305,6 +379,9 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
         "clock":        {"w": CLOCK_SECONDS, "b": CLOCK_SECONDS},
         "last_move_ts": time.time(),
         "over":         False,
+        # Profile data filled in when players send 'profile' message
+        "white_profile": None,   # {username, elo, user_id}
+        "black_profile": None,
     }
 
 
@@ -355,6 +432,7 @@ async def clock_loop(game_id: str):
                 "reason": "timeout",
                 "clock":  game["clock"],
             })
+            await update_elos(game, winner)
             active_games.pop(game_id, None)
             return
 
@@ -376,6 +454,48 @@ def validate_and_push(game: dict, uci_move: str) -> chess.Move | None:
     except Exception:
         pass
     return None
+
+
+# ─── ELO update helper ───────────────────────────────────────────────────────
+
+async def update_elos(game: dict, result: str):
+    """
+    Calculate and persist ELO changes for both players.
+    Only runs if both players have profiles with user_ids.
+    Sends elo_update message to each player.
+    """
+    wp = game.get("white_profile")
+    bp = game.get("black_profile")
+
+    # Both must be logged-in users with ELO
+    if not wp or not bp:
+        return
+    if not wp.get("user_id") or not bp.get("user_id"):
+        return
+    if wp.get("elo") is None or bp.get("elo") is None:
+        return
+
+    w_elo_old = wp["elo"]
+    b_elo_old = bp["elo"]
+
+    w_elo_new = calc_elo(w_elo_old, b_elo_old, result, "white", result)
+    b_elo_new = calc_elo(b_elo_old, w_elo_old, result, "black", result)
+
+    # Persist to Supabase
+    await supabase_update_elo(wp["user_id"], w_elo_new)
+    await supabase_update_elo(bp["user_id"], b_elo_new)
+
+    # Notify players
+    await send(game["white_ws"], {
+        "type":    "elo_update",
+        "old_elo": w_elo_old,
+        "new_elo": w_elo_new,
+    })
+    await send(game["black_ws"], {
+        "type":    "elo_update",
+        "old_elo": b_elo_old,
+        "new_elo": b_elo_new,
+    })
 
 
 # ── WebSocket: Lobby (matchmaking) ────────────────────────────────────────────
@@ -456,6 +576,33 @@ async def game_ws(ws: WebSocket, game_id: str):
 
             msg_type = data.get("type")
 
+            # ── Keepalive ping (ignore) ───────────────────────────────────────
+            if msg_type == "ping":
+                continue
+
+            # ── Profile (sent on connect) ─────────────────────────────────────
+            if msg_type == "profile":
+                profile = {
+                    "username": data.get("username", "guest"),
+                    "elo":      data.get("elo"),
+                    "user_id":  data.get("user_id"),
+                }
+                if color == "w":
+                    game["white_profile"] = profile
+                    await send(game["black_ws"], {
+                        "type":     "opponent_profile",
+                        "username": profile["username"],
+                        "elo":      profile["elo"],
+                    })
+                else:
+                    game["black_profile"] = profile
+                    await send(game["white_ws"], {
+                        "type":     "opponent_profile",
+                        "username": profile["username"],
+                        "elo":      profile["elo"],
+                    })
+                continue
+
             # ── Move ──────────────────────────────────────────────────────────
             if msg_type == "move":
                 # Only the player whose turn it is can move
@@ -491,6 +638,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                         "fen":    fen,
                         "clock":  game["clock"],
                     })
+                    await update_elos(game, result)
                     active_games.pop(game_id, None)
                 else:
                     await broadcast(game, {
@@ -511,6 +659,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                     "reason": "resignation",
                     "clock":  game["clock"],
                 })
+                await update_elos(game, winner)
                 active_games.pop(game_id, None)
 
             # ── Draw offer (future) ───────────────────────────────────────────
@@ -526,6 +675,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                     "reason": "agreement",
                     "clock":  game["clock"],
                 })
+                await update_elos(game, "draw")
                 active_games.pop(game_id, None)
 
     except WebSocketDisconnect:

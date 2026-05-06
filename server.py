@@ -737,6 +737,31 @@ def logo():
 def history():
     return FileResponse("history.html")
 
+@app.get("/chessboard-1.0.0.min.css")
+def cb_css():
+    return FileResponse("chessboard-1.0.0.min.css")
+
+@app.get("/chessboard-1.0.0.min.js")
+def cb_js():
+    return FileResponse("chessboard-1.0.0.min.js")
+
+@app.get("/jquery.min.js")
+def jquery():
+    return FileResponse("jquery.min.js")
+
+@app.get("/chess.min.js")
+def chess_js():
+    return FileResponse("chess.min.js")
+
+import os
+
+@app.get("/debug-files")
+def debug_files():
+    return {
+        "cwd": os.getcwd(),
+        "files": os.listdir(".")
+    }
+
 
 
 

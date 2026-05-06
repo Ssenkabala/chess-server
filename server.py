@@ -95,9 +95,12 @@ TIER_LIMITS = {
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
+DIFFICULTY_THINK_TIME = {1: 0.1, 2: 0.3, 3: 0.7, 4: 1.5, 5: 3.0}
+
 class MoveRequest(BaseModel):
     fen: str
     think_time: float = 1.0
+    difficulty: int = 3  # 1=Beginner → 5=Expert
 
 class CoachRequest(BaseModel):
     fen: str
@@ -197,8 +200,9 @@ async def get_move(req: MoveRequest):
                 }
 
             # Instance 1: get the best move
+            think = DIFFICULTY_THINK_TIME.get(req.difficulty, req.think_time)
             with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-                result = engine.play(board, chess.engine.Limit(time=req.think_time))
+                result = engine.play(board, chess.engine.Limit(time=think))
                 move = result.move
 
             # Instance 2: get candidates separately

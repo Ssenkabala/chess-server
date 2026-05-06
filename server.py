@@ -356,6 +356,10 @@ def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str) -> int
 
     return max(100, my_elo + int(effect))
 
+async def cleanup_game(game_id: str, delay: int = 10):
+    await asyncio.sleep(delay)
+    active_games.pop(game_id, None)
+
 
 def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
              white_id: str, black_id: str) -> dict:
@@ -674,7 +678,8 @@ async def game_ws(ws: WebSocket, game_id: str):
                     "clock":  game["clock"],
                 })
                 await update_elos(game, winner)
-                active_games.pop(game_id, None)
+                # Keep game alive briefly for rematch negotiation
+                asyncio.create_task(cleanup_game(game_id, delay=10))
 
             # ── Draw offer (future) ───────────────────────────────────────────
             elif msg_type == "draw_offer":
@@ -690,7 +695,8 @@ async def game_ws(ws: WebSocket, game_id: str):
                     "clock":  game["clock"],
                 })
                 await update_elos(game, "draw")
-                active_games.pop(game_id, None)
+                # Keep game alive briefly for rematch negotiation
+                asyncio.create_task(cleanup_game(game_id, delay=10))
             
             elif msg_type == "rematch_offer":
                 game["rematch_offered_by"] = color
@@ -720,7 +726,8 @@ async def game_ws(ws: WebSocket, game_id: str):
                     "type": "rematch_start", "game_id": new_game_id, "color": "black"
                 })
                 asyncio.create_task(clock_loop(new_game_id))
-                active_games.pop(game_id, None)
+                # Keep game alive briefly for rematch negotiation
+                asyncio.create_task(cleanup_game(game_id, delay=10))
 
             elif msg_type == "rematch_decline":
                 opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]

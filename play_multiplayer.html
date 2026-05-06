@@ -695,13 +695,18 @@ function onGameMessage(e) {
   }
 
   if (msg.type === 'rematch_start') {
-    // Keep session score, swap into new game
     gameId   = msg.game_id;
     myColor  = msg.color;
     gameOver = false;
+    sessionOpponentId = sessionOpponentId; // preserve session score
     document.getElementById('overlay').classList.remove('active');
-    // Reconnect game socket with new game_id
-    if (gameWs) { gameWs.close(); gameWs = null; }
+    // Don't close gameWs here — startGame() will open a new one
+    // Clear old socket cleanly
+    if (gameWs) {
+      gameWs.onclose = null; // prevent "connection lost" flash
+      gameWs.close();
+      gameWs = null;
+    }
     startGame();
   }
 }
@@ -892,6 +897,7 @@ function showOverlay(result, reason) {
   const title   = document.getElementById('result-title');
   const reasonEl = document.getElementById('result-reason');
 
+  if (overlay.classList.contains('active')) return; // already showing, don't double-count
   overlay.classList.add('active');
 
   const reasonText = {

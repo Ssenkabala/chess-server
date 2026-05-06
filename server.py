@@ -470,8 +470,8 @@ async def update_elos(game: dict, result: str):
     w_elo_old = wp["elo"]
     b_elo_old = bp["elo"]
 
-    w_elo_new = calc_elo(w_elo_old, b_elo_old, result, "white", result)
-    b_elo_new = calc_elo(b_elo_old, w_elo_old, result, "black", result)
+    w_elo_new = calc_elo(w_elo_old, b_elo_old, "white", result)
+    b_elo_new = calc_elo(b_elo_old, w_elo_old, "black", result)
 
     # Persist to Supabase
     await supabase_update_elo(wp["user_id"], w_elo_new)
@@ -558,23 +558,27 @@ async def game_ws(ws: WebSocket, game_id: str):
         # We'll resolve by slot: first to connect gets their slot
         pass
 
-    # Register the actual game WebSocket by slot order
-    if game.get("white_game_ws") is None:
-        game["white_game_ws"] = ws
-        color = "w"
-    elif game.get("black_game_ws") is None:
-        game["black_game_ws"] = ws
-        color = "b"
-    else:
-        await send(ws, {"type": "error", "detail": "Game already full."})
-        await ws.close()
-        return
+    # Thread-safe slot assignment
+    if not game.get("_lock"):
+        game["_lock"] = asyncio.Lock()
 
-    # Update references so broadcast uses the real game sockets
-    if color == "w":
-        game["white_ws"] = ws
-    else:
-        game["black_ws"] = ws
+    async with game["_lock"]:
+        if game.get("white_game_ws") is None:
+            game["white_game_ws"] = ws
+            game["white_ws"] = ws
+            color = "w"
+        elif game.get("black_game_ws") is None:
+            game["black_game_ws"] = ws
+            game["black_ws"] = ws
+            color = "b"
+        else:
+            await send(ws, {"type": "error", "detail": "Game already full."})
+            await ws.close()
+            return
+
+    # Notify both players once both are connected
+    if game.get("white_game_ws") and game.get("black_game_ws"):
+        await broadcast(game, {"type": "both_connected"})
 
     try:
         while True:
@@ -726,12 +730,15 @@ async def game_ws(ws: WebSocket, game_id: str):
         if not game["over"]:
             game["over"] = True
             winner = "black" if color == "w" else "white"
-            await broadcast(game, {
+            opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
+            # Send directly to opponent — broadcast may fail if our socket is dead
+            await send(opponent_ws, {
                 "type":   "gameover",
                 "result": winner,
                 "reason": "disconnect",
                 "clock":  game["clock"],
             })
+            await update_elos(game, winner)
             active_games.pop(game_id, None)
 
 

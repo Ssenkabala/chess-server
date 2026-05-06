@@ -437,6 +437,56 @@
       line-height: 1;
     }
     .auth-close:hover { color: #aaa; background: none; }
+    /* ── Username modal ── */
+    .username-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.92);
+      display: none; align-items: center; justify-content: center;
+      z-index: 300;
+    }
+    .username-overlay.active { display: flex; }
+    .username-card {
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-top: 3px solid #00ff9d;
+      border-radius: 4px;
+      padding: 40px 48px;
+      text-align: center;
+      display: flex; flex-direction: column; gap: 18px;
+      min-width: 300px; max-width: 360px;
+    }
+    .username-title {
+      font-size: 18px; letter-spacing: 0.1em;
+      color: #e8e6e0; text-transform: uppercase;
+    }
+    .username-sub {
+      font-size: 12px; color: #666;
+      letter-spacing: 0.06em; line-height: 1.6;
+    }
+    .username-input {
+      background: #111; border: 1px solid #2a2a2a;
+      color: #e8e6e0; padding: 12px 16px;
+      font-size: 15px; font-family: monospace;
+      border-radius: 2px; outline: none; text-align: center;
+      letter-spacing: 0.08em; width: 100%;
+      transition: border-color 0.2s;
+    }
+    .username-input:focus { border-color: #00ff9d55; }
+    .username-error {
+      font-size: 12px; color: #ff4d4d;
+      letter-spacing: 0.06em; min-height: 16px;
+    }
+    .username-btn {
+      padding: 12px 28px; background: #00ff9d;
+      color: #111; border: none; font-size: 14px;
+      font-family: Georgia, serif; font-weight: bold;
+      letter-spacing: 0.12em; cursor: pointer;
+      border-radius: 2px; text-transform: uppercase;
+      transition: background 0.2s; width: 100%;
+    }
+    .username-btn:hover { background: #00cc7a; }
+    .username-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 
     /* ── User bar (top of play panel) ── */
     .user-bar {
@@ -1224,13 +1274,71 @@ let authMode    = 'signin'; // 'signin' | 'signup'
 // ── User state ────────────────────────────────────────────────
 function setUser(user) {
   currentUser = user;
-  const email = user.email || 'Signed in';
-  document.getElementById('user-info').innerHTML =
-    'Signed in as <span>' + email + '</span>';
   document.getElementById('btn-login').style.display    = 'none';
   document.getElementById('btn-signout').style.display  = 'inline-block';
   document.getElementById('btn-history').style.display  = 'inline-block';
   closeAuth();
+  // Load profile to show username
+  loadProfile(user);
+}
+
+async function loadProfile(user) {
+  if (!sb || !user) return;
+  const { data } = await sb
+    .from('profiles')
+    .select('username, elo')
+    .eq('user_id', user.id)
+    .single();
+
+  if (data) {
+    document.getElementById('user-info').innerHTML =
+      '<span style="color:#00ff9d">' + data.username + '</span>' +
+      ' <span style="color:#444;font-size:11px;">' + data.elo + ' ELO</span>';
+  } else {
+    // No profile yet — show username modal
+    document.getElementById('user-info').innerHTML = 'Signed in';
+    document.getElementById('username-overlay').classList.add('active');
+    document.getElementById('username-input').focus();
+  }
+}
+
+async function submitUsername() {
+  const input  = document.getElementById('username-input');
+  const errEl  = document.getElementById('username-error');
+  const btn    = document.getElementById('username-btn');
+  const val    = input.value.trim();
+  errEl.textContent = '';
+
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(val)) {
+    errEl.textContent = 'Use 3–20 letters, numbers or underscores.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+
+  const { error } = await sb.from('profiles').insert({
+    user_id:  currentUser.id,
+    username: val,
+    elo:      1500
+  });
+
+  btn.disabled = false;
+  btn.textContent = 'Set Username';
+
+  if (error) {
+    if (error.code === '23505') {
+      errEl.textContent = 'That username is taken. Try another.';
+    } else {
+      errEl.textContent = 'Error: ' + error.message;
+    }
+    return;
+  }
+
+  document.getElementById('username-overlay').classList.remove('active');
+  document.getElementById('user-info').innerHTML =
+    '<span style="color:#00ff9d">' + val + '</span>' +
+    ' <span style="color:#444;font-size:11px;">1500 ELO</span>';
 }
 
 function clearUser() {
@@ -1413,6 +1521,19 @@ function toggleMobileMenu() {
     </div>
   </div>
 </div>
+  <!-- ══ USERNAME MODAL ══ -->
+  <div class="username-overlay" id="username-overlay">
+    <div class="username-card">
+      <div class="username-title">One last thing</div>
+      <div class="username-sub">Choose your username. This is permanent and cannot be changed.<br>3–20 characters — letters, numbers, underscores only.</div>
+      <input class="username-input" id="username-input" type="text"
+        maxlength="20" placeholder="your_username"
+        onkeydown="if(event.key==='Enter') submitUsername()" />
+      <div class="username-error" id="username-error"></div>
+      <button class="username-btn" id="username-btn" onclick="submitUsername()">Set Username</button>
+    </div>
+  </div>
+
 </body>
 </html>
 

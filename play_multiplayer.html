@@ -260,70 +260,6 @@
       letter-spacing: 0.1em;
     }
 
-
-    /* ── Username modal ── */
-    .modal-overlay {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.9);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 200;
-    }
-    .modal-overlay.hidden { display: none; }
-    .modal-card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-top: 3px solid var(--green);
-      border-radius: 4px;
-      padding: 40px 48px;
-      text-align: center;
-      display: flex; flex-direction: column; gap: 20px;
-      min-width: 300px; max-width: 360px;
-    }
-    .modal-title {
-      font-size: 18px; letter-spacing: 0.1em;
-      color: var(--text); text-transform: uppercase;
-    }
-    .modal-sub {
-      font-size: 12px; color: var(--muted);
-      letter-spacing: 0.06em; line-height: 1.6;
-    }
-    .modal-input {
-      background: #111; border: 1px solid var(--border);
-      color: var(--text); padding: 12px 16px;
-      font-size: 15px; font-family: monospace;
-      border-radius: 2px; outline: none; text-align: center;
-      letter-spacing: 0.08em; width: 100%;
-      transition: border-color 0.2s;
-    }
-    .modal-input:focus { border-color: var(--green); }
-    .modal-error {
-      font-size: 12px; color: var(--danger);
-      letter-spacing: 0.06em; min-height: 16px;
-    }
-    .btn-primary {
-      padding: 12px 28px; background: var(--green);
-      color: #111; border: none; font-size: 14px;
-      font-family: Georgia, serif; font-weight: bold;
-      letter-spacing: 0.12em; cursor: pointer;
-      border-radius: 2px; text-transform: uppercase;
-      transition: background 0.2s; width: 100%;
-    }
-    .btn-primary:hover { background: var(--green2); }
-    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
-
-    /* ── ELO badge in player bars ── */
-    .player-info { display: flex; flex-direction: column; gap: 2px; }
-    .player-elo {
-      font-size: 11px; color: #444;
-      letter-spacing: 0.1em; font-family: monospace;
-    }
-    .elo-change {
-      font-size: 11px; font-family: monospace;
-      letter-spacing: 0.05em;
-    }
-    .elo-change.gain { color: var(--green); }
-    .elo-change.loss { color: var(--danger); }
-
     /* Highlight */
     .highlight-move {
       background: rgba(0,255,157,0.22) !important;
@@ -367,10 +303,7 @@
 
       <!-- Opponent bar (top) -->
       <div class="player-bar" id="bar-opponent">
-        <div class="player-info">
-          <span class="player-name" id="name-opponent">Opponent</span>
-          <span class="player-elo" id="elo-opponent"></span>
-        </div>
+        <span class="player-name" id="name-opponent">Opponent</span>
         <span class="clock" id="clock-opponent">5:00</span>
       </div>
 
@@ -379,10 +312,7 @@
 
       <!-- My bar (bottom) -->
       <div class="player-bar" id="bar-me">
-        <div class="player-info">
-          <span class="player-name" id="name-me">You</span>
-          <span class="player-elo" id="elo-me"></span>
-        </div>
+        <span class="player-name" id="name-me">You</span>
         <span class="clock" id="clock-me">5:00</span>
       </div>
 
@@ -414,20 +344,6 @@
     </div>
   </div>
 
-  <!-- ══ USERNAME MODAL ══ -->
-  <div class="modal-overlay hidden" id="username-modal">
-    <div class="modal-card">
-      <div class="modal-title">Choose your username</div>
-      <div class="modal-sub">This is permanent and cannot be changed.<br>3–20 characters. Letters, numbers, underscores only.</div>
-      <input class="modal-input" id="username-input" type="text"
-        maxlength="20" placeholder="your_username"
-        onkeydown="if(event.key==='Enter') submitUsername()" />
-      <div class="modal-error" id="username-error"></div>
-      <button class="btn-primary" id="username-btn" onclick="submitUsername()">Set Username</button>
-    </div>
-  </div>
-
-
 <script>
 const SUPABASE_URL  = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
 const SUPABASE_ANON = 'sb_publishable_g5BEYnjhPatfmnHG3jNQTQ_fzgKOy4s';
@@ -437,11 +353,11 @@ try {
 } catch(e) { sb = null; }
 
 let currentUser = null;
-let myProfile   = null;   // { username, elo }
+let myProfile   = null;  // { username, elo }
 let multiMoveHistory = [];
 
 // ═══════════════════════════════════════════════════════════════
-//  AUTH + PROFILE BOOT
+//  AUTH + PROFILE
 // ═══════════════════════════════════════════════════════════════
 async function bootAuth() {
   if (!sb) { connectLobby(); return; }
@@ -449,73 +365,23 @@ async function bootAuth() {
   const { data } = await sb.auth.getSession();
   if (data.session) {
     currentUser = data.session.user;
-    await loadOrPromptProfile();
-  } else {
-    // Not logged in — play as guest
-    connectLobby();
-  }
-}
+    // Load profile
+    const { data: profile } = await sb
+      .from('profiles')
+      .select('username, elo')
+      .eq('user_id', currentUser.id)
+      .single();
 
-async function loadOrPromptProfile() {
-  const { data, error } = await sb
-    .from('profiles')
-    .select('username, elo')
-    .eq('user_id', currentUser.id)
-    .single();
-
-  if (data) {
-    myProfile = data;
-    connectLobby();
-  } else {
-    // First login — show username modal
-    showUsernameModal();
-  }
-}
-
-function showUsernameModal() {
-  document.getElementById('username-modal').classList.remove('hidden');
-  document.getElementById('username-input').focus();
-}
-
-function hideUsernameModal() {
-  document.getElementById('username-modal').classList.add('hidden');
-}
-
-async function submitUsername() {
-  const input = document.getElementById('username-input');
-  const errEl = document.getElementById('username-error');
-  const btn   = document.getElementById('username-btn');
-  const val   = input.value.trim();
-
-  errEl.textContent = '';
-
-  if (!/^[a-zA-Z0-9_]{3,20}$/.test(val)) {
-    errEl.textContent = 'Use 3–20 letters, numbers or underscores.';
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = 'Saving...';
-
-  const { error } = await sb.from('profiles').insert({
-    user_id:  currentUser.id,
-    username: val,
-    elo:      1500
-  });
-
-  if (error) {
-    if (error.code === '23505') {
-      errEl.textContent = 'That username is taken. Try another.';
+    if (profile) {
+      myProfile = profile;
     } else {
-      errEl.textContent = 'Error: ' + error.message;
+      // No profile — send them to play page to set username first
+      alert('Please set your username before playing multiplayer.');
+      window.location.href = '/play';
+      return;
     }
-    btn.disabled = false;
-    btn.textContent = 'Set Username';
-    return;
   }
-
-  myProfile = { username: val, elo: 1500 };
-  hideUsernameModal();
+  // Guest or logged-in with profile — both can enter lobby
   connectLobby();
 }
 // ═══════════════════════════════════════════════════════════════
@@ -628,9 +494,11 @@ function startGame() {
   const myName = myProfile ? myProfile.username : myId;
   const myElo  = myProfile ? myProfile.elo : null;
   document.getElementById('name-me').textContent = myName + ' (' + myColor + ')';
-  document.getElementById('elo-me').textContent  = myElo ? myElo + ' ELO' : '';
+  if (myElo) {
+    document.getElementById('name-me').innerHTML =
+      '<strong>' + myName + '</strong> <span style="font-size:11px;color:#444;">' + myElo + ' ELO</span> (' + myColor + ')';
+  }
   document.getElementById('name-opponent').textContent = 'Opponent (' + opponentColor + ')';
-  document.getElementById('elo-opponent').textContent  = '';
 
   // Board orientation
   board = Chessboard('board', {
@@ -663,13 +531,13 @@ function startGame() {
   // Connect game websocket
   gameWs = new WebSocket(WS_BASE + '/ws/game/' + gameId);
   gameWs.onopen = () => {
-    // Send profile so server can share with opponent
-    if (myProfile) {
+    // Send profile so server can share with opponent and calculate ELO
+    if (myProfile && currentUser) {
       gameWs.send(JSON.stringify({
         type:     'profile',
         username: myProfile.username,
         elo:      myProfile.elo,
-        user_id:  currentUser ? currentUser.id : null
+        user_id:  currentUser.id
       }));
     }
     // Keepalive — Railway kills idle connections after ~30s
@@ -702,24 +570,23 @@ function onGameMessage(e) {
   if (msg.type === 'ping' || msg.type === 'pong') return;
 
   if (msg.type === 'opponent_profile') {
-    document.getElementById('name-opponent').textContent =
-      msg.username + ' (' + (myColor === 'white' ? 'black' : 'white') + ')';
-    document.getElementById('elo-opponent').textContent =
-      msg.elo ? msg.elo + ' ELO' : '';
+    const opColor = myColor === 'white' ? 'black' : 'white';
+    document.getElementById('name-opponent').innerHTML =
+      '<strong>' + msg.username + '</strong>' +
+      (msg.elo ? ' <span style="font-size:11px;color:#444;">' + msg.elo + ' ELO</span>' : '') +
+      ' (' + opColor + ')';
+    return;
   }
 
   if (msg.type === 'elo_update') {
-    // Show ELO change in result card
     const change = msg.new_elo - msg.old_elo;
     const sign   = change >= 0 ? '+' : '';
-    const cls    = change >= 0 ? 'gain' : 'loss';
-    const card   = document.getElementById('result-reason');
-    card.innerHTML = card.textContent +
-      ' <span class="elo-change ' + cls + '">(' + sign + change +
-      ' ELO · now ' + msg.new_elo + ')</span>';
-    // Update local profile
+    const color  = change >= 0 ? '#00ff9d' : '#ff4d4d';
+    const el     = document.getElementById('result-reason');
+    if (el) el.innerHTML += ' <span style="color:' + color + ';font-size:12px;">' +
+      '(' + sign + change + ' ELO · now ' + msg.new_elo + ')</span>';
     if (myProfile) myProfile.elo = msg.new_elo;
-    document.getElementById('elo-me').textContent = msg.new_elo + ' ELO';
+    return;
   }
 
   if (msg.type === 'clock') {

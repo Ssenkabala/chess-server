@@ -589,6 +589,21 @@
     @media (max-width: 600px) {
       .hamburger { display: flex; }
     }
+
+    .diff-btn {
+      padding: 6px 14px;
+      background: transparent;
+      color: #555;
+      border: none;
+      border-right: 1px solid #333;
+      font-size: 13px;
+      font-family: 'Georgia', serif;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .diff-btn:last-child { border-right: none; }
+    .diff-btn:hover { color: #00ff9d; background: #1a1a1a; }
+    .diff-btn.active { background: #00ff9d22; color: #00ff9d; }
   </style>
 </head>
 <body>
@@ -621,6 +636,20 @@
   <!-- ══════════════════ PLAY PANEL ══════════════════ -->
   <div id="panel-play" class="panel active">
     <div id="status">Choose your color to begin.</div>
+
+    <!-- Difficulty selector -->
+    <div style="display:flex; align-items:center; gap:12px; font-size:12px; letter-spacing:0.1em; color:#555; text-transform:uppercase;">
+      <span>Difficulty</span>
+      <div style="display:flex; gap:0; border:1px solid #333; border-radius:2px; overflow:hidden;">
+        <button class="diff-btn active" onclick="setDifficulty(1, this)">1</button>
+        <button class="diff-btn" onclick="setDifficulty(2, this)">2</button>
+        <button class="diff-btn" onclick="setDifficulty(3, this)">3</button>
+        <button class="diff-btn" onclick="setDifficulty(4, this)">4</button>
+        <button class="diff-btn" onclick="setDifficulty(5, this)">5</button>
+      </div>
+      <span id="diff-label" style="color:#00ff9d88; font-size:11px;">Beginner</span>
+    </div>
+
     <div class="controls">
       <button id="btn-white" onclick="startGame('white')">Play as White</button>
       <button id="btn-black" onclick="startGame('black')">Play as Black</button>
@@ -758,6 +787,16 @@ function renderCandidates(candidates) {
   });
 }  
 
+let currentDifficulty = 1;
+
+function setDifficulty(level, el) {
+  currentDifficulty = level;
+  document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  const labels = {1:'Beginner', 2:'Easy', 3:'Intermediate', 4:'Hard', 5:'Expert'};
+  document.getElementById('diff-label').textContent = labels[level];
+}
+
 // ─── Tab switching ─────────────────────────────────────────────
 function switchTab(tab) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -848,7 +887,7 @@ function getEngineMove() {
   fetch(API_BASE + '/move', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fen: game.fen(), think_time: 1.0 })
+    body: JSON.stringify({ fen: game.fen(), difficulty: currentDifficulty })
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {

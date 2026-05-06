@@ -528,9 +528,12 @@ function startGame() {
   updateTurnIndicator();
   startClockTick();
 
-  // Connect game websocket
+  // Connect game websocket after board is ready
   gameWs = new WebSocket(WS_BASE + '/ws/game/' + gameId);
   gameWs.onopen = () => {
+    // Close lobby socket ONLY after game socket is confirmed open
+    if (lobbyWs) { lobbyWs.close(); lobbyWs = null; }
+
     // Send profile so server can share with opponent and calculate ELO
     if (myProfile && currentUser) {
       gameWs.send(JSON.stringify({
@@ -552,9 +555,6 @@ function startGame() {
     if (gameWs && gameWs._ping) clearInterval(gameWs._ping);
     if (!gameOver) showGameStatus('Connection lost.');
   };
-
-  // Close lobby socket
-  if (lobbyWs) { lobbyWs.close(); lobbyWs = null; }
 
   document.getElementById('move-list').innerHTML = '';
   document.getElementById('overlay').classList.remove('active');

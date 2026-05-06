@@ -378,6 +378,8 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
         "board":        chess.Board(),
         "white_ws":     white_ws,
         "black_ws":     black_ws,
+        "white_game_ws": None,
+        "black_game_ws": None,
         "white_id":     white_id,
         "black_id":     black_id,
         "clock":        {"w": CLOCK_SECONDS, "b": CLOCK_SECONDS},
@@ -562,13 +564,31 @@ async def game_ws(ws: WebSocket, game_id: str):
         await ws.close()
         return
 
-    # Identify which player this is
-    if   ws == game["white_ws"]: color = "w"
-    elif ws == game["black_ws"]: color = "b"
+    # Identify which player this is by registering their new game socket
+    player_id = None
+    color = None
+    if game["white_ws"] is None or game.get("white_game_ws") is None:
+        # Check if this is the white player connecting
+        # We'll resolve by slot: first to connect gets their slot
+        pass
+
+    # Register the actual game WebSocket by slot order
+    if game.get("white_game_ws") is None:
+        game["white_game_ws"] = ws
+        color = "w"
+    elif game.get("black_game_ws") is None:
+        game["black_game_ws"] = ws
+        color = "b"
     else:
-        await send(ws, {"type": "error", "detail": "Not a player in this game."})
+        await send(ws, {"type": "error", "detail": "Game already full."})
         await ws.close()
         return
+
+    # Update references so broadcast uses the real game sockets
+    if color == "w":
+        game["white_ws"] = ws
+    else:
+        game["black_ws"] = ws
 
     try:
         while True:

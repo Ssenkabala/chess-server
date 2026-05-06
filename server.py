@@ -95,7 +95,13 @@ TIER_LIMITS = {
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
-DIFFICULTY_THINK_TIME = {1: 0.1, 2: 0.3, 3: 0.7, 4: 1.5, 5: 3.0}
+DIFFICULTY_SETTINGS = {
+    1: {"time": 0.1, "depth": 1},
+    2: {"time": 0.2, "depth": 2},
+    3: {"time": 0.5, "depth": 4},
+    4: {"time": 1.5, "depth": 8},
+    5: {"time": 3.0, "depth": 16},
+}
 
 class MoveRequest(BaseModel):
     fen: str
@@ -200,9 +206,12 @@ async def get_move(req: MoveRequest):
                 }
 
             # Instance 1: get the best move
-            think = DIFFICULTY_THINK_TIME.get(req.difficulty, req.think_time)
+            settings = DIFFICULTY_SETTINGS.get(req.difficulty, {"time": req.think_time, "depth": 4})
             with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-                result = engine.play(board, chess.engine.Limit(time=think))
+                result = engine.play(board, chess.engine.Limit(
+                    time=settings["time"],
+                    depth=settings["depth"]
+                ))
                 move = result.move
 
             # Instance 2: get candidates separately
@@ -588,11 +597,13 @@ async def game_ws(ws: WebSocket, game_id: str):
         while True:
             data = await ws.receive_json()
 
-            if game["over"]:
-                await send(ws, {"type": "error", "detail": "Game is over."})
-                continue
-
             msg_type = data.get("type")
+
+            if game["over"]:
+                if msg_type not in ("rematch_offer", "rematch_accept", "rematch_decline", "ping"):
+                    await send(ws, {"type": "error", "detail": "Game is over."})
+                    continue
+
 
             # ── Keepalive ping (ignore) ───────────────────────────────────────
             if msg_type == "ping":
@@ -704,19 +715,21 @@ async def game_ws(ws: WebSocket, game_id: str):
                 await send(opponent_ws, {"type": "rematch_offer"})
 
             elif msg_type == "rematch_accept":
-                # Swap colors, create new game
                 old_white_profile = game["white_profile"]
                 old_black_profile = game["black_profile"]
                 old_white_ws      = game["white_ws"]
                 old_black_ws      = game["black_ws"]
 
                 new_game_id = uuid.uuid4().hex[:12]
-                # Colors are swapped
+                # Colors swapped: old black becomes new white
                 ng = new_game(new_game_id, old_black_ws, old_white_ws,
-                              old_black_profile.get("username","?"),
-                              old_white_profile.get("username","?"))
-                ng["white_profile"] = old_black_profile
-                ng["black_profile"] = old_white_profile
+                              old_black_profile.get("username", "?") if old_black_profile else "?",
+                              old_white_profile.get("username", "?") if old_white_profile else "?")
+                ng["white_profile"]   = old_black_profile
+                ng["black_profile"]   = old_white_profile
+                # Pre-register the live sockets so no reconnect handshake needed
+                ng["white_game_ws"]   = old_black_ws
+                ng["black_game_ws"]   = old_white_ws
                 active_games[new_game_id] = ng
 
                 await send(old_black_ws, {
@@ -726,7 +739,6 @@ async def game_ws(ws: WebSocket, game_id: str):
                     "type": "rematch_start", "game_id": new_game_id, "color": "black"
                 })
                 asyncio.create_task(clock_loop(new_game_id))
-                # Keep game alive briefly for rematch negotiation
                 asyncio.create_task(cleanup_game(game_id, delay=10))
 
             elif msg_type == "rematch_decline":

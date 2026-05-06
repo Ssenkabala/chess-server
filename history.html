@@ -402,7 +402,7 @@ async function loadGames(userId) {
         '<span class="game-result-badge ' + badgeClass + '">' + badgeText + '</span>' +
         '<span class="game-date">' + date + '</span>' +
       '</div>' +
-      '<div class="game-meta">As ' + (g.player_color || 'white') + ' vs Engine · ' + moveCount + ' moves</div>' +
+      '<div class="game-meta">As ' + (g.player_color || 'white') + ' vs ' + (g.opponent === 'human' ? 'Human' : 'Engine') + ' · ' + moveCount + ' moves</div>' +
       '<div class="game-moves-preview">' + g.pgn.replace(/\[.*?\]\s*/g, '').trim().slice(0, 80) + '</div>';
 
     item.onclick = function() { openReplay(g); };

@@ -12,16 +12,15 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      background: #111;
+      background: #0d0d0d;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
       font-family: 'Georgia', serif;
       color: #e8e6e0;
-      gap: 20px;
-      padding: 20px;
+      gap: 16px;
+      padding: 16px;
     }
 
     h1 {
@@ -58,11 +57,11 @@
     .tab-btn.active { background: #00ff9d22; color: #00ff9d; }
 
     /* ── Panels ── */
-    .panel { display: none; flex-direction: column; align-items: center; gap: 20px; width: 100%; }
+    .panel { display: none; flex-direction: column; align-items: center; gap: 14px; width: 100%; max-width: 520px; }
     .panel.active { display: flex; }
 
     /* ── Board ── */
-    #board, #analysis-board { width: 480px; }
+    #board, #analysis-board { width: 100%; max-width: 480px; }
 
     .highlight-square {
       background: radial-gradient(circle, rgba(0,255,157,0.55) 25%, transparent 27%) !important;
@@ -289,7 +288,8 @@
 
     /* ── Captured pieces ── */
     .captured-bar {
-      width: 480px;
+      width: 100%;
+      max-width: 480px;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -490,7 +490,8 @@
 
     /* ── User bar (top of play panel) ── */
     .user-bar {
-      width: 480px;
+      width: 100%;
+      max-width: 480px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -513,6 +514,7 @@
     .top-bar {
       width: 100%;
       max-width: 520px;
+      padding: 4px 0 4px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -620,9 +622,9 @@
 
 <!-- Mobile menu drawer -->
 <div class="mobile-menu" id="mobile-menu">
-  <a href="/">Home</a>
-  <a href="/multiplayer">Play Live</a>
-  <a href="/history">My Games</a>
+  <a href="/" onclick="toggleMobileMenu()">Home</a>
+  <a href="/multiplayer" onclick="toggleMobileMenu()">Play Live</a>
+  <a href="/history" onclick="toggleMobileMenu()">My Games</a>
   <a href="#" onclick="openAuth(); toggleMobileMenu();">Sign In</a>
 </div>
 <div class="nav-overlay" id="nav-overlay" onclick="toggleMobileMenu()"></div>

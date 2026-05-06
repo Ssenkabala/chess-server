@@ -695,19 +695,48 @@ function onGameMessage(e) {
   }
 
   if (msg.type === 'rematch_start') {
+    const existingWs = gameWs;   // keep the live socket
     gameId   = msg.game_id;
     myColor  = msg.color;
     gameOver = false;
-    sessionOpponentId = sessionOpponentId; // preserve session score
     document.getElementById('overlay').classList.remove('active');
-    // Don't close gameWs here — startGame() will open a new one
-    // Clear old socket cleanly
-    if (gameWs) {
-      gameWs.onclose = null; // prevent "connection lost" flash
-      gameWs.close();
-      gameWs = null;
+    // Reset board state without touching the WebSocket
+    game     = new Chess();
+    selectedSq = null;
+    myTurn   = myColor === 'white';
+    document.getElementById('move-list').innerHTML = '';
+    resetClockDisplay();
+    // Reinitialise board with new orientation
+    board = Chessboard('board', {
+      draggable: true,
+      position:  'start',
+      orientation: myColor,
+      pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
+      onDragStart: onDragStart,
+      onDrop:      onDrop,
+      onSnapEnd:   () => board.position(game.fen()),
+      onSquareClick: onSquareClick,
+    });
+    setTimeout(function() {
+      $('#board').off('click.sq').on('click.sq', '.square-55d63', function() {
+        var sq = null;
+        $(this).attr('class').split(' ').forEach(function(c) {
+          if (c.startsWith('square-') && c !== 'square-55d63') sq = c.replace('square-', '');
+        });
+        if (sq) onSquareClick(sq);
+      });
+    }, 200);
+    updateTurnIndicator();
+    startClockTick();
+    // Send profile on the existing socket for the new game
+    if (myProfile && currentUser) {
+      existingWs.send(JSON.stringify({
+        type:     'profile',
+        username: myProfile.username,
+        elo:      myProfile.elo,
+        user_id:  currentUser.id
+      }));
     }
-    startGame();
   }
 }
 

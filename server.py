@@ -337,38 +337,24 @@ CLOCK_SECONDS = 300             # 5 minutes each side
 
 # ─── ELO calculation ──────────────────────────────────────────────────────────
 
-def calc_elo(my_elo: int, opp_elo: int, result: str, my_color: str, winner_color: str) -> int:
-    """
-    Your formula:
-    - Base ±7 for same tier (within 100 ELO)
-    - Each tier above opponent: multiply remaining by +50% (rounded up)
-    - Each tier below: multiply by -50% (rounded up)
-    Returns new ELO.
-    """
+def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str) -> int:
     import math
+    diff  = my_elo - opp_elo
+    tiers = diff // 100
+    base  = 7
 
-    diff   = my_elo - opp_elo
-    tiers  = diff // 100          # positive = I am higher, negative = I am lower
-    base   = 7
-
-    if result == 'draw':
+    if winner_color == 'draw':
         effect = 0
     elif winner_color == my_color:
-        # I won
-        if tiers >= 0:
-            effect = base * (1.5 ** tiers)
-        else:
-            effect = base * (0.5 ** abs(tiers))
-        effect = math.ceil(effect)
+        # Won
+        effect = base * (1.5 ** tiers) if tiers >= 0 else base * (0.5 ** abs(tiers))
+        effect = round(effect)
     else:
-        # I lost
-        if tiers <= 0:
-            effect = -base * (1.5 ** abs(tiers))
-        else:
-            effect = -base * (0.5 ** tiers)
-        effect = -math.ceil(abs(effect))
+        # Lost — mirror exactly
+        effect = base * (1.5 ** abs(tiers)) if tiers <= 0 else base * (0.5 ** tiers)
+        effect = -round(effect)
 
-    return max(100, my_elo + effect)   # floor at 100
+    return max(100, my_elo + int(effect))
 
 
 def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
@@ -701,6 +687,40 @@ async def game_ws(ws: WebSocket, game_id: str):
                 })
                 await update_elos(game, "draw")
                 active_games.pop(game_id, None)
+            
+            elif msg_type == "rematch_offer":
+                game["rematch_offered_by"] = color
+                opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
+                await send(opponent_ws, {"type": "rematch_offer"})
+
+            elif msg_type == "rematch_accept":
+                # Swap colors, create new game
+                old_white_profile = game["white_profile"]
+                old_black_profile = game["black_profile"]
+                old_white_ws      = game["white_ws"]
+                old_black_ws      = game["black_ws"]
+
+                new_game_id = uuid.uuid4().hex[:12]
+                # Colors are swapped
+                ng = new_game(new_game_id, old_black_ws, old_white_ws,
+                              old_black_profile.get("username","?"),
+                              old_white_profile.get("username","?"))
+                ng["white_profile"] = old_black_profile
+                ng["black_profile"] = old_white_profile
+                active_games[new_game_id] = ng
+
+                await send(old_black_ws, {
+                    "type": "rematch_start", "game_id": new_game_id, "color": "white"
+                })
+                await send(old_white_ws, {
+                    "type": "rematch_start", "game_id": new_game_id, "color": "black"
+                })
+                asyncio.create_task(clock_loop(new_game_id))
+                active_games.pop(game_id, None)
+
+            elif msg_type == "rematch_decline":
+                opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
+                await send(opponent_ws, {"type": "rematch_declined"})
 
     except WebSocketDisconnect:
         if not game["over"]:

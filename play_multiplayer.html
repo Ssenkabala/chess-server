@@ -259,6 +259,25 @@
       color: var(--muted);
       letter-spacing: 0.1em;
     }
+    .session-score {
+      display: flex;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .session-score span {
+      padding: 4px 12px;
+      background: var(--bg2);
+      color: var(--muted);
+    }
+    .session-score .sc-w { color: var(--green); }
+    .session-score .sc-d { color: #777; }
+    .session-score .sc-l { color: var(--danger); }
+    .session-score .sep  { color: #333; padding: 4px 4px; background: var(--bg); }
 
     /* Highlight */
     .highlight-move {
@@ -338,8 +357,19 @@
     <div class="result-card">
       <div class="result-title" id="result-title">Draw</div>
       <div class="result-reason" id="result-reason">by agreement</div>
-      <div class="controls" style="justify-content:center; margin-top:8px;">
-        <button onclick="goToLobby()">Play Again</button>
+      <div class="session-score" id="session-score" style="display:none; justify-content:center; margin-top:4px;">
+        <span class="sc-w" id="sc-w">0W</span>
+        <span class="sep">/</span>
+        <span class="sc-d" id="sc-d">0D</span>
+        <span class="sep">/</span>
+        <span class="sc-l" id="sc-l">0L</span>
+      </div>
+      <div id="rematch-area" style="margin-top:8px;">
+        <div class="controls" style="justify-content:center;">
+          <button id="btn-rematch" onclick="offerRematch()">Rematch</button>
+          <button onclick="goToLobby()">New Game</button>
+        </div>
+        <div id="rematch-status" style="font-size:11px; color:var(--muted); text-align:center; margin-top:6px; letter-spacing:0.08em;"></div>
       </div>
     </div>
   </div>
@@ -351,10 +381,29 @@ let sb;
 try {
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 } catch(e) { sb = null; }
+let sessionScore  = { w: 0, d: 0, l: 0 };
+let sessionOpponentId = null;   // tracks if we're vs same opponent
 
 let currentUser = null;
 let myProfile   = null;  // { username, elo }
 let multiMoveHistory = [];
+
+function offerRematch() {
+  sendGame({ type: 'rematch_offer' });
+  document.getElementById('rematch-status').textContent = 'Rematch offered — waiting...';
+  document.getElementById('btn-rematch').disabled = true;
+}
+
+function updateSessionScore(result) {
+  if (result === myColor)       sessionScore.w++;
+  else if (result === 'draw')   sessionScore.d++;
+  else                          sessionScore.l++;
+
+  document.getElementById('sc-w').textContent = sessionScore.w + 'W';
+  document.getElementById('sc-d').textContent = sessionScore.d + 'D';
+  document.getElementById('sc-l').textContent = sessionScore.l + 'L';
+  document.getElementById('session-score').style.display = 'flex';
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  AUTH + PROFILE
@@ -621,6 +670,40 @@ function onGameMessage(e) {
     appendMove(msg.move);
     clearHighlights();
   }
+  if (msg.type === 'rematch_offer') {
+    document.getElementById('rematch-status').textContent = 'Opponent wants a rematch!';
+    document.getElementById('btn-rematch').textContent = 'Accept';
+    document.getElementById('btn-rematch').onclick = () => {
+      sendGame({ type: 'rematch_accept' });
+      document.getElementById('rematch-status').textContent = 'Starting rematch...';
+      document.getElementById('btn-rematch').disabled = true;
+    };
+    // Add decline button
+    const area = document.getElementById('rematch-area').querySelector('.controls');
+    if (!document.getElementById('btn-decline')) {
+      const btn = document.createElement('button');
+      btn.id = 'btn-decline'; btn.className = 'danger';
+      btn.textContent = 'Decline';
+      btn.onclick = () => { sendGame({ type: 'rematch_decline' }); goToLobby(); };
+      area.insertBefore(btn, area.children[1]);
+    }
+  }
+
+  if (msg.type === 'rematch_declined') {
+    document.getElementById('rematch-status').textContent = 'Opponent declined.';
+    document.getElementById('btn-rematch').disabled = true;
+  }
+
+  if (msg.type === 'rematch_start') {
+    // Keep session score, swap into new game
+    gameId   = msg.game_id;
+    myColor  = msg.color;
+    gameOver = false;
+    document.getElementById('overlay').classList.remove('active');
+    // Reconnect game socket with new game_id
+    if (gameWs) { gameWs.close(); gameWs = null; }
+    startGame();
+  }
 }
 
 function sendGame(obj) {
@@ -834,6 +917,14 @@ function showOverlay(result, reason) {
     title.textContent = 'You Lose';
   }
   reasonEl.textContent = reasonText;
+  updateSessionScore(result);
+  document.getElementById('btn-rematch').textContent = 'Rematch';
+  document.getElementById('btn-rematch').disabled = false;
+  document.getElementById('btn-rematch').onclick = offerRematch;
+  document.getElementById('rematch-status').textContent = '';
+  // Remove any stale decline button
+  const old = document.getElementById('btn-decline');
+  if (old) old.remove();
 
   // Save multiplayer game
   if (sb && currentUser && multiMoveHistory.length > 0) {

@@ -527,31 +527,8 @@
     }
     .reveal.visible { opacity: 1; transform: translateY(0); }
 
-    /* ── Hamburger ── */
-    .hamburger {
-      display: none;
-      flex-direction: column;
-      gap: 5px;
-      background: none;
-      border: none;
-      cursor: pointer;
-      padding: 8px;
-      z-index: 60;
-    }
-    .hamburger span {
-      display: block;
-      width: 24px;
-      height: 2px;
-      background: var(--text, #ccc8be);
-      border-radius: 2px;
-      transition: all 0.3s;
-    }
-    .hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
-    .hamburger.open span:nth-child(2) { opacity: 0; }
-    .hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
-
+   
     @media (max-width: 768px) {
-      .hamburger { display: flex; }
       .nav-links {
         display: none;
         position: fixed;

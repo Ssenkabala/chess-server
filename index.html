@@ -622,10 +622,10 @@
 
 <!-- Mobile menu drawer -->
 <div class="mobile-menu" id="mobile-menu">
-  <a href="/" onclick="toggleMobileMenu()">Home</a>
-  <a href="/multiplayer" onclick="toggleMobileMenu()">Play Live</a>
-  <a href="/history" onclick="toggleMobileMenu()">My Games</a>
-  <a href="#" onclick="openAuth(); toggleMobileMenu();">Sign In</a>
+  <a href="/">Home</a>
+  <a href="/multiplayer">Play Live</a>
+  <a href="/history">My Games</a>
+  <a href="#" id="mobile-signin">Sign In</a>
 </div>
 <div class="nav-overlay" id="nav-overlay" onclick="toggleMobileMenu()"></div>
 
@@ -1504,6 +1504,21 @@ function toggleMobileMenu() {
   document.getElementById('hamburger').classList.toggle('open');
   document.getElementById('nav-overlay').classList.toggle('open');
 }
+// Close menu on link tap, then navigate
+document.querySelectorAll('#mobile-menu a').forEach(function(a) {
+  a.addEventListener('click', function(e) {
+    var href = this.getAttribute('href');
+    if (this.id === 'mobile-signin') {
+      e.preventDefault();
+      toggleMobileMenu();
+      setTimeout(openAuth, 50);
+      return;
+    }
+    // For real hrefs: close menu, then let browser navigate
+    toggleMobileMenu();
+    // Navigation happens naturally — don't preventDefault
+  });
+});
 // ── Load position from URL (from history page) ────────────────
 (function checkUrlParams() {
   const params = new URLSearchParams(window.location.search);

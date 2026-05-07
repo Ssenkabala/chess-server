@@ -615,7 +615,7 @@
       <img src="/logo.png" height="32" alt="AfriChess">
       <span>Afri<span style="color:#00d98b">Chess</span></span>
     </a>
-    <button class="hamburger" id="hamburger" aria-label="Toggle Menu">
+    <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
       <span></span><span></span><span></span>
     </button>
   </div>
@@ -1499,44 +1499,26 @@ if (sb) {
     else clearUser();
   });
 }
-
-// Mobile Hamburger Menu
 function toggleMobileMenu() {
-  const menu    = document.getElementById('mobile-menu');
-  const burger  = document.getElementById('hamburger');
-  const overlay = document.getElementById('nav-overlay');
-  
-  menu.classList.toggle('open');
-  burger.classList.toggle('open');
-  overlay.classList.toggle('open');
-  document.body.style.overflow = menu.classList.contains('open') ? 'hidden' : '';
+  document.getElementById('mobile-menu').classList.toggle('open');
+  document.getElementById('hamburger').classList.toggle('open');
+  document.getElementById('nav-overlay').classList.toggle('open');
 }
-
-// Close menu + navigate reliably
-document.querySelectorAll('#mobile-menu a').forEach(link => {
-  link.addEventListener('click', function(e) {
-    const href = this.getAttribute('href');
-
-    // Special case: Sign In
+// Close menu on link tap, then navigate
+document.querySelectorAll('#mobile-menu a').forEach(function(a) {
+  a.addEventListener('click', function(e) {
+    var href = this.getAttribute('href');
     if (this.id === 'mobile-signin') {
       e.preventDefault();
       toggleMobileMenu();
-      setTimeout(() => openAuth(), 180);
+      setTimeout(openAuth, 50);
       return;
     }
-
-    // Close menu first
+    // For real hrefs: close menu, then let browser navigate
     toggleMobileMenu();
-
-    // Navigate after a tiny delay so menu close animation finishes
-    if (href && href !== '#') {
-      setTimeout(() => {
-        window.location.href = href;
-      }, 220);
-    }
+    // Navigation happens naturally — don't preventDefault
   });
 });
-
 // ── Load position from URL (from history page) ────────────────
 (function checkUrlParams() {
   const params = new URLSearchParams(window.location.search);

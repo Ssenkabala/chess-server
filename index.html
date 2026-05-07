@@ -615,7 +615,7 @@
       <img src="/logo.png" height="32" alt="AfriChess">
       <span>Afri<span style="color:#00d98b">Chess</span></span>
     </a>
-    <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
+    <button class="hamburger" id="hamburger" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
   </div>
@@ -1500,23 +1500,32 @@ if (sb) {
   });
 }
 function toggleMobileMenu() {
-  document.getElementById('mobile-menu').classList.toggle('open');
-  document.getElementById('hamburger').classList.toggle('open');
-  document.getElementById('nav-overlay').classList.toggle('open');
+  const menu = document.getElementById('mobile-menu');
+  const burger = document.getElementById('hamburger');
+  const overlay = document.getElementById('nav-overlay');
+  
+  menu.classList.toggle('open');
+  burger.classList.toggle('open');
+  overlay.classList.toggle('open');
+  document.body.style.overflow = menu.classList.contains('open') ? 'hidden' : '';
 }
-// Close menu on link tap, then navigate
-document.querySelectorAll('#mobile-menu a').forEach(function(a) {
+
+// Close menu on link click and navigate
+document.querySelectorAll('#mobile-menu a').forEach(a => {
   a.addEventListener('click', function(e) {
-    var href = this.getAttribute('href');
+    // Special case for Sign In
     if (this.id === 'mobile-signin') {
       e.preventDefault();
       toggleMobileMenu();
-      setTimeout(openAuth, 50);
+      setTimeout(openAuth, 100);
       return;
     }
-    // For real hrefs: close menu, then let browser navigate
+
+    // Close menu
     toggleMobileMenu();
-    // Navigation happens naturally — don't preventDefault
+
+    // Let browser handle navigation for real hrefs
+    // No preventDefault() needed
   });
 });
 // ── Load position from URL (from history page) ────────────────

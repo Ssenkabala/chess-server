@@ -615,7 +615,7 @@
       <img src="/logo.png" height="32" alt="AfriChess">
       <span>Afri<span style="color:#00d98b">Chess</span></span>
     </a>
-    <button class="hamburger" id="hamburger" aria-label="Menu">
+    <button class="hamburger" id="hamburger" aria-label="Toggle Menu">
       <span></span><span></span><span></span>
     </button>
   </div>
@@ -1499,9 +1499,11 @@ if (sb) {
     else clearUser();
   });
 }
+
+// Mobile Hamburger Menu
 function toggleMobileMenu() {
-  const menu = document.getElementById('mobile-menu');
-  const burger = document.getElementById('hamburger');
+  const menu    = document.getElementById('mobile-menu');
+  const burger  = document.getElementById('hamburger');
   const overlay = document.getElementById('nav-overlay');
   
   menu.classList.toggle('open');
@@ -1510,24 +1512,31 @@ function toggleMobileMenu() {
   document.body.style.overflow = menu.classList.contains('open') ? 'hidden' : '';
 }
 
-// Close menu on link click and navigate
-document.querySelectorAll('#mobile-menu a').forEach(a => {
-  a.addEventListener('click', function(e) {
-    // Special case for Sign In
+// Close menu + navigate reliably
+document.querySelectorAll('#mobile-menu a').forEach(link => {
+  link.addEventListener('click', function(e) {
+    const href = this.getAttribute('href');
+
+    // Special case: Sign In
     if (this.id === 'mobile-signin') {
       e.preventDefault();
       toggleMobileMenu();
-      setTimeout(openAuth, 100);
+      setTimeout(() => openAuth(), 180);
       return;
     }
 
-    // Close menu
+    // Close menu first
     toggleMobileMenu();
 
-    // Let browser handle navigation for real hrefs
-    // No preventDefault() needed
+    // Navigate after a tiny delay so menu close animation finishes
+    if (href && href !== '#') {
+      setTimeout(() => {
+        window.location.href = href;
+      }, 220);
+    }
   });
 });
+
 // ── Load position from URL (from history page) ────────────────
 (function checkUrlParams() {
   const params = new URLSearchParams(window.location.search);

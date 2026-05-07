@@ -811,11 +811,11 @@
 
 
 <script>
-// Toggle mobile nav
+// Desktop + Mobile Nav
 function toggleNav() {
-  const links    = document.getElementById('nav-links');
-  const burger   = document.getElementById('hamburger');
-  const overlay  = document.getElementById('nav-overlay');
+  const links   = document.getElementById('nav-links');
+  const burger  = document.getElementById('hamburger');
+  const overlay = document.getElementById('nav-overlay');
   
   links.classList.toggle('open');
   burger.classList.toggle('open');
@@ -823,29 +823,23 @@ function toggleNav() {
   document.body.style.overflow = links.classList.contains('open') ? 'hidden' : '';
 }
 
-// Close menu when clicking links + allow navigation
 document.querySelectorAll('.nav-links a').forEach(link => {
   link.addEventListener('click', function() {
-    // Close menu immediately
+    // Close menu
     document.getElementById('nav-links').classList.remove('open');
     document.getElementById('hamburger').classList.remove('open');
     document.getElementById('nav-overlay').classList.remove('open');
     document.body.style.overflow = '';
 
-    // For anchor links (#features etc.) do smooth scroll
     const href = this.getAttribute('href');
     if (href && href.startsWith('#')) {
-      const target = document.querySelector(href);
-      if (target) {
-        setTimeout(() => {
-          target.scrollIntoView({ behavior: 'smooth' });
-        }, 80);
-      }
+      setTimeout(() => {
+        document.querySelector(href)?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
     }
-    // External/internal page links (e.g. /play, /multiplayer) will navigate naturally
+    // Page links navigate naturally
   });
 });
 </script>
-
 </body>
 </html>

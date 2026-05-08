@@ -208,14 +208,21 @@ async def get_move(req: MoveRequest):
                 }
 
             # Instance 1: get the best move
+            import random
             think_ms = DIFFICULTY_SETTINGS.get(req.difficulty, int(req.think_time * 1000))
-            with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-                result = engine.play(board, chess.engine.Limit(
-                    white_clock=think_ms / 1000,
-                    black_clock=think_ms / 1000,
-                    remaining_moves=1
-                ))
-                move = result.move
+
+            # At low difficulty, randomly pick a legal move instead of engine's best
+            random_chance = {1: 0.75, 2: 0.40, 3: 0.15, 4: 0.0, 5: 0.0}
+            if random.random() < random_chance.get(req.difficulty, 0):
+                move = random.choice(list(board.legal_moves))
+            else:
+                with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
+                    result = engine.play(board, chess.engine.Limit(
+                        white_clock=think_ms / 1000,
+                        black_clock=think_ms / 1000,
+                        remaining_moves=1
+                    ))
+                    move = result.move
 
             # Instance 2: get candidates separately
             candidates = []

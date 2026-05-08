@@ -362,6 +362,18 @@ sb.auth.getSession().then(({ data }) => {
   loadGames(user.id);
 });
 
+function formatOpponent(opponent) {
+  if (!opponent) return 'Engine';
+  if (opponent.startsWith('human:')) return opponent.replace('human:', '');
+  if (opponent === 'human') return 'Human';
+  if (opponent.startsWith('engine_lvl_')) {
+    const lvl = opponent.replace('engine_lvl_', '');
+    const labels = {'1':'Beginner','2':'Easy','3':'Intermediate','4':'Hard','5':'Expert'};
+    return 'Engine · ' + (labels[lvl] || 'Lvl ' + lvl);
+  }
+  return opponent;
+}
+
 // ── Load games ────────────────────────────────────────────────
 async function loadGames(userId) {
   const { data, error } = await sb
@@ -402,7 +414,7 @@ async function loadGames(userId) {
         '<span class="game-result-badge ' + badgeClass + '">' + badgeText + '</span>' +
         '<span class="game-date">' + date + '</span>' +
       '</div>' +
-      '<div class="game-meta">As ' + (g.player_color || 'white') + ' vs ' + (g.opponent === 'human' ? 'Human' : 'Engine') + ' · ' + moveCount + ' moves</div>' +
+      '<div class="game-meta">As ' + (g.player_color || 'white') + ' vs ' + formatOpponent(g.opponent) + ' · ' + moveCount + ' moves</div>' +
       '<div class="game-moves-preview">' + g.pgn.replace(/\[.*?\]\s*/g, '').trim().slice(0, 80) + '</div>';
 
     item.onclick = function() { openReplay(g); };

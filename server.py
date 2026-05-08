@@ -96,11 +96,11 @@ TIER_LIMITS = {
 # ─── Models ───────────────────────────────────────────────────────────────────
 
 DIFFICULTY_SETTINGS = {
-    1: {"time": 0.1, "depth": 1},
-    2: {"time": 0.2, "depth": 2},
-    3: {"time": 0.5, "depth": 4},
-    4: {"time": 1.5, "depth": 8},
-    5: {"time": 3.0, "depth": 16},
+    1: 0.05,   # 50ms  — blunders freely
+    2: 0.15,   # 150ms
+    3: 0.5,    # 500ms
+    4: 1.5,    # 1.5s
+    5: 4.0,    # 4s — near full strength
 }
 
 class MoveRequest(BaseModel):
@@ -206,12 +206,9 @@ async def get_move(req: MoveRequest):
                 }
 
             # Instance 1: get the best move
-            settings = DIFFICULTY_SETTINGS.get(req.difficulty, {"time": req.think_time, "depth": 4})
+            think_time = DIFFICULTY_SETTINGS.get(req.difficulty, req.think_time)
             with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-                result = engine.play(board, chess.engine.Limit(
-                    time=settings["time"],
-                    depth=settings["depth"]
-                ))
+                result = engine.play(board, chess.engine.Limit(time=think_time))
                 move = result.move
 
             # Instance 2: get candidates separately
@@ -347,11 +344,10 @@ CLOCK_SECONDS = 300             # 5 minutes each side
 # ─── ELO calculation ──────────────────────────────────────────────────────────
 
 def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str) -> int:
-    import math
     diff  = my_elo - opp_elo
-    tiers = diff // 100
+    tiers = int(diff / 100)   # truncate toward zero — avoids asymmetry from floor division
     base  = 7
-
+    
     if winner_color == 'draw':
         effect = 0
     elif winner_color == my_color:

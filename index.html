@@ -549,6 +549,7 @@
       background: #555;
       border-radius: 2px;
       transition: all 0.3s;
+      pointer-events: none;
     }
     .hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
     .hamburger.open span:nth-child(2) { opacity: 0; }
@@ -556,19 +557,20 @@
 
     /* ── Mobile drawer ── */
     .mobile-menu {
-      display: none;
       position: fixed;
-      top: 0; right: 0;
+      top: 0; right: -260px;
       width: 240px;
       height: 100vh;
       background: #0d0d0d;
       border-left: 1px solid #222;
+      display: flex;
       flex-direction: column;
       padding: 72px 28px 28px;
       gap: 24px;
       z-index: 55;
+      transition: right 0.3s ease;
     }
-    .mobile-menu.open { display: flex; }
+    .mobile-menu.open { right: 0; }
     .mobile-menu a {
       color: #888;
       text-decoration: none;
@@ -576,6 +578,10 @@
       letter-spacing: 0.15em;
       text-transform: uppercase;
       transition: color 0.2s;
+      cursor: pointer;
+      padding: 8px 0;
+      border-bottom: 1px solid #1a1a1a;
+      display: block;
     }
     .mobile-menu a:hover { color: #00ff9d; }
 

@@ -95,12 +95,14 @@ TIER_LIMITS = {
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
+# Times in ms sent as wtime/btime with movestogo=1
+# Engine adds 200ms buffer to movetime, so we use wtime directly
 DIFFICULTY_SETTINGS = {
-    1: 0.05,   # 50ms  — blunders freely
-    2: 0.15,   # 150ms
-    3: 0.5,    # 500ms
-    4: 1.5,    # 1.5s
-    5: 4.0,    # 4s — near full strength
+    1: 100,    # engine gets 100ms — genuinely weak
+    2: 300,
+    3: 800,
+    4: 2000,
+    5: 5000,
 }
 
 class MoveRequest(BaseModel):
@@ -206,9 +208,13 @@ async def get_move(req: MoveRequest):
                 }
 
             # Instance 1: get the best move
-            think_time = DIFFICULTY_SETTINGS.get(req.difficulty, req.think_time)
+            think_ms = DIFFICULTY_SETTINGS.get(req.difficulty, int(req.think_time * 1000))
             with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-                result = engine.play(board, chess.engine.Limit(time=think_time))
+                result = engine.play(board, chess.engine.Limit(
+                    white_clock=think_ms / 1000,
+                    black_clock=think_ms / 1000,
+                    remaining_moves=1
+                ))
                 move = result.move
 
             # Instance 2: get candidates separately

@@ -383,7 +383,7 @@ try {
 } catch(e) { sb = null; }
 let sessionScore  = { w: 0, d: 0, l: 0 };
 let sessionOpponentId = null;   // tracks if we're vs same opponent
-
+let myEloChange = null;
 let currentUser = null;
 let myProfile   = null;  // { username, elo }
 let multiMoveHistory = [];
@@ -637,6 +637,7 @@ function onGameMessage(e) {
     const el     = document.getElementById('result-reason');
     if (el) el.innerHTML += ' <span style="color:' + color + ';font-size:12px;">' +
       '(' + sign + change + ' ELO · now ' + msg.new_elo + ')</span>';
+    myEloChange = msg.new_elo - msg.old_elo;
     if (myProfile) myProfile.elo = msg.new_elo;
     return;
   }
@@ -977,7 +978,9 @@ function showOverlay(result, reason) {
       pgn:          pgn.trim(),
       result:       result,
       player_color: myColor,
-      opponent:     'human'
+      opponent:     opponentUsername ? 'human:' + opponentUsername : 'human',
+      player_elo_before: myProfile ? myProfile.elo : null,
+      player_elo_after:  myProfile ? myProfile.elo + (myEloChange || 0) : null,
     }).then(function(res) {
       if (res.error) console.error('Multiplayer save failed:', res.error.message);
       else console.log('Multiplayer game saved.');

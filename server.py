@@ -357,20 +357,31 @@ CLOCK_SECONDS = 300             # 5 minutes each side
 # ΓöÇΓöÇΓöÇ ELO calculation ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str) -> int:
-    diff  = my_elo - opp_elo
-    tiers = int(diff / 100)   # truncate toward zero ΓÇö avoids asymmetry from floor division
+    diff  = my_elo - opp_elo   # positive = I am higher rated
+    tiers = int(diff / 100)    # truncate toward zero
     base  = 7
-    
+
     if winner_color == 'draw':
-        effect = 0
-    elif winner_color == my_color:
-        # Won
-        effect = base * (1.5 ** tiers) if tiers >= 0 else base * (0.5 ** abs(tiers))
-        effect = round(effect)
+        return my_elo
+
+    if winner_color == my_color:
+        # I won — gain less if I was favored (higher), more if underdog (lower)
+        if tiers >= 0:
+            # I am higher rated — expected win — gain less
+            effect = base * (0.5 ** tiers)
+        else:
+            # I am lower rated — upset win — gain more
+            effect = base * (1.5 ** abs(tiers))
+        effect = max(1, round(effect))
     else:
-        # Lost ΓÇö mirror exactly
-        effect = base * (1.5 ** abs(tiers)) if tiers <= 0 else base * (0.5 ** tiers)
-        effect = -round(effect)
+        # I lost — lose less if I was underdog (lower), more if favored (higher)
+        if tiers <= 0:
+            # I am lower rated — expected loss — lose less
+            effect = base * (0.5 ** abs(tiers))
+        else:
+            # I am higher rated — upset loss — lose more
+            effect = base * (1.5 ** tiers)
+        effect = -max(1, round(effect))
 
     return max(100, my_elo + int(effect))
 

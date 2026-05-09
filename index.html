@@ -1477,7 +1477,9 @@ async function saveGame(pgn, result, playerColor) {
     pgn:          pgn,
     result:       result,
     player_color: playerColor,
-    opponent:     'engine_lvl_' + currentDifficulty
+    opponent:     'engine_lvl_' + currentDifficulty,
+      player_elo_before: null,
+      player_elo_after:  null
   });
 
   if (error) console.error('Game save failed:', error.message);

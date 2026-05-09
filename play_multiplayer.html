@@ -638,7 +638,24 @@ function onGameMessage(e) {
     if (el) el.innerHTML += ' <span style="color:' + color + ';font-size:12px;">' +
       '(' + sign + change + ' ELO · now ' + msg.new_elo + ')</span>';
     myEloChange = msg.new_elo - msg.old_elo;
-    if (myProfile) myProfile.elo = msg.new_elo;
+    if (myProfile) {
+      myProfile.eloBefore = msg.old_elo;
+      myProfile.elo = msg.new_elo;
+    }
+    return;
+  }
+
+  if (msg.type === 'draw_offer_received') {
+    // Show draw offer to opponent
+    document.getElementById('rematch-status').textContent = 'Opponent offers a draw!';
+    const area = document.getElementById('rematch-area');
+    if (area && !document.getElementById('btn-accept-draw')) {
+      const btn = document.createElement('button');
+      btn.id = 'btn-accept-draw';
+      btn.textContent = 'Accept Draw';
+      btn.onclick = () => sendGame({ type: 'draw_accept' });
+      area.querySelector('.controls').appendChild(btn);
+    }
     return;
   }
 
@@ -928,6 +945,7 @@ function appendMove(uci) {
 
 function showOverlay(result, reason) {
   const overlay = document.getElementById('overlay');
+  if (overlay.classList.contains('active')) return;
   const title   = document.getElementById('result-title');
   const reasonEl = document.getElementById('result-reason');
 
@@ -979,8 +997,8 @@ function showOverlay(result, reason) {
       result:       result,
       player_color: myColor,
       opponent:     opponentUsername ? 'human:' + opponentUsername : 'human',
-      player_elo_before: myProfile ? myProfile.elo : null,
-      player_elo_after:  myProfile ? myProfile.elo + (myEloChange || 0) : null,
+      player_elo_before: myProfile ? (myProfile.eloBefore || myProfile.elo) : null,
+      player_elo_after:  myProfile ? myProfile.elo : null,
     }).then(function(res) {
       if (res.error) console.error('Multiplayer save failed:', res.error.message);
       else console.log('Multiplayer game saved.');
@@ -1022,3 +1040,4 @@ bootAuth();
 </script>
 </body>
 </html>
+

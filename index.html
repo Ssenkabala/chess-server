@@ -2,14 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Africhess</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -25,26 +23,15 @@
       padding: 16px;
     }
 
-    .top-bar {
-      width: 100%;
-      max-width: 520px;
-      padding: 4px 0 8px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .top-logo {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      text-decoration: none;
-      font-size: 16px;
+    h1 {
+      font-size: 22px;
       font-weight: 400;
       letter-spacing: 0.15em;
       color: #888;
       text-transform: uppercase;
     }
 
+    /* ── Tab navigation ── */
     .tabs {
       display: flex;
       gap: 0;
@@ -69,13 +56,19 @@
     .tab-btn:hover { color: #00ff9d; background: #1a1a1a; }
     .tab-btn.active { background: #00ff9d22; color: #00ff9d; }
 
+    /* ── Panels ── */
     .panel { display: none; flex-direction: column; align-items: center; gap: 14px; width: 100%; max-width: 520px; }
     .panel.active { display: flex; }
 
+    /* ── Board ── */
     #board, #analysis-board { width: 100%; max-width: 480px; }
 
-    .highlight-square { background: radial-gradient(circle, rgba(0,255,157,0.55) 25%, transparent 27%) !important; }
-    .highlight-capture { background: radial-gradient(circle, transparent 55%, rgba(0,255,157,0.55) 57%) !important; }
+    .highlight-square {
+      background: radial-gradient(circle, rgba(0,255,157,0.55) 25%, transparent 27%) !important;
+    }
+    .highlight-capture {
+      background: radial-gradient(circle, transparent 55%, rgba(0,255,157,0.55) 57%) !important;
+    }
     .highlight-selected { background: rgba(0,255,157,0.2) !important; }
     .highlight-best { background: rgba(0,255,157,0.35) !important; box-shadow: inset 0 0 0 3px #00ff9d88; }
 
@@ -85,6 +78,13 @@
       letter-spacing: 0.05em;
       min-height: 24px;
       text-align: center;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
     }
 
     button {
@@ -102,20 +102,213 @@
     button:hover, button.active { background: #00ff9d; color: #111; }
     button:disabled { opacity: 0.35; cursor: not-allowed; }
 
-    .user-bar {
+    /* ── Analysis panel extras ── */
+    .analysis-input-row {
+      display: flex;
+      gap: 10px;
+      width: 480px;
+    }
+    #fen-input {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #e8e6e0;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-family: monospace;
+      border-radius: 2px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #fen-input:focus { border-color: #00ff9d55; }
+    #fen-input::placeholder { color: #444; }
+
+    /* API key row */
+    .api-row {
+      display: flex;
+      gap: 10px;
+      width: 480px;
+      align-items: center;
+    }
+    #api-key-input {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #e8e6e0;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-family: monospace;
+      border-radius: 2px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #api-key-input:focus { border-color: #00ff9d55; }
+    #api-key-input::placeholder { color: #444; }
+    .api-label {
+      font-size: 11px;
+      color: #555;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    /* Eval bar */
+    .eval-bar-wrap {
+      width: 480px;
+      height: 6px;
+      background: #222;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .eval-bar-fill {
+      height: 100%;
+      width: 50%;
+      background: #00ff9d;
+      transition: width 0.6s ease;
+      border-radius: 3px;
+    }
+    .eval-label {
+      font-size: 12px;
+      color: #555;
+      letter-spacing: 0.08em;
+      width: 480px;
+      text-align: right;
+    }
+
+    /* Coach card */
+    #coach-card {
+      width: 480px;
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-left: 3px solid #00ff9d44;
+      border-radius: 2px;
+      padding: 18px 20px;
+      display: none;
+      gap: 14px;
+      flex-direction: column;
+    }
+    #coach-card.visible { display: flex; }
+
+    .coach-section { display: flex; flex-direction: column; gap: 5px; }
+    .coach-label {
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #00ff9d88;
+    }
+    .coach-text {
+      font-size: 14px;
+      color: #ccc;
+      line-height: 1.65;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #333;
+      border-top-color: #00ff9d;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .best-move-badge {
+      display: inline-block;
+      background: #00ff9d18;
+      border: 1px solid #00ff9d44;
+      color: #00ff9d;
+      font-family: monospace;
+      font-size: 13px;
+      padding: 2px 10px;
+      border-radius: 2px;
+      letter-spacing: 0.05em;
+    }
+    /* ── Candidate moves ── */
+    .candidates-wrap {
+      width: 480px;
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 2px;
+      padding: 12px 14px;
+      display: none;
+    }
+    .candidates-wrap.visible { display: block; }
+    .candidates-label {
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #444;
+      margin-bottom: 10px;
+    }
+    .candidate-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 5px 0;
+      border-bottom: 1px solid #1e1e1e;
+    }
+    .candidate-row:last-child { border-bottom: none; }
+    .candidate-rank {
+      font-size: 10px;
+      color: #444;
+      width: 16px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+    .candidate-move {
+      font-family: monospace;
+      font-size: 14px;
+      color: #00ff9d;
+      width: 56px;
+      flex-shrink: 0;
+    }
+    .candidate-bar-wrap {
+      flex: 1;
+      height: 4px;
+      background: #222;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .candidate-bar {
+      height: 100%;
+      background: #00ff9d;
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+    .candidate-eval {
+      font-family: monospace;
+      font-size: 12px;
+      color: #666;
+      width: 48px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* ── Captured pieces ── */
+    .captured-bar {
       width: 100%;
       max-width: 480px;
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      padding: 6px 0;
+      gap: 6px;
+      min-height: 22px;
+      font-size: 18px;
+      line-height: 1;
     }
-    .user-info { font-size: 11px; color: #555; letter-spacing: 0.08em; font-family: monospace; }
-    .user-info span { color: #00ff9d; }
-
-    /* Auth Modal */
+    .captured-pieces { display: flex; flex-wrap: wrap; gap: 1px; }
+    .material-score {
+      font-size: 12px;
+      font-family: monospace;
+      color: #555;
+      margin-left: 4px;
+    }
+    .material-score.ahead { color: #00ff9d; }
+    /* ── Auth modal ── */
     .auth-overlay {
-      position: fixed; inset: 0;
+      position: fixed;
+      inset: 0;
       background: rgba(0,0,0,0.85);
       display: none;
       align-items: center;
@@ -136,7 +329,19 @@
       flex-direction: column;
       gap: 16px;
     }
-    .auth-title { font-size: 13px; letter-spacing: 0.2em; text-transform: uppercase; color: #00ff9d; }
+    .auth-title {
+      font-size: 13px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #00ff9d;
+      margin-bottom: 4px;
+    }
+    .auth-subtitle {
+      font-size: 12px;
+      color: #555;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
     .auth-input {
       width: 100%;
       background: #111;
@@ -147,8 +352,11 @@
       font-family: monospace;
       border-radius: 2px;
       outline: none;
+      transition: border-color 0.2s;
     }
     .auth-input:focus { border-color: #00ff9d55; }
+    .auth-input::placeholder { color: #444; }
+
     .auth-btn {
       width: 100%;
       padding: 12px;
@@ -161,18 +369,246 @@
       text-transform: uppercase;
       cursor: pointer;
       border-radius: 2px;
+      transition: background 0.2s;
     }
     .auth-btn:hover { background: #00cc7a; }
 
+    .auth-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #333;
+      font-size: 11px;
+    }
+    .auth-divider::before,
+    .auth-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #2a2a2a;
+    }
+
+    .google-btn {
+      width: 100%;
+      padding: 11px;
+      background: transparent;
+      color: #aaa;
+      border: 1px solid #2a2a2a;
+      font-size: 12px;
+      font-family: 'Georgia', serif;
+      letter-spacing: 0.1em;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .google-btn:hover { border-color: #555; color: #fff; }
+
+    .auth-toggle {
+      font-size: 11px;
+      color: #555;
+      text-align: center;
+      letter-spacing: 0.05em;
+    }
+    .auth-toggle span {
+      color: #00ff9d;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    .auth-error {
+      font-size: 12px;
+      color: #ff6b6b;
+      text-align: center;
+      min-height: 16px;
+      letter-spacing: 0.04em;
+    }
+    .auth-close {
+      position: absolute;
+      top: 12px; right: 16px;
+      background: none;
+      border: none;
+      color: #444;
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px 8px;
+      line-height: 1;
+    }
+    .auth-close:hover { color: #aaa; background: none; }
+    /* ── Username modal ── */
     .username-overlay {
       position: fixed; inset: 0;
       background: rgba(0,0,0,0.92);
-      display: none;
-      align-items: center;
-      justify-content: center;
+      display: none; align-items: center; justify-content: center;
       z-index: 300;
     }
     .username-overlay.active { display: flex; }
+    .username-card {
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-top: 3px solid #00ff9d;
+      border-radius: 4px;
+      padding: 40px 48px;
+      text-align: center;
+      display: flex; flex-direction: column; gap: 18px;
+      min-width: 300px; max-width: 360px;
+    }
+    .username-title {
+      font-size: 18px; letter-spacing: 0.1em;
+      color: #e8e6e0; text-transform: uppercase;
+    }
+    .username-sub {
+      font-size: 12px; color: #666;
+      letter-spacing: 0.06em; line-height: 1.6;
+    }
+    .username-input {
+      background: #111; border: 1px solid #2a2a2a;
+      color: #e8e6e0; padding: 12px 16px;
+      font-size: 15px; font-family: monospace;
+      border-radius: 2px; outline: none; text-align: center;
+      letter-spacing: 0.08em; width: 100%;
+      transition: border-color 0.2s;
+    }
+    .username-input:focus { border-color: #00ff9d55; }
+    .username-error {
+      font-size: 12px; color: #ff4d4d;
+      letter-spacing: 0.06em; min-height: 16px;
+    }
+    .username-btn {
+      padding: 12px 28px; background: #00ff9d;
+      color: #111; border: none; font-size: 14px;
+      font-family: Georgia, serif; font-weight: bold;
+      letter-spacing: 0.12em; cursor: pointer;
+      border-radius: 2px; text-transform: uppercase;
+      transition: background 0.2s; width: 100%;
+    }
+    .username-btn:hover { background: #00cc7a; }
+    .username-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+
+    /* ── User bar (top of play panel) ── */
+    .user-bar {
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+    }
+    .user-info {
+      font-size: 11px;
+      color: #555;
+      letter-spacing: 0.08em;
+      font-family: monospace;
+    }
+    .user-info span { color: #00ff9d; }
+    .user-actions { display: flex; gap: 8px; }
+    .user-actions button {
+      padding: 5px 14px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+    }
+    /* ── Top bar ── */
+    .top-bar {
+      width: 100%;
+      max-width: 520px;
+      padding: 4px 0 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 0 8px;
+    }
+    .top-logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: 400;
+      letter-spacing: 0.15em;
+      color: #888;
+      text-transform: uppercase;
+    }
+
+    /* ── Hamburger ── */
+    .hamburger {
+      display: none;
+      flex-direction: column;
+      gap: 5px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 6px;
+    }
+    .hamburger span {
+      display: block;
+      width: 22px;
+      height: 2px;
+      background: #555;
+      border-radius: 2px;
+      transition: all 0.3s;
+    }
+    .hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .hamburger.open span:nth-child(2) { opacity: 0; }
+    .hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+    /* ── Mobile drawer ── */
+    .mobile-menu button {
+      color: #888;
+      text-decoration: none;
+      font-size: 13px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      transition: color 0.2s;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-family: 'Georgia', serif;
+      text-align: left;
+      padding: 0;
+    }
+    .mobile-menu button:hover { color: #00ff9d; background: none; }
+
+    .mobile-menu.open { display: flex; }
+    .mobile-menu a {
+      color: #888;
+      text-decoration: none;
+      font-size: 13px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      transition: color 0.2s;
+    }
+    .mobile-menu a:hover { color: #00ff9d; }
+
+    .nav-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 54;
+    }
+    .nav-overlay.open { display: block; }
+
+    @media (max-width: 600px) {
+      .hamburger { display: flex; }
+    }
+
+    .diff-btn {
+      padding: 6px 14px;
+      background: transparent;
+      color: #555;
+      border: none;
+      border-right: 1px solid #333;
+      font-size: 13px;
+      font-family: 'Georgia', serif;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .diff-btn:last-child { border-right: none; }
+    .diff-btn:hover { color: #00ff9d; background: #1a1a1a; }
+    .diff-btn.active { background: #00ff9d22; color: #00ff9d; }
   </style>
 </head>
 <body>
@@ -182,45 +618,40 @@
       <img src="/logo.png" height="32" alt="AfriChess">
       <span>Afri<span style="color:#00d98b">Chess</span></span>
     </a>
-    <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">☰</button>
+    <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
+      <span></span><span></span><span></span>
+    </button>
   </div>
 
-  <!-- Mobile Menu -->
-  <div class="mobile-menu" id="mobile-menu" style="display:none; flex-direction:column; gap:12px; padding:20px; background:#111; width:100%; max-width:520px;">
-    <button onclick="window.location.href='/'">Home</button>
-    <button onclick="window.location.href='/multiplayer'">Play Live</button>
-    <button onclick="window.location.href='/history'">My Games</button>
-    <button onclick="toggleMobileMenu(); openAuth()">Sign In</button>
-  </div>
+<div class="mobile-menu" id="mobile-menu">
+  <button onclick="window.location.href='/'">Home</button>
+  <button onclick="window.location.href='/multiplayer'">Play Live</button>
+  <button onclick="window.location.href='/history'">My Games</button>
+  <button onclick="toggleMobileMenu(); setTimeout(openAuth,50);">Sign In</button>
+</div>
+<div class="nav-overlay" id="nav-overlay" onclick="toggleMobileMenu()"></div>
 
-  <!-- Tabs -->
+  <!-- Tab switcher -->
   <div class="tabs">
-    <button class="tab-btn active" onclick="switchTab(0)">Play</button>
-    <button class="tab-btn" onclick="switchTab(1)">Analysis</button>
+    <button class="tab-btn active" onclick="switchTab('play')">Play</button>
+    <button class="tab-btn" onclick="switchTab('analysis')">Analysis</button>
   </div>
 
-  <!-- PLAY PANEL -->
+  <!-- ══════════════════ PLAY PANEL ══════════════════ -->
   <div id="panel-play" class="panel active">
     <div id="status">Choose your color to begin.</div>
 
-    <div style="display:flex; align-items:center; gap:12px; font-size:12px; color:#555;">
+    <!-- Difficulty selector -->
+    <div style="display:flex; align-items:center; gap:12px; font-size:12px; letter-spacing:0.1em; color:#555; text-transform:uppercase;">
       <span>Difficulty</span>
-      <div style="display:flex; border:1px solid #333;">
-        <button class="diff-btn active" data-diff="1" onclick="setDifficulty(1,this)">1</button>
-        <button class="diff-btn" data-diff="2" onclick="setDifficulty(2,this)">2</button>
-        <button class="diff-btn" data-diff="3" onclick="setDifficulty(3,this)">3</button>
-        <button class="diff-btn" data-diff="4" onclick="setDifficulty(4,this)">4</button>
-        <button class="diff-btn" data-diff="5" onclick="setDifficulty(5,this)">5</button>
+      <div style="display:flex; gap:0; border:1px solid #333; border-radius:2px; overflow:hidden;">
+        <button class="diff-btn active" onclick="setDifficulty(1, this)">1</button>
+        <button class="diff-btn" onclick="setDifficulty(2, this)">2</button>
+        <button class="diff-btn" onclick="setDifficulty(3, this)">3</button>
+        <button class="diff-btn" onclick="setDifficulty(4, this)">4</button>
+        <button class="diff-btn" onclick="setDifficulty(5, this)">5</button>
       </div>
-    </div>
-
-    <div class="user-bar">
-      <div class="user-info" id="user-info">Not signed in</div>
-      <div>
-        <button onclick="openAuth()" id="btn-login">Sign In</button>
-        <button onclick="signOut()" id="btn-signout" style="display:none">Sign Out</button>
-        <button onclick="goToHistory()" id="btn-history" style="display:none">My Games</button>
-      </div>
+      <span id="diff-label" style="color:#00ff9d88; font-size:11px;">Beginner</span>
     </div>
 
     <div class="controls">
@@ -228,181 +659,933 @@
       <button id="btn-black" onclick="startGame('black')">Play as Black</button>
     </div>
 
-    <div id="board" style="display:none;"></div>
-
-    <div class="controls" id="game-controls" style="display:none;">
-      <button onclick="resign()">Resign</button>
-      <button onclick="newGame()">New Game</button>
+    <!-- Opponent captured pieces (shown above board) -->
+    <div class="captured-bar" id="captured-opponent">
+      <div class="captured-pieces" id="pieces-opponent"></div>
+      <span class="material-score" id="score-opponent"></span>
     </div>
-  </div>
+    
 
-  <!-- ANALYSIS PANEL -->
-  <div id="panel-analysis" class="panel">
-    <input type="text" id="fen-input" placeholder="Paste FEN here" style="width:480px;padding:10px;">
+    <div id="board"></div>
+
+    <div class="user-bar">
+      <div class="user-info" id="user-info">Not signed in</div>
+      <div class="user-actions">
+        <button onclick="openAuth()" id="btn-login">Sign In</button>
+        <button onclick="goToHistory()" id="btn-history" style="display:none">My Games</button>
+        <button onclick="signOut()" id="btn-signout" style="display:none">Sign Out</button>
+      </div>
+    </div>
+    
+    <!-- Player captured pieces (shown below board) -->
+    <div class="captured-bar" id="captured-player">
+      <div class="captured-pieces" id="pieces-player"></div>
+      <span class="material-score" id="score-player"></span>
+    </div>
+
     <div class="controls">
-      <button onclick="loadFen()">Load FEN</button>
-      <button onclick="analysePosition()">Analyse</button>
-      <button id="btn-coach" onclick="getCoaching()">Coach Me</button>
+      <button onclick="resetGame()">New Game</button>
+      <button onclick="if(board) board.flip()">Flip Board</button>
     </div>
+  </div>
+
+  <!-- ══════════════════ ANALYSIS PANEL ══════════════════ -->
+  <div id="panel-analysis" class="panel">
+
+    <!-- API key input -->
+    <div class="api-row">
+      <span class="api-label">API Key</span>
+      <input id="api-key-input" type="password" placeholder="Your Africhess API key (required for coaching)" />
+    </div>
+
+    <!-- FEN input -->
+    <div class="analysis-input-row">
+      <input id="fen-input" type="text" placeholder="Paste FEN  —  or leave blank for starting position" />
+      <button onclick="loadFen()">Load</button>
+    </div>
+
+    <div id="analysis-status">Paste a FEN and press Load, or click Analyse.</div>
+
     <div id="analysis-board"></div>
-    <div id="analysis-status"></div>
-    <!-- Coach card and candidates would go here (same as original) -->
-  </div>
 
-  <!-- Auth Modal -->
-  <div class="auth-overlay" id="auth-overlay">
-    <div class="auth-card">
-      <button onclick="closeAuth()" style="position:absolute;top:10px;right:15px;background:none;border:none;color:#666;font-size:24px;cursor:pointer;">×</button>
-      <div class="auth-title" id="auth-title">Sign In</div>
-      <input class="auth-input" id="auth-email" type="email" placeholder="Email">
-      <input class="auth-input" id="auth-password" type="password" placeholder="Password">
-      <div class="auth-error" id="auth-error"></div>
-      <button class="auth-btn" id="auth-submit-btn" onclick="handleAuth()">Sign In</button>
-      <button class="auth-btn" onclick="signInWithGoogle()" style="background:#4285F4;color:white;">Continue with Google</button>
+    <!-- Eval bar -->
+    <div class="eval-bar-wrap">
+      <div class="eval-bar-fill" id="eval-bar"></div>
     </div>
-  </div>
+    <div class="eval-label" id="eval-label">—</div>
 
+    <!-- Candidate moves -->
+    <div class="candidates-wrap" id="candidates-wrap">
+      <div class="candidates-label">Candidate Moves</div>
+      <div id="candidates-list"></div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <button onclick="analysePosition()">Analyse</button>
+      <button onclick="getCoaching()" id="btn-coach">Coach Me</button>
+      <button onclick="resetAnalysis()">Reset</button>
+      <button onclick="if(analysisBoard) analysisBoard.flip()">Flip</button>
+    </div>
+
+    <!-- Coach card -->
+    <div id="coach-card">
+      <div class="coach-section">
+        <span class="coach-label">Assessment</span>
+        <span class="coach-text" id="c-assessment">—</span>
+      </div>
+      <div class="coach-section">
+        <span class="coach-label">Best Move</span>
+        <span class="coach-text" id="c-bestmove">—</span>
+      </div>
+      <div class="coach-section">
+        <span class="coach-label">Plan</span>
+        <span class="coach-text" id="c-plan">—</span>
+      </div>
+      <div class="coach-section">
+        <span class="coach-label">Tip</span>
+        <span class="coach-text" id="c-tip">—</span>
+      </div>
+    </div>
+
+  </div><!-- /panel-analysis -->
+
+
+<!-- ══════════════════ SCRIPTS ══════════════════ -->
 <script>
-// ==================== CORE GAME LOGIC ====================
-let currentDifficulty = 3;
-let game = new Chess();
-let board = null;
-let playerColor = 'w';
-let moveHistory = [];
 
-// Supabase
-const SUPABASE_URL = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
-const SUPABASE_ANON = 'sb_publishable_g5BEYnjhPatfmnHG3jNQTQ_fzgKOy4s';
-let sb, currentUser = null;
+// Prevent page scroll when dragging pieces on mobile
+document.addEventListener('DOMContentLoaded', function() {
+  var boardEl = document.getElementById('board');
+  if (boardEl) {
+    boardEl.addEventListener('touchmove', function(e) {
+      e.preventDefault();
+    }, { passive: false });
+  }
+});
 
-function initSupabase() {
-  try {
-    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-    sb.auth.getSession().then(({ data }) => {
-      if (data.session) setUser(data.session.user);
-    });
-  } catch(e) {}
+const API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+  ? 'http://127.0.0.1:8000'
+  : 'https://' + location.hostname;
+
+function renderCandidates(candidates) {
+  if (!candidates || !candidates.length) return;
+  var wrap = document.getElementById('candidates-wrap');
+  var list = document.getElementById('candidates-list');
+  if (!wrap || !list) return;
+  wrap.classList.add('visible');
+  list.innerHTML = '';
+  var maxEval = Math.max.apply(null, candidates.map(function(c) { return Math.abs(c.eval_pawns); }));
+  if (maxEval === 0) maxEval = 1;
+  candidates.forEach(function(c, i) {
+    var sign   = c.eval_pawns >= 0 ? '+' : '';
+    var barPct = Math.min(100, (Math.abs(c.eval_pawns) / maxEval) * 100);
+    var row    = document.createElement('div');
+    row.className = 'candidate-row';
+    row.innerHTML =
+      '<span class="candidate-rank">' + (i+1) + '</span>' +
+      '<span class="candidate-move">' + c.move + '</span>' +
+      '<div class="candidate-bar-wrap"><div class="candidate-bar" style="width:' + barPct + '%"></div></div>' +
+      '<span class="candidate-eval">' + sign + c.eval_pawns.toFixed(2) + '</span>';
+    list.appendChild(row);
+  });
+}  
+
+let currentDifficulty = 1;
+
+function setDifficulty(level, el) {
+  currentDifficulty = level;
+  document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  const labels = {1:'Beginner', 2:'Easy', 3:'Intermediate', 4:'Hard', 5:'Expert'};
+  document.getElementById('diff-label').textContent = labels[level];
 }
 
-function setUser(user) {
-  currentUser = user;
-  document.getElementById('user-info').innerHTML = `<span>${user.email}</span>`;
-  document.getElementById('btn-login').style.display = 'none';
-  document.getElementById('btn-signout').style.display = 'inline-block';
-  document.getElementById('btn-history').style.display = 'inline-block';
+// ─── Tab switching ─────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + tab).classList.add('active');
+  event.target.classList.add('active');
+
 }
 
-async function saveGame() {
-  if (!currentUser || !sb) return;
-  const pgn = game.pgn();
-  const result = game.in_checkmate() ? (game.turn() === 'w' ? 'black' : 'white') : 
-                 game.in_draw() ? 'draw' : 'unknown';
+// ══════════════════════════════════════════════════════════════
+//  PLAY MODE  (original code, untouched)
+// ══════════════════════════════════════════════════════════════
+var game = new Chess();
+var board = null;
+var playerColor = 'w';
+var engineThinking = false;
+var selectedSquare = null;
+var gameStarted = false;
+var moveHistory = []; 
 
-  await sb.from('games').insert({
-    user_id: currentUser.id,
-    pgn: pgn,
-    result: result,
-    player_color: playerColor === 'w' ? 'white' : 'black',
-    opponent: `engine_lvl_${currentDifficulty}`
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+
+function clearHighlights() {
+  $('#board .square-55d63').removeClass('highlight-square highlight-capture highlight-selected');
+}
+
+function highlightMoves(square) {
+  clearHighlights();
+  var moves = game.moves({ square: square, verbose: true });
+  if (!moves.length) return;
+  $('#board .square-' + square).addClass('highlight-selected');
+  moves.forEach(function(m) {
+    var isCapture = !!game.get(m.to) || m.flags.indexOf('e') > -1;
+    $('#board .square-' + m.to).addClass(isCapture ? 'highlight-capture' : 'highlight-square');
   });
 }
 
-// ==================== PLAY FUNCTIONS ====================
-function startGame(color) {
-  playerColor = color === 'white' ? 'w' : 'b';
-  game = new Chess();
-  moveHistory = [];
-
-  document.getElementById('board').style.display = 'block';
-  document.getElementById('game-controls').style.display = 'flex';
-
-  board = Chessboard('board', {
-    draggable: true,
-    position: 'start',
-    orientation: playerColor,
-    onDrop: onDrop,
-    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png'
-  });
+function onDragStart(source, piece) {
+  if (!gameStarted) return false;
+  if (engineThinking || game.game_over()) return false;
+  if (game.turn() !== playerColor) return false;
+  if (playerColor === 'w' && piece.search(/^b/) !== -1) return false;
+  if (playerColor === 'b' && piece.search(/^w/) !== -1) return false;
+  highlightMoves(source);
+  selectedSquare = source;
+  return true;
 }
 
 function onDrop(source, target) {
-  const move = game.move({from: source, to: target, promotion: 'q'});
-  if (!move) return 'snapback';
-
-  board.position(game.fen());
+  clearHighlights();
+  selectedSquare = null;
+  var move = game.move({ from: source, to: target, promotion: 'q' });
+  if (move === null) return 'snapback';
   moveHistory.push(move.san);
+  updateCapturedPieces();
+  if (game.game_over()) { showResult(); return; }
+  setStatus('Engine thinking...');
+  engineThinking = true;
+  setTimeout(getEngineMove, 150);
+}
 
-  if (game.game_over()) {
-    setTimeout(() => {
-      alert(game.in_checkmate() ? "Checkmate!" : "Draw!");
-      saveGame();
-    }, 300);
+function onSnapEnd() { board.position(game.fen()); }
+
+function onSquareClick(square) {
+  if (!gameStarted || engineThinking || game.game_over()) return;
+  if (game.turn() !== playerColor) return;
+  var piece = game.get(square);
+  if (piece && piece.color === playerColor) {
+    highlightMoves(square);
+    selectedSquare = square;
+    return;
+  }
+  if (selectedSquare) {
+    var move = game.move({ from: selectedSquare, to: square, promotion: 'q' });
+    clearHighlights();
+    selectedSquare = null;
+    if (move === null) return;
+    moveHistory.push(move.san);
+    board.position(game.fen());
+    if (game.game_over()) { showResult(); return; }
+    setStatus('Engine thinking...');
+    engineThinking = true;
+    setTimeout(getEngineMove, 150);
+  }
+}
+
+function getEngineMove() {
+  fetch(API_BASE + '/move', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fen: game.fen(), difficulty: currentDifficulty })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    // Always update board first
+    if (data.fen) {
+      // Get SAN before loading new position
+      if (data.move) {
+        var tempGame = new Chess(game.fen());
+        var engineMove = tempGame.move({
+          from: data.move.slice(0,2),
+          to:   data.move.slice(2,4),
+          promotion: data.move[4] || 'q'
+        });
+        if (engineMove) moveHistory.push(engineMove.san);
+      }
+      game.load(data.fen);
+      board.position(data.fen);
+      updateCapturedPieces();
+    }
+    renderCandidates(data.candidates);
+    engineThinking = false;
+    
+    // Then check game over
+    if (data.is_game_over) { 
+      showResult(); 
+      return; 
+    }
+    setStatus('Your move.');
+  })
+  .catch(function() {
+    engineThinking = false;
+    setStatus('Engine error — is the server running?');
+  });
+}
+
+function showResult() {
+  var resultText, resultKey;
+
+  if (game.in_checkmate()) {
+    if (game.turn() === playerColor) {
+      resultText = 'Engine wins by checkmate.';
+      resultKey  = playerColor === 'w' ? 'black' : 'white';
+    } else {
+      resultText = 'You win by checkmate!';
+      resultKey  = playerColor === 'w' ? 'white' : 'black';
+    }
+  } else if (game.in_draw()) {
+    resultText = 'Game drawn.';
+    resultKey  = 'draw';
+  } else {
+    resultText = 'Game over.';
+    resultKey  = 'draw';
+  }
+
+  setStatus(resultText);
+
+  // Save game if user is signed in
+  var pgn = buildPGN(game, resultKey);
+  var colorName = playerColor === 'w' ? 'white' : 'black';
+  saveGame(pgn, resultKey, colorName);
+}
+
+function startGame(color) {
+  moveHistory = [];
+  playerColor = (color === 'white') ? 'w' : 'b';
+  gameStarted = true;
+  engineThinking = false;
+  selectedSquare = null;
+  game = new Chess();
+  document.getElementById('btn-white').classList.toggle('active', color === 'white');
+  document.getElementById('btn-black').classList.toggle('active', color === 'black');
+  $('#board').empty();
+  board = Chessboard('board', {
+    draggable: !isMobile(),   // ← disable drag on mobile
+    position: 'start',
+    orientation: color,
+    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
+    onDragStart: onDragStart,
+    onDrop: onDrop,
+    onSnapEnd: onSnapEnd,
+    onSquareClick: onSquareClick
+  });
+  if (playerColor === 'b') {
+    setStatus('Engine thinking...');
+    engineThinking = true;
+    updateCapturedPieces();
+    setTimeout(getEngineMove, 500);
+  } else {
+    updateCapturedPieces();
+    setStatus('Your move.');
+  }
+}
+
+function resetGame() {
+  if (!gameStarted) return;
+  startGame(playerColor === 'w' ? 'white' : 'black');
+}
+
+function isMobile() {
+  return window.innerWidth <= 600;
+}
+
+function updateCapturedPieces() {
+  var pieces = { w: {p:8,r:2,n:2,b:2,q:1}, b: {p:8,r:2,n:2,b:2,q:1} };
+  var onBoard = { w: {p:0,r:0,n:0,b:0,q:0}, b: {p:0,r:0,n:0,b:0,q:0} };
+  var values  = { p:1, n:3, b:3, r:5, q:9 };
+  var symbols = {
+    w: { p:'♙', n:'♘', b:'♗', r:'♖', q:'♕' },
+    b: { p:'♟', n:'♞', b:'♝', r:'♜', q:'♛' }
+  };
+
+  // Count what's still on board
+  var board_state = game.board();
+  board_state.forEach(function(row) {
+    row.forEach(function(sq) {
+      if (sq && sq.type !== 'k') onBoard[sq.color][sq.type]++;
+    });
+  });
+
+  // Calculate captures
+  var captured = { w: {}, b: {} };
+  var score = { w: 0, b: 0 };
+  ['w','b'].forEach(function(color) {
+    ['p','r','n','b','q'].forEach(function(type) {
+      var count = pieces[color][type] - onBoard[color][type];
+      if (count > 0) {
+        captured[color][type] = count;
+        score[color] += count * values[type];
+      }
+    });
+  });
+
+  // Net advantage
+  var diff = score.b - score.w; // pieces white lost = black captured
+  var diffOpp = score.w - score.b;
+
+  // Render — opponent's captures show above, player's below
+  // "opponent captured white pieces" shows above board
+  // "player captured black pieces" shows below board
+  var topColor    = playerColor === 'w' ? 'b' : 'w'; // opponent's pieces player captured → show above
+  var bottomColor = playerColor === 'w' ? 'w' : 'b'; // player's pieces opponent captured → show below
+
+  function renderBar(elId, capturedPieces, netDiff, pieceColor) {
+    var el = document.getElementById(elId);
+    var html = '';
+    ['q','r','b','n','p'].forEach(function(type) {
+      var count = capturedPieces[type] || 0;
+      for (var i = 0; i < count; i++) {
+        html += '<span style="font-size:16px;opacity:0.85">' + symbols[pieceColor][type] + '</span>';
+      }
+    });
+    if (netDiff > 0) html += '<span style="font-size:11px;color:#888;margin-left:4px;">+' + netDiff + '</span>';
+    el.innerHTML = html;
+  }
+
+renderBar('pieces-opponent', captured[topColor],    diff > 0 ? diff : 0,    topColor);
+renderBar('pieces-player',   captured[bottomColor], diffOpp > 0 ? diffOpp : 0, bottomColor);
+
+
+}
+
+// ══════════════════════════════════════════════════════════════
+//  ANALYSIS MODE
+// ══════════════════════════════════════════════════════════════
+var analysisGame = new Chess();
+var analysisBoard = null;
+
+function setAnalysisStatus(msg) {
+  document.getElementById('analysis-status').textContent = msg;
+}
+
+function initAnalysisBoard() {
+  analysisGame = new Chess();
+  var selectedAnalysisSquare = null;
+
+  analysisBoard = Chessboard('analysis-board', {
+    draggable: true,
+    position: 'start',
+    pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
+    onDragStart: function(source, piece) { return true; },
+    onDrop: function(source, target) {
+      var move = analysisGame.move({ from: source, to: target, promotion: 'q' });
+      if (move === null) return 'snapback';
+      analysisBoard.position(analysisGame.fen());
+      setAnalysisStatus('Position updated. Press Analyse or Coach Me.');
+      resetCoachCard();
+      clearBestMoveHighlight();
+      selectedAnalysisSquare = null;
+    },
+    onSnapEnd: function() { analysisBoard.position(analysisGame.fen()); }
+  });
+
+  // Manual click-to-move — use native DOM, not jQuery
+  document.getElementById('analysis-board').addEventListener('click', function(e) {
+    var squareEl = e.target.closest('[data-square]');
+    if (!squareEl) return;
+    var square = squareEl.getAttribute('data-square');
+    
+    var piece = analysisGame.get(square);
+
+    if (selectedAnalysisSquare) {
+      var move = analysisGame.move({ from: selectedAnalysisSquare, to: square, promotion: 'q' });
+      document.querySelectorAll('#analysis-board [data-square]').forEach(function(el) {
+        el.classList.remove('highlight-selected', 'highlight-square', 'highlight-capture');
+      });
+      selectedAnalysisSquare = null;
+      if (move === null) {
+        if (piece) {
+          selectedAnalysisSquare = square;
+          squareEl.classList.add('highlight-selected');
+        }
+        return;
+      }
+      analysisBoard.position(analysisGame.fen());
+      setAnalysisStatus('Position updated. Press Analyse or Coach Me.');
+      resetCoachCard();
+      clearBestMoveHighlight();
+    } else {
+      if (!piece) return;
+      selectedAnalysisSquare = square;
+      document.querySelectorAll('#analysis-board [data-square]').forEach(function(el) {
+        el.classList.remove('highlight-selected');
+      });
+      squareEl.classList.add('highlight-selected');
+    }
+  }, true); // <-- true = capture phase, fires before chessboard.js can swallow it
+}
+
+function loadFen() {
+  if (!analysisBoard) initAnalysisBoard();
+
+  var fen = document.getElementById('fen-input').value.trim();
+  if (!fen) {
+    analysisGame = new Chess();
+    analysisBoard.position('start');
+    setAnalysisStatus('Starting position loaded.');
+    resetCoachCard();
+    updateEvalBar(0);
+    return;
+  }
+  var test = new Chess();
+  if (!test.load(fen)) {
+    setAnalysisStatus('Invalid FEN — please check and try again.');
+    return;
+  }
+  analysisGame = test;
+  analysisBoard.position(fen);
+  setAnalysisStatus('Position loaded. Press Analyse or Coach Me.');
+  resetCoachCard();
+  updateEvalBar(0);
+  clearBestMoveHighlight();
+}
+
+function analysePosition() {
+  if (!analysisBoard) initAnalysisBoard();
+
+  var fen = analysisGame.fen();
+  setAnalysisStatus('⏳ Engine analysing...');
+  document.getElementById('btn-coach').disabled = true;
+
+  fetch(API_BASE + '/move', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fen: fen, think_time: 2.0 })
+  })
+  .then(r => r.json())
+  .then(data => {
+      var from = data.move.slice(0, 2);
+      var to   = data.move.slice(2, 4);
+      highlightBestMove(from, to);
+      updateEvalBar(data.eval_pawns || 0); 
+      renderCandidates(data.candidates);
+      setAnalysisStatus('Best move: ' + data.move + '  |  Use Coach Me for a full explanation.');
+      document.getElementById('btn-coach').disabled = false;
+  })
+  .catch(() => {
+    setAnalysisStatus('Engine error — is the server running?');
+    document.getElementById('btn-coach').disabled = false;
+  });
+}
+
+function getCoaching() {
+  if (!analysisBoard) initAnalysisBoard();
+  
+  var apiKey = document.getElementById('api-key-input').value.trim();
+  if (!apiKey) {
+    setAnalysisStatus('Enter your API key above to use coaching.');
+    return;
+  }
+  var fen = analysisGame.fen();
+  setAnalysisStatus('<span class="spinner"></span> Coach thinking...');
+  document.getElementById('analysis-status').innerHTML =
+    '<span class="spinner"></span> Coach thinking...';
+  document.getElementById('btn-coach').disabled = true;
+  resetCoachCard();
+
+  fetch(API_BASE + '/coach', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey
+    },
+    body: JSON.stringify({ fen: fen, think_time: 2.0 })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.detail) {
+      setAnalysisStatus('Error: ' + data.detail);
+      document.getElementById('btn-coach').disabled = false;
+      return;
+    }
+
+    // Highlight best move on board
+    if (data.best_move) {
+      highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
+    }
+
+    // Update eval bar
+    updateEvalBar(data.eval_pawns || 0);
+
+    // Parse coaching text into sections
+    parseAndRenderCoaching(data.coaching, data.best_move, data.eval_pawns);
+
+    setAnalysisStatus('Analysis complete.');
+    document.getElementById('btn-coach').disabled = false;
+  })
+  .catch(() => {
+    setAnalysisStatus('Coach unavailable — check server and API key.');
+    document.getElementById('btn-coach').disabled = false;
+  });
+}
+
+function parseAndRenderCoaching(text, bestMove, evalPawns) {
+  // Extract sections from formatted coach response
+  var sections = { assessment: '', bestmove: '', plan: '', tip: '' };
+
+  var assessMatch = text.match(/ASSESSMENT:\s*(.+?)(?=BEST MOVE:|PLAN:|TIP:|$)/si);
+  var bestMatch   = text.match(/BEST MOVE:\s*(.+?)(?=PLAN:|TIP:|$)/si);
+  var planMatch   = text.match(/PLAN:\s*(.+?)(?=TIP:|$)/si);
+  var tipMatch    = text.match(/TIP:\s*(.+?)$/si);
+
+  if (assessMatch) sections.assessment = assessMatch[1].trim();
+  if (bestMatch)   sections.bestmove   = bestMatch[1].trim();
+  if (planMatch)   sections.plan       = planMatch[1].trim();
+  if (tipMatch)    sections.tip        = tipMatch[1].trim();
+
+  // Fallback: show raw text if parsing failed
+  if (!sections.assessment && !sections.bestmove) {
+    sections.assessment = text;
+  }
+
+  // Add eval to assessment
+  if (evalPawns !== undefined) {
+    var sign = evalPawns >= 0 ? '+' : '';
+    var evalStr = ' [Eval: ' + sign + evalPawns + ']';
+    sections.assessment = (sections.assessment || '') + evalStr;
+  }
+
+  document.getElementById('c-assessment').textContent = sections.assessment || '—';
+  document.getElementById('c-bestmove').textContent   = sections.bestmove   || (bestMove || '—');
+  document.getElementById('c-plan').textContent       = sections.plan       || '—';
+  document.getElementById('c-tip').textContent        = sections.tip        || '—';
+
+  document.getElementById('coach-card').classList.add('visible');
+}
+
+function updateEvalBar(evalPawns) {
+  // Convert eval to 0-100 range. +5 pawns = ~90%, -5 = ~10%
+  var clamped = Math.max(-5, Math.min(5, evalPawns || 0));
+  var pct = 50 + (clamped / 5) * 40;
+  document.getElementById('eval-bar').style.width = pct + '%';
+  var sign = evalPawns >= 0 ? '+' : '';
+  document.getElementById('eval-label').textContent =
+    'Eval: ' + sign + (evalPawns || 0).toFixed(2);
+}
+
+function highlightBestMove(from, to) {
+  clearBestMoveHighlight();
+  $('#analysis-board .square-' + from).addClass('highlight-best');
+  $('#analysis-board .square-' + to).addClass('highlight-best');
+}
+
+function clearBestMoveHighlight() {
+  $('#analysis-board .square-55d63').removeClass('highlight-best');
+}
+
+function resetCoachCard() {
+  document.getElementById('coach-card').classList.remove('visible');
+  ['c-assessment','c-bestmove','c-plan','c-tip'].forEach(function(id) {
+    document.getElementById(id).textContent = '—';
+  });
+  document.getElementById('eval-label').textContent = '—';
+  document.getElementById('eval-bar').style.width = '50%';
+}
+
+function resetAnalysis() {
+  document.getElementById('fen-input').value = '';
+  analysisGame = new Chess();
+  if (analysisBoard) analysisBoard.position('start');
+  setAnalysisStatus('Paste a FEN and press Load, or click Analyse.');
+  resetCoachCard();
+  clearBestMoveHighlight();
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  SUPABASE AUTH + GAME SAVING
+// ═══════════════════════════════════════════════════════════════
+const SUPABASE_URL  = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
+const SUPABASE_ANON = 'sb_publishable_g5BEYnjhPatfmnHG3jNQTQ_fzgKOy4s';
+let sb;
+try {
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+} catch(e) {
+  console.error('Supabase failed to load:', e);
+  sb = null;
+}
+
+let currentUser = null;
+let authMode    = 'signin'; // 'signin' | 'signup'
+
+
+// ── User state ────────────────────────────────────────────────
+function setUser(user) {
+  currentUser = user;
+  document.getElementById('btn-login').style.display    = 'none';
+  document.getElementById('btn-signout').style.display  = 'inline-block';
+  document.getElementById('btn-history').style.display  = 'inline-block';
+  closeAuth();
+  // Load profile to show username
+  loadProfile(user);
+}
+
+async function loadProfile(user) {
+  if (!sb || !user) return;
+  const { data } = await sb
+    .from('profiles')
+    .select('username, elo')
+    .eq('user_id', user.id)
+    .single();
+
+  if (data) {
+    document.getElementById('user-info').innerHTML =
+      '<span style="color:#00ff9d">' + data.username + '</span>' +
+      ' <span style="color:#444;font-size:11px;">' + data.elo + ' ELO</span>';
+  } else {
+    // No profile yet — show username modal
+    document.getElementById('user-info').innerHTML = 'Signed in';
+    document.getElementById('username-overlay').classList.add('active');
+    document.getElementById('username-input').focus();
+  }
+}
+
+async function submitUsername() {
+  const input  = document.getElementById('username-input');
+  const errEl  = document.getElementById('username-error');
+  const btn    = document.getElementById('username-btn');
+  const val    = input.value.trim();
+  errEl.textContent = '';
+
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(val)) {
+    errEl.textContent = 'Use 3–20 letters, numbers or underscores.';
     return;
   }
 
-  // Engine move
-  setTimeout(engineMove, 300);
-}
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
 
-async function engineMove() {
-  // Call /move endpoint with current difficulty
-  const res = await fetch('/move', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ fen: game.fen(), difficulty: currentDifficulty })
+  const { error } = await sb.from('profiles').insert({
+    user_id:  currentUser.id,
+    username: val,
+    elo:      1500
   });
-  const data = await res.json();
 
-  if (data.move) {
-    game.move(data.move, {sloppy: true});
-    board.position(game.fen());
+  btn.disabled = false;
+  btn.textContent = 'Set Username';
+
+  if (error) {
+    if (error.code === '23505') {
+      errEl.textContent = 'That username is taken. Try another.';
+    } else {
+      errEl.textContent = 'Error: ' + error.message;
+    }
+    return;
   }
 
-  if (game.game_over()) {
-    saveGame();
-  }
+  document.getElementById('username-overlay').classList.remove('active');
+  document.getElementById('user-info').innerHTML =
+    '<span style="color:#00ff9d">' + val + '</span>' +
+    ' <span style="color:#444;font-size:11px;">1500 ELO</span>';
 }
 
-// ==================== AUTH ====================
-function openAuth() { document.getElementById('auth-overlay').classList.add('active'); }
-function closeAuth() { document.getElementById('auth-overlay').classList.remove('active'); }
+function clearUser() {
+  currentUser = null;
+  document.getElementById('user-info').innerHTML = 'Not signed in';
+  document.getElementById('btn-login').style.display    = 'inline-block';
+  document.getElementById('btn-signout').style.display  = 'none';
+  document.getElementById('btn-history').style.display  = 'none';
+}
+
+// ── Auth modal ────────────────────────────────────────────────
+function openAuth() {
+  document.getElementById('auth-overlay').classList.add('active');
+  document.getElementById('auth-error').textContent = '';
+}
+
+function closeAuth() {
+  document.getElementById('auth-overlay').classList.remove('active');
+}
+
+function toggleAuthMode() {
+  authMode = authMode === 'signin' ? 'signup' : 'signin';
+  const isSignIn = authMode === 'signin';
+  document.getElementById('auth-title').textContent        = isSignIn ? 'Sign In' : 'Create Account';
+  document.getElementById('auth-submit-btn').textContent   = isSignIn ? 'Sign In' : 'Create Account';
+  document.getElementById('auth-toggle').innerHTML         = isSignIn
+    ? 'No account? <span onclick="toggleAuthMode()">Create one</span>'
+    : 'Already have one? <span onclick="toggleAuthMode()">Sign in</span>';
+  document.getElementById('auth-error').textContent = '';
+}
 
 async function handleAuth() {
-  // ... (full auth logic from previous version)
+  const email    = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const errorEl  = document.getElementById('auth-error');
+  errorEl.textContent = '';
+
+  if (!email || !password) {
+    errorEl.textContent = 'Please enter email and password.';
+    return;
+  }
+
+  const btn = document.getElementById('auth-submit-btn');
+  btn.textContent = 'Please wait...';
+  btn.disabled = true;
+
+  let result;
+  if (authMode === 'signin') {
+    result = await sb.auth.signInWithPassword({ email, password });
+  } else {
+    result = await sb.auth.signUp({ email, password });
+  }
+
+  btn.disabled = false;
+  btn.textContent = authMode === 'signin' ? 'Sign In' : 'Create Account';
+
+  if (result.error) {
+    errorEl.textContent = result.error.message;
+  } else if (authMode === 'signup') {
+    errorEl.style.color = '#00ff9d';
+    errorEl.textContent = 'Check your email to confirm your account.';
+  }
+}
+
+async function signInWithGoogle() {
+  await sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: 'https://www.africhess.org/play'
+    }
+  });
 }
 
 async function signOut() {
-  if (sb) await sb.auth.signOut();
-  currentUser = null;
-  document.getElementById('user-info').textContent = 'Not signed in';
-  document.getElementById('btn-login').style.display = 'inline-block';
-  document.getElementById('btn-signout').style.display = 'none';
+  await sb.auth.signOut();
+  clearUser();
 }
 
 function goToHistory() {
   window.location.href = '/history';
 }
 
-// Tab switching
-function switchTab(n) {
+// ── Game saving ───────────────────────────────────────────────
+async function saveGame(pgn, result, playerColor) {
+  if (!currentUser || !sb) return; // ← add !sb here
+
+  const { error } = await sb.from('games').insert({
+    user_id:      currentUser.id,
+    pgn:          pgn,
+    result:       result,
+    player_color: playerColor,
+    opponent:     'engine_lvl_' + currentDifficulty
+  });
+
+  if (error) console.error('Game save failed:', error.message);
+  else console.log('Game saved.');
+}
+
+// ── PGN builder from chess.js game ───────────────────────────
+function buildPGN(chessGame, result) {
+  // Rebuild PGN from tracked move history
+  var pgn = '';
+  moveHistory.forEach(function(san, i) {
+    if (i % 2 === 0) pgn += (Math.floor(i/2) + 1) + '. ';
+    pgn += san + ' ';
+  });
+  return pgn.trim();
+}
+
+// ── Init auth ─────────────────────────────────────────────────
+if (sb) {
+  sb.auth.getSession().then(({ data }) => {
+    if (data.session) setUser(data.session.user);
+  });
+  sb.auth.onAuthStateChange((event, session) => {
+    if (session) setUser(session.user);
+    else clearUser();
+  });
+}
+
+// Mobile Hamburger Menu
+function toggleMobileMenu() {
+  const menu    = document.getElementById('mobile-menu');
+  const burger  = document.getElementById('hamburger');
+  const overlay = document.getElementById('nav-overlay');
+  
+  menu.classList.toggle('open');
+  burger.classList.toggle('open');
+  overlay.classList.toggle('open');
+  document.body.style.overflow = menu.classList.contains('open') ? 'hidden' : '';
+}
+
+
+// ── Load position from URL (from history page) ────────────────
+(function checkUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  const fen = params.get('analyse');
+  if (!fen) return;
+
+  // Switch to analysis tab
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('panel-play').classList.toggle('active', n === 0);
-  document.getElementById('panel-analysis').classList.toggle('active', n === 1);
-  document.querySelectorAll('.tab-btn')[n].classList.add('active');
-}
+  document.getElementById('panel-analysis').classList.add('active');
+  document.querySelectorAll('.tab-btn')[1].classList.add('active');
 
-// Mobile menu
-function toggleMobileMenu() {
-  const menu = document.getElementById('mobile-menu');
-  menu.style.display = menu.style.display === 'flex' ? 'none' : 'flex';
-}
-
-// Init
-document.addEventListener('DOMContentLoaded', () => {
-  initSupabase();
-  switchTab(0);
-});
+  // Load the FEN
+  setTimeout(function() {
+    if (!analysisBoard) initAnalysisBoard();
+    var test = new Chess();
+    if (test.load(decodeURIComponent(fen))) {
+      analysisGame = test;
+      analysisBoard.position(decodeURIComponent(fen));
+      document.getElementById('fen-input').value = decodeURIComponent(fen);
+      document.getElementById('analysis-status').textContent =
+        'Position loaded from saved game. Press Analyse or Coach Me.';
+    }
+  }, 300);
+})();
 </script>
+
+<!-- Auth Modal -->
+<div class="auth-overlay" id="auth-overlay">
+  <div class="auth-card" style="position:relative;">
+    <button class="auth-close" onclick="closeAuth()">×</button>
+    <div class="auth-title" id="auth-title">Sign In</div>
+    <div class="auth-subtitle">Save your games and track your progress.</div>
+
+    <input class="auth-input" type="email" id="auth-email" placeholder="Email address" />
+    <input class="auth-input" type="password" id="auth-password" placeholder="Password" />
+
+    <div class="auth-error" id="auth-error"></div>
+
+    <button class="auth-btn" id="auth-submit-btn" onclick="handleAuth()">Sign In</button>
+
+    <div class="auth-divider">or</div>
+
+    <button class="google-btn" onclick="signInWithGoogle()">
+      <svg width="16" height="16" viewBox="0 0 24 24">
+        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+      </svg>
+      Continue with Google
+    </button>
+
+    <div class="auth-toggle" id="auth-toggle">
+      No account? <span onclick="toggleAuthMode()">Create one</span>
+    </div>
+  </div>
+</div>
+  <!-- ══ USERNAME MODAL ══ -->
+  <div class="username-overlay" id="username-overlay">
+    <div class="username-card">
+      <div class="username-title">One last thing</div>
+      <div class="username-sub">Choose your username. This is permanent and cannot be changed.<br>3–20 characters — letters, numbers, underscores only.</div>
+      <input class="username-input" id="username-input" type="text"
+        maxlength="20" placeholder="your_username"
+        onkeydown="if(event.key==='Enter') submitUsername()" />
+      <div class="username-error" id="username-error"></div>
+      <button class="username-btn" id="username-btn" onclick="submitUsername()">Set Username</button>
+    </div>
+  </div>
+
 </body>
 </html>
+

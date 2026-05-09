@@ -1,4 +1,4 @@
-﻿# server.py
+# server.py
 import chess
 import chess.engine
 import anthropic
@@ -580,21 +580,30 @@ async def game_ws(ws: WebSocket, game_id: str):
         # We'll resolve by slot: first to connect gets their slot
         pass
 
-    # Thread-safe slot assignment
+    # Wait for client to declare their color via first message
+    # First message must be {"type": "claim", "color": "white"/"black"}
+    try:
+        claim_data = await ws.receive_json()
+    except Exception:
+        await ws.close()
+        return
+
+    claimed_color = claim_data.get("color", "")
+
     if not game.get("_lock"):
         game["_lock"] = asyncio.Lock()
 
     async with game["_lock"]:
-        if game.get("white_game_ws") is None:
+        if claimed_color == "white" and game.get("white_game_ws") is None:
             game["white_game_ws"] = ws
             game["white_ws"] = ws
             color = "w"
-        elif game.get("black_game_ws") is None:
+        elif claimed_color == "black" and game.get("black_game_ws") is None:
             game["black_game_ws"] = ws
             game["black_ws"] = ws
             color = "b"
         else:
-            await send(ws, {"type": "error", "detail": "Game already full."})
+            await send(ws, {"type": "error", "detail": "Slot unavailable."})
             await ws.close()
             return
 
@@ -736,11 +745,10 @@ async def game_ws(ws: WebSocket, game_id: str):
                               old_white_profile.get("username", "?") if old_white_profile else "?")
                 ng["white_profile"]   = old_black_profile
                 ng["black_profile"]   = old_white_profile
-                # Pre-register the live sockets so no reconnect handshake needed
-                ng["white_game_ws"]   = old_black_ws
-                ng["black_game_ws"]   = old_white_ws
                 active_games[new_game_id] = ng
 
+                # Notify players — colors are swapped
+                # old black → new white; old white → new black
                 await send(old_black_ws, {
                     "type": "rematch_start", "game_id": new_game_id, "color": "white"
                 })
@@ -806,6 +814,10 @@ def landing():
 
 @app.get("/logo.png")
 def logo():
+    return FileResponse("logo.png")
+
+@app.get("/favicon.ico")
+def favicon():
     return FileResponse("logo.png")
 
 @app.get("/history")

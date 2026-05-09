@@ -382,8 +382,7 @@ try {
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 } catch(e) { sb = null; }
 let sessionScore  = { w: 0, d: 0, l: 0 };
-let sessionOpponentId = null;
-let opponentUsername  = null;   // store for game save   // tracks if we're vs same opponent
+let sessionOpponentId = null;   // tracks if we're vs same opponent
 
 let currentUser = null;
 let myProfile   = null;  // { username, elo }
@@ -584,6 +583,9 @@ function startGame() {
     // Close lobby socket ONLY after game socket is confirmed open
     if (lobbyWs) { lobbyWs.close(); lobbyWs = null; }
 
+    // First: claim our color slot so server assigns correctly
+    gameWs.send(JSON.stringify({ type: 'claim', color: myColor }));
+
     // Send profile so server can share with opponent and calculate ELO
     if (myProfile && currentUser) {
       gameWs.send(JSON.stringify({
@@ -620,7 +622,6 @@ function onGameMessage(e) {
   if (msg.type === 'ping' || msg.type === 'pong') return;
 
   if (msg.type === 'opponent_profile') {
-    opponentUsername = msg.username;
     const opColor = myColor === 'white' ? 'black' : 'white';
     document.getElementById('name-opponent').innerHTML =
       '<strong>' + msg.username + '</strong>' +
@@ -730,7 +731,8 @@ function onGameMessage(e) {
     }, 200);
     updateTurnIndicator();
     startClockTick();
-    // Send profile on the existing socket for the new game
+    // Send claim then profile on the existing socket for the new game
+    existingWs.send(JSON.stringify({ type: 'claim', color: myColor }));
     if (myProfile && currentUser) {
       existingWs.send(JSON.stringify({
         type:     'profile',
@@ -975,7 +977,7 @@ function showOverlay(result, reason) {
       pgn:          pgn.trim(),
       result:       result,
       player_color: myColor,
-      opponent:     opponentUsername ? 'human:' + opponentUsername : 'human'
+      opponent:     'human'
     }).then(function(res) {
       if (res.error) console.error('Multiplayer save failed:', res.error.message);
       else console.log('Multiplayer game saved.');

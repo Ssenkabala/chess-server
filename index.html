@@ -549,29 +549,28 @@
       background: #555;
       border-radius: 2px;
       transition: all 0.3s;
+      pointer-events: none;
     }
     .hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
     .hamburger.open span:nth-child(2) { opacity: 0; }
     .hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
 
     /* ── Mobile drawer ── */
-    .mobile-menu button {
-      color: #888;
-      text-decoration: none;
-      font-size: 13px;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      transition: color 0.2s;
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-family: 'Georgia', serif;
-      text-align: left;
-      padding: 0;
+    .mobile-menu {
+      position: fixed;
+      top: 0; right: -260px;
+      width: 240px;
+      height: 100vh;
+      background: #0d0d0d;
+      border-left: 1px solid #222;
+      display: flex;
+      flex-direction: column;
+      padding: 72px 28px 28px;
+      gap: 24px;
+      z-index: 55;
+      transition: right 0.3s ease;
     }
-    .mobile-menu button:hover { color: #00ff9d; background: none; }
-
-    .mobile-menu.open { display: flex; }
+    .mobile-menu.open { right: 0; }
     .mobile-menu a {
       color: #888;
       text-decoration: none;
@@ -579,6 +578,10 @@
       letter-spacing: 0.15em;
       text-transform: uppercase;
       transition: color 0.2s;
+      cursor: pointer;
+      padding: 8px 0;
+      border-bottom: 1px solid #1a1a1a;
+      display: block;
     }
     .mobile-menu a:hover { color: #00ff9d; }
 
@@ -623,11 +626,12 @@
     </button>
   </div>
 
+<!-- Mobile menu drawer -->
 <div class="mobile-menu" id="mobile-menu">
-  <button onclick="window.location.href='/'">Home</button>
-  <button onclick="window.location.href='/multiplayer'">Play Live</button>
-  <button onclick="window.location.href='/history'">My Games</button>
-  <button onclick="toggleMobileMenu(); setTimeout(openAuth,50);">Sign In</button>
+  <a onclick="navTo('/')">Home</a>
+  <a onclick="navTo('/multiplayer')">Play Live</a>
+  <a onclick="navTo('/history')">My Games</a>
+  <a onclick="closeMenuThenAuth()">Sign In</a>
 </div>
 <div class="nav-overlay" id="nav-overlay" onclick="toggleMobileMenu()"></div>
 
@@ -1473,7 +1477,7 @@ async function saveGame(pgn, result, playerColor) {
     pgn:          pgn,
     result:       result,
     player_color: playerColor,
-    opponent:     'engine_lvl_' + currentDifficulty
+    opponent:     'engine'
   });
 
   if (error) console.error('Game save failed:', error.message);
@@ -1501,20 +1505,23 @@ if (sb) {
     else clearUser();
   });
 }
-
-// Mobile Hamburger Menu
 function toggleMobileMenu() {
-  const menu    = document.getElementById('mobile-menu');
-  const burger  = document.getElementById('hamburger');
-  const overlay = document.getElementById('nav-overlay');
-  
-  menu.classList.toggle('open');
-  burger.classList.toggle('open');
-  overlay.classList.toggle('open');
-  document.body.style.overflow = menu.classList.contains('open') ? 'hidden' : '';
+  document.getElementById('mobile-menu').classList.toggle('open');
+  document.getElementById('hamburger').classList.toggle('open');
+  document.getElementById('nav-overlay').classList.toggle('open');
 }
-
-
+function navTo(url) {
+  document.getElementById('mobile-menu').classList.remove('open');
+  document.getElementById('hamburger').classList.remove('open');
+  document.getElementById('nav-overlay').classList.remove('open');
+  window.location.href = url;
+}
+function closeMenuThenAuth() {
+  document.getElementById('mobile-menu').classList.remove('open');
+  document.getElementById('hamburger').classList.remove('open');
+  document.getElementById('nav-overlay').classList.remove('open');
+  setTimeout(openAuth, 50);
+}
 // ── Load position from URL (from history page) ────────────────
 (function checkUrlParams() {
   const params = new URLSearchParams(window.location.search);
@@ -1588,4 +1595,3 @@ function toggleMobileMenu() {
 
 </body>
 </html>
-

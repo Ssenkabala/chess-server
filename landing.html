@@ -28,32 +28,11 @@
       font-family: 'DM Mono', monospace;
       font-weight: 300;
       overflow-x: hidden;
-      cursor: none;
     }
 
-    /* ── Custom cursor ── */
-    .cursor {
-      position: fixed;
-      width: 10px; height: 10px;
-      background: var(--green);
-      border-radius: 50%;
-      pointer-events: none;
-      z-index: 9999;
-      transition: transform 0.15s ease, opacity 0.2s;
-      transform: translate(-50%, -50%);
-    }
-    .cursor-ring {
-      position: fixed;
-      width: 36px; height: 36px;
-      border: 1px solid var(--green);
-      border-radius: 50%;
-      pointer-events: none;
-      z-index: 9998;
-      opacity: 0.4;
-      transform: translate(-50%, -50%);
-      transition: transform 0.35s ease, width 0.2s, height 0.2s, opacity 0.2s;
-    }
-    body:hover .cursor { opacity: 1; }
+    
+
+    
 
     /* ── Noise overlay ── */
     body::before {
@@ -64,6 +43,7 @@
       pointer-events: none;
       z-index: 100;
       opacity: 0.5;
+      pointer-events: none;
     }
 
     /* ── Nav ── */
@@ -76,8 +56,7 @@
       justify-content: space-between;
       padding: 24px 60px;
       border-bottom: 1px solid #ffffff08;
-      background: linear-gradient(to bottom, #0a0a0aee, transparent);
-      backdrop-filter: blur(6px);
+      background: #0a0a0aee;
     }
     .nav-logo {
       font-family: 'Playfair Display', serif;
@@ -88,25 +67,15 @@
     }
     .nav-logo span { color: var(--green); }
     .nav-links { display: flex; gap: 36px; align-items: center; }
-    .nav-links button {
+    .nav-links a {
       color: var(--muted);
-      background: none;
-      border: none;
-      font-family: 'DM Mono', monospace;
+      text-decoration: none;
       font-size: 11px;
       letter-spacing: 0.2em;
       text-transform: uppercase;
-      cursor: pointer;
       transition: color 0.2s;
-      padding: 0;
     }
-    .nav-links button:hover { color: var(--green); background: none; }
-    .nav-links button.nav-cta {
-      padding: 9px 22px;
-      border: 1px solid var(--green);
-      color: var(--green);
-    }
-    .nav-links button.nav-cta:hover { background: var(--green); color: var(--black); }
+    .nav-links a:hover { color: var(--green); }
     .nav-cta {
       padding: 9px 22px;
       border: 1px solid var(--green);
@@ -133,6 +102,7 @@
       height: 2px;
       background: var(--text);
       transition: all 0.25s;
+      pointer-events: none;
     }
     .hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
     .hamburger.open span:nth-child(2) { opacity: 0; }
@@ -141,29 +111,37 @@
     @media (max-width: 768px) {
       .hamburger { display: flex; }
       .nav-links {
-        display: none;
         position: fixed;
-        top: 0; right: 0;
+        top: 0; right: -280px;
         width: 260px;
         height: 100vh;
         background: #0d0d0d;
         border-left: 1px solid #1a1a1a;
+        display: flex;
         flex-direction: column;
         align-items: flex-start;
         padding: 80px 32px 32px;
         gap: 28px;
-        z-index: 55;
+        z-index: 300;
         box-shadow: -8px 0 32px rgba(0,0,0,0.5);
+        transition: right 0.3s ease;
       }
-      .nav-links.open { display: flex; }
-      .nav-links a { font-size: 14px; letter-spacing: 0.15em; }
+      .nav-links.open { right: 0; }
+      .nav-links a {
+        font-size: 14px;
+        letter-spacing: 0.15em;
+        cursor: pointer;
+        padding: 8px 0;
+        border-bottom: 1px solid #1a1a1a;
+        width: 100%;
+      }
       .nav-cta { width: 100%; text-align: center; margin-top: 8px; }
       .nav-overlay {
         display: none;
         position: fixed;
         inset: 0;
         background: rgba(0,0,0,0.6);
-        z-index: 54;
+        z-index: 290;
       }
       .nav-overlay.open { display: block; }
     }
@@ -247,7 +225,7 @@
       text-transform: uppercase;
       text-decoration: none;
       border: none;
-      cursor: none;
+
       transition: background 0.2s, transform 0.15s;
       display: inline-block;
     }
@@ -263,7 +241,7 @@
       text-transform: uppercase;
       text-decoration: none;
       border: 1px solid var(--mid);
-      cursor: none;
+
       transition: border-color 0.2s, color 0.2s, transform 0.15s;
       display: inline-block;
     }
@@ -447,7 +425,7 @@
       letter-spacing: 0.18em;
       text-transform: uppercase;
       text-decoration: none;
-      cursor: none;
+
       transition: all 0.2s;
     }
     .btn-plan-outline {
@@ -537,43 +515,11 @@
     }
     .reveal.visible { opacity: 1; transform: translateY(0); }
 
-   
-    @media (max-width: 768px) {
-      .nav-links {
-        display: none;
-        position: fixed;
-        top: 0; right: 0;
-        width: 260px;
-        height: 100vh;
-        background: #0d0d0d;
-        border-left: 1px solid #1a1a1a;
-        flex-direction: column;
-        align-items: flex-start;
-        padding: 80px 32px 32px;
-        gap: 28px;
-        z-index: 55;
-        box-shadow: -8px 0 32px rgba(0,0,0,0.5);
-      }
-      .nav-links.open { display: flex; }
-      .nav-links a { font-size: 14px; letter-spacing: 0.15em; }
-      .nav-cta { width: 100%; text-align: center; margin-top: 8px; }
 
-      /* Overlay behind drawer */
-      .nav-overlay {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.6);
-        z-index: 54;
-      }
-      .nav-overlay.open { display: block; }
-    }
   </style>
 </head>
 <body>
 
-<div class="cursor" id="cursor"></div>
-<div class="cursor-ring" id="cursor-ring"></div>
 
 <!-- NAV -->
 <nav>
@@ -584,11 +530,11 @@
 
   <!-- Desktop links -->
   <div class="nav-links" id="nav-links">
-    <button onclick="toggleNav(); setTimeout(function(){ document.querySelector('#features').scrollIntoView({behavior:'smooth'}); }, 50);">Features</button>
-    <button onclick="toggleNav(); setTimeout(function(){ document.querySelector('#pricing').scrollIntoView({behavior:'smooth'}); }, 50);">Pricing</button>
-    <button onclick="toggleNav(); setTimeout(function(){ document.querySelector('#api').scrollIntoView({behavior:'smooth'}); }, 50);">API</button>
-    <button onclick="window.location.href='/multiplayer'">Play Live</button>
-    <button onclick="window.location.href='/play'" class="nav-cta">Play Now</button>
+    <a href="javascript:void(0)" onclick="navTo('#features')">Features</a>
+    <a href="javascript:void(0)" onclick="navTo('#pricing')">Pricing</a>
+    <a href="javascript:void(0)" onclick="navTo('#api')">API</a>
+    <a href="javascript:void(0)" onclick="navTo('/multiplayer')">Play Live</a>
+    <a href="javascript:void(0)" onclick="navTo('/play')" class="nav-cta">Play Now</a>
   </div>
 
   <!-- Hamburger button -->
@@ -772,27 +718,6 @@
 </footer>
 
 <script>
-  // Custom cursor
-  const cursor = document.getElementById('cursor');
-  const ring   = document.getElementById('cursor-ring');
-  document.addEventListener('mousemove', e => {
-    cursor.style.left = e.clientX + 'px';
-    cursor.style.top  = e.clientY + 'px';
-    ring.style.left   = e.clientX + 'px';
-    ring.style.top    = e.clientY + 'px';
-  });
-  document.querySelectorAll('a, button').forEach(el => {
-    el.addEventListener('mouseenter', () => {
-      cursor.style.transform = 'translate(-50%,-50%) scale(2)';
-      ring.style.width = '56px'; ring.style.height = '56px'; ring.style.opacity = '0.2';
-    });
-    el.addEventListener('mouseleave', () => {
-      cursor.style.transform = 'translate(-50%,-50%) scale(1)';
-      ring.style.width = '36px'; ring.style.height = '56px'; ring.style.opacity = '0.4';
-      ring.style.height = '36px';
-    });
-  });
-
   // Mini chess board
   const pieces = {
     0: '♜', 1: '♞', 2: '♝', 3: '♛', 4: '♚', 5: '♝', 6: '♞', 7: '♜',
@@ -821,41 +746,28 @@
 
 
 <script>
+function closeNav() {
+  document.getElementById('nav-links').classList.remove('open');
+  document.getElementById('hamburger').classList.remove('open');
+  document.getElementById('nav-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
 function toggleNav() {
-  const links    = document.getElementById('nav-links');
-  const burger   = document.getElementById('hamburger');
-  const overlay  = document.getElementById('nav-overlay');
+  const links = document.getElementById('nav-links');
   links.classList.toggle('open');
-  burger.classList.toggle('open');
-  overlay.classList.toggle('open');
+  document.getElementById('hamburger').classList.toggle('open');
+  document.getElementById('nav-overlay').classList.toggle('open');
   document.body.style.overflow = links.classList.contains('open') ? 'hidden' : '';
 }
-
-// Close menu on link click — let the navigation happen first
-document.querySelectorAll('.nav-links a').forEach(function(a) {
-  a.addEventListener('click', function(e) {
-    var href = this.getAttribute('href') || '';
-    var isAnchor = href.startsWith('#');
-
-    // Close the menu
-    document.getElementById('nav-links').classList.remove('open');
-    document.getElementById('hamburger').classList.remove('open');
-    document.getElementById('nav-overlay').classList.remove('open');
-    document.body.style.overflow = '';
-
-    if (isAnchor) {
-      // Anchor link — scroll to section manually so menu close doesn't interfere
-      e.preventDefault();
-      var target = document.querySelector(href);
-      if (target) {
-        setTimeout(function() {
-          target.scrollIntoView({ behavior: 'smooth' });
-        }, 50);
-      }
-    }
-    // Non-anchor links (e.g. /play, /multiplayer) navigate normally
-  });
-});
+function navTo(dest) {
+  closeNav();
+  if (dest.startsWith('#')) {
+    var target = document.querySelector(dest);
+    if (target) setTimeout(function() { target.scrollIntoView({ behavior: 'smooth' }); }, 50);
+  } else {
+    window.location.href = dest;
+  }
+}
 </script>
 
 </body>

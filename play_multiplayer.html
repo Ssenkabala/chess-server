@@ -382,7 +382,8 @@ try {
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 } catch(e) { sb = null; }
 let sessionScore  = { w: 0, d: 0, l: 0 };
-let sessionOpponentId = null;   // tracks if we're vs same opponent
+let sessionOpponentId = null;
+let opponentUsername  = null;   // store for game save   // tracks if we're vs same opponent
 
 let currentUser = null;
 let myProfile   = null;  // { username, elo }
@@ -619,6 +620,7 @@ function onGameMessage(e) {
   if (msg.type === 'ping' || msg.type === 'pong') return;
 
   if (msg.type === 'opponent_profile') {
+    opponentUsername = msg.username;
     const opColor = myColor === 'white' ? 'black' : 'white';
     document.getElementById('name-opponent').innerHTML =
       '<strong>' + msg.username + '</strong>' +
@@ -973,7 +975,7 @@ function showOverlay(result, reason) {
       pgn:          pgn.trim(),
       result:       result,
       player_color: myColor,
-      opponent:     'human'
+      opponent:     opponentUsername ? 'human:' + opponentUsername : 'human'
     }).then(function(res) {
       if (res.error) console.error('Multiplayer save failed:', res.error.message);
       else console.log('Multiplayer game saved.');

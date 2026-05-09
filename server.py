@@ -691,11 +691,11 @@ async def game_ws(ws: WebSocket, game_id: str):
                 # Check game over conditions (claim_draw=True catches threefold/50-move)
                 if game["board"].is_game_over(claim_draw=True):
                     game["over"] = True
-                    outcome = game["board"].outcome()
+                    outcome = game["board"].outcome(claim_draw=True)
                     result = (
+                        "draw" if outcome is None or outcome.winner is None else
                         "white" if outcome.winner == chess.WHITE else
-                        "black" if outcome.winner == chess.BLACK else
-                        "draw"
+                        "black"
                     )
                     reason = outcome.termination.name.lower()
                     await broadcast(game, {

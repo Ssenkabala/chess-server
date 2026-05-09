@@ -384,6 +384,7 @@ try {
 let sessionScore  = { w: 0, d: 0, l: 0 };
 let sessionOpponentId = null;   // tracks if we're vs same opponent
 let myEloChange = null;
+let opponentUsername = null;
 let currentUser = null;
 let myProfile   = null;  // { username, elo }
 let multiMoveHistory = [];
@@ -622,6 +623,7 @@ function onGameMessage(e) {
   if (msg.type === 'ping' || msg.type === 'pong') return;
 
   if (msg.type === 'opponent_profile') {
+    opponentUsername = msg.username;
     const opColor = myColor === 'white' ? 'black' : 'white';
     document.getElementById('name-opponent').innerHTML =
       '<strong>' + msg.username + '</strong>' +

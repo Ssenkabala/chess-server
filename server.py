@@ -362,17 +362,7 @@ def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str) -> int
     base  = 7
 
     if winner_color == 'draw':
-        # Draw gives ELO benefit to underdog, slight loss to favorite
-        if tiers == 0:
-            return my_elo   # equal rating, no change
-        elif tiers < 0:
-            # I am lower rated — draw is good for me
-            effect = round(base * 0.3 * abs(tiers))
-            return my_elo + effect
-        else:
-            # I am higher rated — draw is bad for me
-            effect = round(base * 0.3 * tiers)
-            return max(100, my_elo - effect)
+        return my_elo
 
     if winner_color == my_color:
         # I won — gain less if I was favored (higher), more if underdog (lower)
@@ -602,6 +592,7 @@ async def game_ws(ws: WebSocket, game_id: str):
         pass
 
     # Wait for client to declare their color via first message
+    # First message must be {"type": "claim", "color": "white"/"black"}
     try:
         claim_data = await ws.receive_json()
     except Exception:
@@ -638,7 +629,7 @@ async def game_ws(ws: WebSocket, game_id: str):
             msg_type = data.get("type")
 
             if game["over"]:
-                if msg_type not in ("rematch_offer", "rematch_accept", "rematch_decline", "ping", "claim", "profile"):
+                if msg_type not in ("rematch_offer", "rematch_accept", "rematch_decline", "ping"):
                     await send(ws, {"type": "error", "detail": "Game is over."})
                     continue
 
@@ -688,14 +679,14 @@ async def game_ws(ws: WebSocket, game_id: str):
                 remaining = deduct_clock(game)
                 fen = game["board"].fen()
 
-                # Check game over conditions (claim_draw=True catches threefold/50-move)
-                if game["board"].is_game_over(claim_draw=True):
+                # Check game over conditions
+                if game["board"].is_game_over():
                     game["over"] = True
-                    outcome = game["board"].outcome(claim_draw=True)
+                    outcome = game["board"].outcome()
                     result = (
-                        "draw" if outcome is None or outcome.winner is None else
                         "white" if outcome.winner == chess.WHITE else
-                        "black"
+                        "black" if outcome.winner == chess.BLACK else
+                        "draw"
                     )
                     reason = outcome.termination.name.lower()
                     await broadcast(game, {
@@ -731,24 +722,9 @@ async def game_ws(ws: WebSocket, game_id: str):
                 asyncio.create_task(cleanup_game(game_id, delay=10))
 
             # ΓöÇΓöÇ Draw offer (future) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-            elif msg_type == "draw_claim":
-                # Client claims draw by threefold/50-move - verify server-side
-                if game["board"].is_game_over(claim_draw=True):
-                    game["over"] = True
-                    await broadcast(game, {
-                        "type":   "gameover",
-                        "result": "draw",
-                        "reason": data.get("reason", "draw_claim"),
-                        "clock":  game["clock"],
-                    })
-                    await update_elos(game, "draw")
-                    asyncio.create_task(cleanup_game(game_id, delay=10))
-                else:
-                    await send(ws, {"type": "error", "detail": "Draw claim not valid."})
-
             elif msg_type == "draw_offer":
                 opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
-                await send(opponent_ws, {"type": "draw_offer_received"})
+                await send(opponent_ws, {"type": "draw_offer"})
 
             elif msg_type == "draw_accept":
                 game["over"] = True
@@ -891,4 +867,3 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8080))
     uvicorn.run(app, host="0.0.0.0", port=port)
-

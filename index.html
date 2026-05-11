@@ -61,7 +61,12 @@
     .panel.active { display: flex; }
 
     /* ── Board ── */
-    #board, #analysis-board { width: 100%; max-width: 480px; }
+    #board, #analysis-board { width: 100%; max-width: 520px; }
+    @media (max-width: 600px) {
+      #board, #analysis-board { width: 100vw !important; max-width: 100vw !important; }
+      .panel { max-width: 100vw; padding: 0; gap: 8px; }
+      body { padding: 8px 0; }
+    }
 
     .highlight-square {
       background: radial-gradient(circle, rgba(0,255,157,0.55) 25%, transparent 27%) !important;
@@ -598,20 +603,7 @@
       .hamburger { display: flex; }
     }
 
-    .diff-btn {
-      padding: 6px 14px;
-      background: transparent;
-      color: #555;
-      border: none;
-      border-right: 1px solid #333;
-      font-size: 13px;
-      font-family: 'Georgia', serif;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .diff-btn:last-child { border-right: none; }
-    .diff-btn:hover { color: #00ff9d; background: #1a1a1a; }
-    .diff-btn.active { background: #00ff9d22; color: #00ff9d; }
+
   </style>
 </head>
 <body>
@@ -645,22 +637,24 @@
   <div id="panel-play" class="panel active">
     <div id="status">Choose your color to begin.</div>
 
-    <!-- Difficulty selector -->
-    <div style="display:flex; align-items:center; gap:12px; font-size:12px; letter-spacing:0.1em; color:#555; text-transform:uppercase;">
-      <span>Difficulty</span>
-      <div style="display:flex; gap:0; border:1px solid #333; border-radius:2px; overflow:hidden;">
-        <button class="diff-btn active" onclick="setDifficulty(1, this)">1</button>
-        <button class="diff-btn" onclick="setDifficulty(2, this)">2</button>
-        <button class="diff-btn" onclick="setDifficulty(3, this)">3</button>
-        <button class="diff-btn" onclick="setDifficulty(4, this)">4</button>
-        <button class="diff-btn" onclick="setDifficulty(5, this)">5</button>
+    <!-- Pre-game setup — hidden once game starts -->
+    <div id="pregame-setup" style="width:100%;max-width:480px;display:flex;flex-direction:column;gap:14px;align-items:center;">
+      <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;letter-spacing:0.1em;color:#555;text-transform:uppercase;">
+          <span>Difficulty</span>
+          <span id="diff-label" style="color:#00ff9d;font-size:13px;letter-spacing:0.05em;">Beginner</span>
+        </div>
+        <input type="range" id="diff-slider" min="1" max="8" value="1"
+          style="width:100%;accent-color:#00ff9d;cursor:pointer;"
+          oninput="setDifficulty(parseInt(this.value))">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:#333;letter-spacing:0.05em;">
+          <span>Beginner</span><span>Expert</span>
+        </div>
       </div>
-      <span id="diff-label" style="color:#00ff9d88; font-size:11px;">Beginner</span>
-    </div>
-
-    <div class="controls">
-      <button id="btn-white" onclick="startGame('white')">Play as White</button>
-      <button id="btn-black" onclick="startGame('black')">Play as Black</button>
+      <div class="controls">
+        <button id="btn-white" onclick="startGame('white')">Play as White</button>
+        <button id="btn-black" onclick="startGame('black')">Play as Black</button>
+      </div>
     </div>
 
     <!-- Opponent captured pieces (shown above board) -->
@@ -797,12 +791,14 @@ function renderCandidates(candidates) {
 
 let currentDifficulty = 1;
 
-function setDifficulty(level, el) {
+const DIFF_LABELS = {
+  1:'Beginner', 2:'Beginner+', 3:'Easy', 4:'Intermediate',
+  5:'Hard', 6:'Hard+', 7:'Expert', 8:'Master'
+};
+
+function setDifficulty(level) {
   currentDifficulty = level;
-  document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('active'));
-  el.classList.add('active');
-  const labels = {1:'Beginner', 2:'Easy', 3:'Intermediate', 4:'Hard', 5:'Expert'};
-  document.getElementById('diff-label').textContent = labels[level];
+  document.getElementById('diff-label').textContent = DIFF_LABELS[level] || level;
 }
 
 // ─── Tab switching ─────────────────────────────────────────────
@@ -959,6 +955,8 @@ function showResult() {
 }
 
 function startGame(color) {
+  document.getElementById('pregame-setup').style.display = 'none';
+  document.getElementById('status').style.display = 'none';
   moveHistory = [];
   playerColor = (color === 'white') ? 'w' : 'b';
   gameStarted = true;
@@ -990,6 +988,8 @@ function startGame(color) {
 }
 
 function resetGame() {
+  document.getElementById('pregame-setup').style.display = 'flex';
+  document.getElementById('status').style.display = 'block';
   if (!gameStarted) return;
   startGame(playerColor === 'w' ? 'white' : 'black');
 }
@@ -1597,3 +1597,4 @@ function closeMenuThenAuth() {
 
 </body>
 </html>
+

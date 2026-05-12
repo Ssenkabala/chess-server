@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile · AfriChess</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    :root {
+      --bg:    #0d0d0d;
+      --bg2:   #111;
+      --bg3:   #1a1a1a;
+      --border:#222;
+      --text:  #e8e6e0;
+      --muted: #555;
+      --green: #00ff9d;
+      --red:   #ff4d4d;
+      --gold:  #d4af37;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Georgia', serif;
+      min-height: 100vh;
+      padding-bottom: 40px;
+    }
+
+    /* ── Nav ── */
+    .top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0;
+      background: var(--bg);
+      z-index: 10;
+    }
+    .top-logo {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none; color: var(--text);
+      font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .nav-links { display: flex; gap: 20px; align-items: center; }
+    .nav-links a {
+      color: var(--muted); font-size: 11px; letter-spacing: 0.15em;
+      text-transform: uppercase; text-decoration: none; cursor: pointer;
+    }
+    .nav-links a:hover { color: var(--green); }
+
+    /* ── Page layout ── */
+    .page { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
+
+    /* ── Avatar + header ── */
+    .profile-header {
+      display: flex; align-items: center; gap: 20px;
+      padding: 24px; background: var(--bg2);
+      border: 1px solid var(--border); border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    .avatar {
+      width: 72px; height: 72px; border-radius: 50%;
+      background: var(--bg3); border: 2px solid var(--green);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px; color: var(--green); letter-spacing: 0;
+      flex-shrink: 0;
+    }
+    .profile-info { flex: 1; }
+    .profile-username {
+      font-size: 22px; color: var(--text); letter-spacing: 0.08em;
+      text-transform: uppercase; margin-bottom: 4px;
+    }
+    .profile-elo {
+      font-size: 28px; color: var(--green); font-weight: bold;
+      letter-spacing: 0.05em;
+    }
+    .profile-elo span { font-size: 13px; color: var(--muted); margin-left: 6px; }
+    .profile-since {
+      font-size: 11px; color: var(--muted); letter-spacing: 0.1em;
+      text-transform: uppercase; margin-top: 6px;
+    }
+
+    /* ── Stats grid ── */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 12px; margin-bottom: 20px;
+    }
+    .stat-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 16px 12px; text-align: center;
+    }
+    .stat-val { font-size: 24px; color: var(--text); margin-bottom: 4px; }
+    .stat-val.green { color: var(--green); }
+    .stat-val.red   { color: var(--red); }
+    .stat-val.gold  { color: var(--gold); }
+    .stat-lbl { font-size: 10px; color: var(--muted); letter-spacing: 0.15em; text-transform: uppercase; }
+
+    /* ── Section ── */
+    .section {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 4px; margin-bottom: 20px; overflow: hidden;
+    }
+    .section-header {
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+      font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+      color: var(--muted);
+    }
+    .section-body { padding: 18px; }
+
+    /* ── ELO chart ── */
+    .chart-wrap { position: relative; height: 180px; }
+
+    /* ── Coach section ── */
+    .coach-usage {
+      display: flex; align-items: center; gap: 16px; margin-bottom: 16px;
+    }
+    .usage-bar-wrap { flex: 1; }
+    .usage-bar-bg {
+      height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden;
+    }
+    .usage-bar-fill {
+      height: 100%; background: var(--green); border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+    .usage-bar-fill.warning { background: #ff9d00; }
+    .usage-bar-fill.danger  { background: var(--red); }
+    .usage-count {
+      font-size: 20px; color: var(--green); white-space: nowrap;
+    }
+    .usage-count.warning { color: #ff9d00; }
+    .usage-count.danger  { color: var(--red); }
+    .upgrade-box {
+      background: var(--bg3); border: 1px solid #333;
+      border-radius: 4px; padding: 14px 16px;
+      font-size: 12px; color: var(--muted); line-height: 1.6;
+    }
+    .upgrade-box strong { color: var(--text); }
+
+    /* ── Recent games ── */
+    .game-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .game-row:last-child { border-bottom: none; }
+    .game-result {
+      width: 32px; height: 32px; border-radius: 2px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: bold; flex-shrink: 0;
+    }
+    .game-result.win  { background: #00ff9d22; color: var(--green); }
+    .game-result.loss { background: #ff4d4d22; color: var(--red); }
+    .game-result.draw { background: #55555522; color: #888; }
+    .game-info { flex: 1; }
+    .game-opp  { color: var(--text); margin-bottom: 2px; }
+    .game-meta { color: var(--muted); font-size: 10px; letter-spacing: 0.08em; }
+    .game-elo  { color: var(--muted); font-size: 11px; text-align: right; white-space: nowrap; }
+    .game-elo.pos { color: var(--green); }
+    .game-elo.neg { color: var(--red); }
+
+    /* ── Loading ── */
+    .loading {
+      text-align: center; padding: 60px 20px;
+      color: var(--muted); font-size: 13px; letter-spacing: 0.1em;
+    }
+    .not-signed-in {
+      text-align: center; padding: 80px 20px;
+      color: var(--muted);
+    }
+    .not-signed-in h2 { color: var(--text); margin-bottom: 12px; }
+    .btn {
+      display: inline-block; padding: 10px 24px;
+      background: var(--green); color: #000;
+      font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase;
+      text-decoration: none; cursor: pointer; border: none;
+      font-family: 'Georgia', serif;
+    }
+
+    @media (max-width: 500px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .profile-header { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="top-bar">
+  <a href="/" class="top-logo">
+    <img src="/logo.png" height="28" alt="AfriChess">
+    <span>Afri<span style="color:#00ff9d">Chess</span></span>
+  </a>
+  <div class="nav-links">
+    <a onclick="window.location.href='/play'">Play</a>
+    <a onclick="window.location.href='/multiplayer'">Live</a>
+    <a onclick="window.location.href='/history'">History</a>
+    <a id="nav-signout" onclick="signOut()" style="display:none">Sign Out</a>
+  </div>
+</div>
+
+<div class="page" id="page-content">
+  <div class="loading">Loading profile…</div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ic2tnenN2eWdkbWx2d2JldHhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQxMTM3NDIsImV4cCI6MjA1OTY4OTc0Mn0.BKA2G4fGlhMjJQlHgT8KaHSBjIREbdBQiQsKjy2CkP8';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+let currentUser = null;
+let eloChart = null;
+
+async function init() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) {
+    showNotSignedIn();
+    return;
+  }
+  currentUser = session.user;
+  document.getElementById('nav-signout').style.display = 'block';
+  await loadProfile();
+}
+
+function showNotSignedIn() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="not-signed-in">
+      <h2>Sign in to view your profile</h2>
+      <p style="margin-bottom:24px;font-size:13px;">Track your ELO, coach usage, and game history.</p>
+      <a href="/play" class="btn">Go to Play</a>
+    </div>`;
+}
+
+async function loadProfile() {
+  try {
+    const r = await fetch(`/api/profile/${currentUser.id}`, {
+      headers: { 'x-user-id': currentUser.id }
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    renderProfile(data);
+  } catch (e) {
+    document.getElementById('page-content').innerHTML =
+      `<div class="loading">Error loading profile: ${e.message}</div>`;
+  }
+}
+
+function renderProfile(d) {
+  const initials = (d.username || '?').slice(0, 2).toUpperCase();
+  const since = d.created_at ? new Date(d.created_at).toLocaleDateString('en-GB', {month:'short', year:'numeric'}) : '';
+  const usagePct = Math.round((d.coach_uses_today / d.coach_limit) * 100);
+  const usageClass = usagePct >= 100 ? 'danger' : usagePct >= 60 ? 'warning' : '';
+
+  document.getElementById('page-content').innerHTML = `
+    <!-- Header -->
+    <div class="profile-header">
+      <div class="avatar">${initials}</div>
+      <div class="profile-info">
+        <div class="profile-username">${d.username || 'Unknown'}</div>
+        <div class="profile-elo">${d.elo}<span>ELO</span></div>
+        ${since ? `<div class="profile-since">Member since ${since}</div>` : ''}
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-val">${d.total}</div>
+        <div class="stat-lbl">Games</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val green">${d.wins}</div>
+        <div class="stat-lbl">Wins</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val red">${d.losses}</div>
+        <div class="stat-lbl">Losses</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val gold">${d.win_rate}%</div>
+        <div class="stat-lbl">Win Rate</div>
+      </div>
+    </div>
+
+    <!-- ELO Graph -->
+    ${d.elo_history.length > 1 ? `
+    <div class="section">
+      <div class="section-header">ELO History</div>
+      <div class="section-body">
+        <div class="chart-wrap">
+          <canvas id="elo-chart"></canvas>
+        </div>
+      </div>
+    </div>` : ''}
+
+    <!-- Coach -->
+    <div class="section">
+      <div class="section-header">Coach · Senkabala</div>
+      <div class="section-body">
+        <div class="coach-usage">
+          <div class="usage-count ${usageClass}">${d.coach_uses_remaining} <span style="font-size:12px;color:var(--muted)">left today</span></div>
+          <div class="usage-bar-wrap">
+            <div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px;">
+              ${d.coach_uses_today} / ${d.coach_limit} uses today
+            </div>
+            <div class="usage-bar-bg">
+              <div class="usage-bar-fill ${usageClass}" style="width:${Math.min(usagePct,100)}%"></div>
+            </div>
+          </div>
+        </div>
+        <div class="upgrade-box">
+          <strong>Free plan:</strong> ${d.coach_limit} coach analyses per day. 
+          Each analysis uses your current position to give you real engine-backed coaching from Senkabala.<br><br>
+          ${d.coach_uses_remaining <= 0
+            ? '<strong style="color:#ff9d00">You\'ve used all your daily coach analyses.</strong> Upgrade for unlimited access — coming soon.'
+            : `Go to <a href="/play" style="color:var(--green)">Play vs Engine</a> and click <strong>Analyse</strong> after any move.`}
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Games -->
+    ${d.recent_games.length > 0 ? `
+    <div class="section">
+      <div class="section-header">Recent Games</div>
+      <div class="section-body" style="padding:0 18px;">
+        ${d.recent_games.map(g => renderGameRow(g)).join('')}
+      </div>
+    </div>` : ''}
+  `;
+
+  // Draw ELO chart
+  if (d.elo_history.length > 1) {
+    const ctx = document.getElementById('elo-chart').getContext('2d');
+    eloChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: d.elo_history.map(e => e.date),
+        datasets: [{
+          data: d.elo_history.map(e => e.elo),
+          borderColor: '#00ff9d',
+          backgroundColor: 'rgba(0,255,157,0.05)',
+          borderWidth: 2,
+          pointRadius: 3,
+          pointBackgroundColor: '#00ff9d',
+          tension: 0.3,
+          fill: true,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: {
+            ticks: { color: '#555', font: { size: 10 }, maxRotation: 0, maxTicksLimit: 6 },
+            grid: { color: '#1a1a1a' }
+          },
+          y: {
+            ticks: { color: '#555', font: { size: 10 } },
+            grid: { color: '#1a1a1a' }
+          }
+        }
+      }
+    });
+  }
+}
+
+function renderGameRow(g) {
+  const isWin  = g.result === g.player_color;
+  const isDraw = g.result === 'draw';
+  const resultClass = isWin ? 'win' : isDraw ? 'draw' : 'loss';
+  const resultLabel = isWin ? 'W' : isDraw ? 'D' : 'L';
+
+  const opp = formatOpponent(g.opponent);
+  const date = g.created_at ? new Date(g.created_at).toLocaleDateString('en-GB', {day:'numeric',month:'short'}) : '';
+  const moves = (g.pgn ? (g.pgn.match(/\d+\./g) || []).length : 0);
+
+  let eloStr = '';
+  let eloClass = '';
+  if (g.player_elo_before && g.player_elo_after) {
+    const diff = g.player_elo_after - g.player_elo_before;
+    eloStr = (diff >= 0 ? '+' : '') + diff;
+    eloClass = diff >= 0 ? 'pos' : 'neg';
+  }
+
+  return `
+    <div class="game-row">
+      <div class="game-result ${resultClass}">${resultLabel}</div>
+      <div class="game-info">
+        <div class="game-opp">vs ${opp}</div>
+        <div class="game-meta">As ${g.player_color || '?'} · ${moves} moves · ${date}</div>
+      </div>
+      ${eloStr ? `<div class="game-elo ${eloClass}">${eloStr}</div>` : ''}
+    </div>`;
+}
+
+function formatOpponent(opponent) {
+  if (!opponent) return 'Engine';
+  if (opponent.startsWith('human:')) return opponent.replace('human:', '');
+  if (opponent === 'human') return 'Human';
+  if (opponent.startsWith('engine_lvl_')) {
+    const lvl = opponent.replace('engine_lvl_', '');
+    const labels = {'1':'Beginner','2':'Beginner+','3':'Easy','4':'Intermediate','5':'Hard','6':'Hard+','7':'Expert','8':'Master'};
+    return 'Engine · ' + (labels[lvl] || 'Lvl ' + lvl);
+  }
+  return opponent;
+}
+
+async function signOut() {
+  await sb.auth.signOut();
+  window.location.href = '/';
+}
+
+init();
+</script>
+</body>
+</html>

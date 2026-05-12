@@ -800,6 +800,193 @@ def lobby_status():
 
 # ΓöÇΓöÇΓöÇ Health / static ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
+
+@app.get("/profile")
+def profile():
+    return FileResponse("profile.html")
+
+# ─── Free coach endpoint (no API key needed, uses daily quota) ────────────────
+
+class FreeCoachRequest(BaseModel):
+    fen: str
+    played_move: Optional[str] = None
+    pgn: Optional[str] = None
+    user_id: str
+    think_time: float = 0.5
+
+FREE_COACH_LIMIT = 5  # uses per day
+
+@app.post("/coach-free")
+async def coach_free(req: FreeCoachRequest):
+    if not SUPABASE_SERVICE_KEY:
+        raise HTTPException(503, "Service unavailable")
+
+    today = datetime.utcnow().date().isoformat()
+
+    # Fetch profile
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{req.user_id}", "select": "username,elo,coach_uses_today,coach_reset_date"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        rows = r.json()
+
+    if not rows:
+        raise HTTPException(404, "Profile not found")
+
+    profile = rows[0]
+    uses_today = profile.get("coach_uses_today") or 0
+    reset_date = profile.get("coach_reset_date") or ""
+
+    # Reset counter if new day
+    if reset_date != today:
+        uses_today = 0
+
+    if uses_today >= FREE_COACH_LIMIT:
+        raise HTTPException(429, f"Daily limit of {FREE_COACH_LIMIT} coach uses reached. Upgrade for unlimited access.")
+
+    # Increment usage
+    async with httpx.AsyncClient() as client:
+        await client.patch(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{req.user_id}"},
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+            json={"coach_uses_today": uses_today + 1, "coach_reset_date": today}
+        )
+
+    # Run analysis
+    try:
+        analysis = analyse_position(req.fen, req.think_time)
+    except Exception as e:
+        raise HTTPException(500, f"Engine error: {e}")
+
+    score_pawns = round(analysis["score_cp"] / 100, 2)
+    board = chess.Board(req.fen)
+    turn = "White" if board.turn == chess.WHITE else "Black"
+
+    prompt = f"""You are Senkabala, an expert chess coach powered by a 2050 ELO engine.
+Analyze this position and give coaching advice to a club-level player.
+
+Position (FEN): {req.fen}
+Side to move: {turn}
+Engine evaluation: {'+' if score_pawns >= 0 else ''}{score_pawns} pawns (from White's perspective)
+Engine best move: {analysis['best_move']}
+Suggested continuation: {' '.join(analysis['pv'])}
+"""
+    if req.played_move and req.played_move != analysis['best_move']:
+        prompt += f"
+The player just played: {req.played_move}
+Briefly explain why {analysis['best_move']} is better.
+"
+    elif req.played_move:
+        prompt += f"
+The player found the best move: {req.played_move}. Confirm why this is strong.
+"
+
+    if req.pgn:
+        prompt += f"
+Game PGN:
+{req.pgn}
+"
+
+    prompt += """
+Respond in this exact format:
+ASSESSMENT: (1 sentence on who stands better and why)
+BEST MOVE: (explain the engine best move in plain English)
+PLAN: (2-3 sentences on the strategic plan)
+TIP: (one practical chess principle this position illustrates)
+"""
+
+    try:
+        ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        message = ai_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        explanation = message.content[0].text
+    except Exception as e:
+        raise HTTPException(500, f"Coach unavailable: {e}")
+
+    return {
+        "best_move": analysis["best_move"],
+        "eval_pawns": score_pawns,
+        "pv": analysis["pv"],
+        "coaching": explanation,
+        "uses_today": uses_today + 1,
+        "uses_remaining": FREE_COACH_LIMIT - (uses_today + 1),
+    }
+
+# ─── Profile stats endpoint ───────────────────────────────────────────────────
+
+@app.get("/api/profile/{user_id}")
+async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
+    if x_user_id != user_id:
+        raise HTTPException(403, "Forbidden")
+    if not SUPABASE_SERVICE_KEY:
+        raise HTTPException(503, "Service unavailable")
+
+    today = datetime.utcnow().date().isoformat()
+
+    async with httpx.AsyncClient() as client:
+        # Get profile
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{user_id}", "select": "*"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        profiles = r.json()
+        if not profiles:
+            raise HTTPException(404, "Profile not found")
+        profile = profiles[0]
+
+        # Get games
+        r2 = await client.get(
+            f"{SUPABASE_URL}/rest/v1/games",
+            params={"user_id": f"eq.{user_id}", "select": "*", "order": "created_at.desc", "limit": "50"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        games = r2.json()
+
+    # Compute stats
+    wins = sum(1 for g in games if g.get("result") == g.get("player_color"))
+    losses = sum(1 for g in games if g.get("result") not in (g.get("player_color"), "draw") and g.get("result"))
+    draws = sum(1 for g in games if g.get("result") == "draw")
+    total = len(games)
+
+    # ELO history from games
+    elo_history = []
+    for g in reversed(games):
+        if g.get("player_elo_after"):
+            elo_history.append({"date": g["created_at"][:10], "elo": g["player_elo_after"]})
+
+    # Coach usage
+    uses_today = profile.get("coach_uses_today") or 0
+    if profile.get("coach_reset_date") != today:
+        uses_today = 0
+
+    return {
+        "username": profile.get("username"),
+        "elo": profile.get("elo", 1500),
+        "created_at": profile.get("created_at"),
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
+        "total": total,
+        "win_rate": round(wins / total * 100) if total else 0,
+        "recent_games": games[:10],
+        "elo_history": elo_history[-20:],
+        "coach_uses_today": uses_today,
+        "coach_uses_remaining": FREE_COACH_LIMIT - uses_today,
+        "coach_limit": FREE_COACH_LIMIT,
+    }
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -867,3 +1054,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8080))
     uvicorn.run(app, host="0.0.0.0", port=port)
+

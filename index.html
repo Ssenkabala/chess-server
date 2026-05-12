@@ -623,6 +623,7 @@
   <a onclick="navTo('/')">Home</a>
   <a onclick="navTo('/multiplayer')">Play Live</a>
   <a onclick="navTo('/history')">My Games</a>
+  <a onclick="navTo('/profile')">Profile</a>
   <a onclick="closeMenuThenAuth()">Sign In</a>
 </div>
 <div class="nav-overlay" id="nav-overlay" onclick="toggleMobileMenu()"></div>
@@ -670,6 +671,7 @@
       <div class="user-info" id="user-info">Not signed in</div>
       <div class="user-actions">
         <button onclick="openAuth()" id="btn-login">Sign In</button>
+        <button onclick="window.location.href='/profile'" id="btn-profile" style="display:none">Profile</button>
         <button onclick="goToHistory()" id="btn-history" style="display:none">My Games</button>
         <button onclick="signOut()" id="btn-signout" style="display:none">Sign Out</button>
       </div>
@@ -693,7 +695,9 @@
     <!-- API key input -->
     <div class="api-row">
       <span class="api-label">API Key</span>
-      <input id="api-key-input" type="password" placeholder="Your Africhess API key (required for coaching)" />
+      <div id="coach-usage-label" style="font-size:11px;color:#555;letter-spacing:0.1em;text-transform:uppercase;text-align:right;margin-bottom:4px;">
+        Sign in to use coaching
+      </div>
     </div>
 
     <!-- FEN input -->
@@ -1179,51 +1183,46 @@ function analysePosition() {
 
 function getCoaching() {
   if (!analysisBoard) initAnalysisBoard();
-  
-  var apiKey = document.getElementById('api-key-input').value.trim();
-  if (!apiKey) {
-    setAnalysisStatus('Enter your API key above to use coaching.');
+
+  if (!currentUser) {
+    setAnalysisStatus('Sign in to use coaching.');
     return;
   }
+
   var fen = analysisGame.fen();
   setAnalysisStatus('<span class="spinner"></span> Coach thinking...');
-  document.getElementById('analysis-status').innerHTML =
-    '<span class="spinner"></span> Coach thinking...';
   document.getElementById('btn-coach').disabled = true;
   resetCoachCard();
 
-  fetch(API_BASE + '/coach', {
+  fetch(API_BASE + '/coach-free', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey
-    },
-    body: JSON.stringify({ fen: fen, think_time: 2.0 })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fen: fen, user_id: currentUser.id, think_time: 1.0 })
   })
   .then(r => r.json())
   .then(data => {
     if (data.detail) {
-      setAnalysisStatus('Error: ' + data.detail);
+      setAnalysisStatus('⚠ ' + data.detail);
       document.getElementById('btn-coach').disabled = false;
       return;
     }
 
-    // Highlight best move on board
+    // Update usage display
+    if (data.uses_remaining !== undefined) {
+      var usageEl = document.getElementById('coach-usage-label');
+      if (usageEl) usageEl.textContent = data.uses_remaining + ' coach uses left today';
+    }
+
     if (data.best_move) {
       highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
     }
-
-    // Update eval bar
     updateEvalBar(data.eval_pawns || 0);
-
-    // Parse coaching text into sections
     parseAndRenderCoaching(data.coaching, data.best_move, data.eval_pawns);
-
     setAnalysisStatus('Analysis complete.');
     document.getElementById('btn-coach').disabled = false;
   })
   .catch(() => {
-    setAnalysisStatus('Coach unavailable — check server and API key.');
+    setAnalysisStatus('Coach unavailable — try again.');
     document.getElementById('btn-coach').disabled = false;
   });
 }
@@ -1324,6 +1323,9 @@ function setUser(user) {
   document.getElementById('btn-login').style.display    = 'none';
   document.getElementById('btn-signout').style.display  = 'inline-block';
   document.getElementById('btn-history').style.display  = 'inline-block';
+  document.getElementById('btn-profile').style.display  = 'inline-block';
+  var usageEl = document.getElementById('coach-usage-label');
+  if (usageEl) usageEl.textContent = '5 coach uses left today';
   closeAuth();
   // Load profile to show username
   loadProfile(user);
@@ -1394,6 +1396,7 @@ function clearUser() {
   document.getElementById('btn-login').style.display    = 'inline-block';
   document.getElementById('btn-signout').style.display  = 'none';
   document.getElementById('btn-history').style.display  = 'none';
+  document.getElementById('btn-profile').style.display  = 'none';
 }
 
 // ── Auth modal ────────────────────────────────────────────────

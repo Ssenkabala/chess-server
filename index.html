@@ -1160,25 +1160,20 @@ function analysePosition() {
   setAnalysisStatus('⏳ Engine analysing...');
   document.getElementById('btn-coach').disabled = true;
 
-  fetch(API_BASE + '/move', {
+  fetch(API_BASE + '/analyse-position', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fen: fen, think_time: 2.0 })
+    body: JSON.stringify({ fen: fen })
   })
   .then(r => r.json())
   .then(data => {
-      var from = data.move.slice(0, 2);
-      var to   = data.move.slice(2, 4);
-      highlightBestMove(from, to);
-      updateEvalBar(data.eval_pawns || 0); 
-      renderCandidates(data.candidates);
-      setAnalysisStatus('Best move: ' + data.move + '  |  Use Coach Me for a full explanation.');
+      if (data.best_move) {
+        highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
+      }
+      updateEvalBar(data.eval_pawns || 0);
+      setAnalysisStatus('Best move: ' + (data.best_move || '?') + '  |  Eval: ' + (data.eval_pawns >= 0 ? '+' : '') + data.eval_pawns);
       document.getElementById('btn-coach').disabled = false;
   })
-  .catch(() => {
-    setAnalysisStatus('Engine error — is the server running?');
-    document.getElementById('btn-coach').disabled = false;
-  });
 }
 
 function getCoaching() {

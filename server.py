@@ -792,8 +792,7 @@ async def game_ws(ws: WebSocket, game_id: str):
             active_games.pop(game_id, None)
 
 
-# ΓöÇΓöÇ Lobby status (optional debug endpoint) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-
+# ΓöÇΓöÇ Lobby status (optional debug endpoint) 
 @app.get("/lobby/status")
 def lobby_status():
     return {
@@ -801,8 +800,7 @@ def lobby_status():
         "active_games": len(active_games),
     }
 
-# ΓöÇΓöÇΓöÇ Health / static ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-
+# ----------- Health / static --------------------------------------------------------
 
 @app.get("/profile")
 def profile():
@@ -987,6 +985,25 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         "coach_uses_remaining": FREE_COACH_LIMIT - uses_today,
         "coach_limit": FREE_COACH_LIMIT,
     }
+
+class AnalyseRequest(BaseModel):
+    fen: str
+
+@app.post("/analyse-position")
+async def analyse_pos(req: AnalyseRequest):
+    try:
+        async with engine_semaphore:
+            loop = asyncio.get_event_loop()
+            analysis = await loop.run_in_executor(None, analyse_position, req.fen, 2.0)
+        return {
+            "best_move": analysis["best_move"],
+            "eval_pawns": round(analysis["score_cp"] / 100, 2),
+            "score_cp":   analysis["score_cp"],
+            "pv":         analysis["pv"],
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Engine error: {e}")
+
 
 @app.get("/health")
 def health():

@@ -183,6 +183,8 @@ def analyse_position(fen: str, think_time: float):
         )
         best_move = info["pv"][0].uci() if info.get("pv") else None
         score = info["score"].white().score(mate_score=10000)  # centipawns
+        if score is None:
+            score = 0
         pv_moves = [m.uci() for m in info.get("pv", [])[:5]]
 
     return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
@@ -860,9 +862,11 @@ async def coach_free(req: FreeCoachRequest):
             json={"coach_uses_today": uses_today + 1, "coach_reset_date": today}
         )
 
-    # Run analysis
+    # Run analysis — use semaphore and run in thread to avoid blocking event loop
     try:
-        analysis = analyse_position(req.fen, req.think_time)
+        async with engine_semaphore:
+            loop = asyncio.get_event_loop()
+            analysis = await loop.run_in_executor(None, analyse_position, req.fen, req.think_time)
     except Exception as e:
         raise HTTPException(500, f"Engine error: {e}")
 

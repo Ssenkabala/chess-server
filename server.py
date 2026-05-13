@@ -182,7 +182,8 @@ def analyse_position(fen: str, think_time: float):
             # removed multipv=3 since your engine doesn't support it
         )
         best_move = info["pv"][0].uci() if info.get("pv") else None
-        score = info["score"].white().score(mate_score=10000)  # centipawns
+        score_obj = info.get("score")
+        score = score_obj.white().score(mate_score=10000) if score_obj else 0
         if score is None:
             score = 0
         pv_moves = [m.uci() for m in info.get("pv", [])[:5]]
@@ -869,7 +870,7 @@ async def coach_free(req: FreeCoachRequest):
             analysis = await loop.run_in_executor(None, analyse_position, req.fen, req.think_time)
     except Exception as e:
         import traceback
-        logger.error(f"coach-free engine error: {traceback.format_exc()}")
+        print(f"coach-free engine error: {traceback.format_exc()}", flush=True)
         raise HTTPException(500, f"Engine error: {e}")
 
     score_pawns = round(analysis["score_cp"] / 100, 2)
@@ -911,7 +912,7 @@ TIP: (one practical chess principle this position illustrates)
         explanation = message.content[0].text
     except Exception as e:
         import traceback
-        logger.error(f"coach-free anthropic error: {traceback.format_exc()}")
+        print(f"coach-free anthropic error: {traceback.format_exc()}", flush=True)
         raise HTTPException(500, f"Coach unavailable: {e}")
 
     return {

@@ -1182,10 +1182,13 @@ function analysePosition() {
 }
 
 function getCoaching() {
-  if (!analysisBoard) initAnalysisBoard();
-
-  if (!currentUser) {
+    if (!currentUser) {
     setAnalysisStatus('Sign in to use coaching.');
+    return;
+  }
+
+  if (!analysisBoard || !analysisGame) {
+    setAnalysisStatus('Load a position first using the Analyse button.');
     return;
   }
 

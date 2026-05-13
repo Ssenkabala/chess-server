@@ -868,6 +868,8 @@ async def coach_free(req: FreeCoachRequest):
             loop = asyncio.get_event_loop()
             analysis = await loop.run_in_executor(None, analyse_position, req.fen, req.think_time)
     except Exception as e:
+        import traceback
+        logger.error(f"coach-free engine error: {traceback.format_exc()}")
         raise HTTPException(500, f"Engine error: {e}")
 
     score_pawns = round(analysis["score_cp"] / 100, 2)
@@ -902,12 +904,14 @@ TIP: (one practical chess principle this position illustrates)
     try:
         ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         message = ai_client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-opus-4-5",
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}]
         )
         explanation = message.content[0].text
     except Exception as e:
+        import traceback
+        logger.error(f"coach-free anthropic error: {traceback.format_exc()}")
         raise HTTPException(500, f"Coach unavailable: {e}")
 
     return {
@@ -1036,7 +1040,21 @@ def chess_js():
 
 import os
 
-@app.get("/debug-files")
+@app.get("/debug-coach")
+async def debug_coach():
+    """Test engine analysis in isolation."""
+    import traceback
+    try:
+        loop = asyncio.get_event_loop()
+        analysis = await loop.run_in_executor(
+            None, analyse_position,
+            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", 0.5
+        )
+        return {"status": "ok", "analysis": analysis}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
+
+
 def debug_files():
     return {
         "cwd": os.getcwd(),

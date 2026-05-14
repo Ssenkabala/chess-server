@@ -176,16 +176,26 @@ def analyse_position(fen: str, think_time: float):
     """Returns best_move (UCI), score in centipawns, and top PV moves."""
     board = chess.Board(fen)
     with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-        info = engine.analyse(
-            board,
-            chess.engine.Limit(time=think_time)
-            # removed multipv=3 since your engine doesn't support it
-        )
-        best_move = info["pv"][0].uci() if info.get("pv") else None
+        actual_time = max(think_time, 2.0)
+        info = engine.analyse(board, chess.engine.Limit(time=actual_time))
+
+        # Best move from pv, fallback to play()
+        if info.get("pv"):
+            best_move = info["pv"][0].uci()
+        else:
+            result = engine.play(board, chess.engine.Limit(time=1.0))
+            best_move = result.move.uci() if result.move else None
+
+        # Score with fallback
         score_obj = info.get("score")
-        score = score_obj.white().score(mate_score=10000) if score_obj else 0
+        score = score_obj.white().score(mate_score=10000) if score_obj else None
+        if score is None:
+            info2 = engine.analyse(board, chess.engine.Limit(time=1.0))
+            score_obj2 = info2.get("score")
+            score = score_obj2.white().score(mate_score=10000) if score_obj2 else 0
         if score is None:
             score = 0
+
         pv_moves = [m.uci() for m in info.get("pv", [])[:5]]
 
     return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
@@ -792,7 +802,8 @@ async def game_ws(ws: WebSocket, game_id: str):
             active_games.pop(game_id, None)
 
 
-# ΓöÇΓöÇ Lobby status (optional debug endpoint) 
+# ΓöÇΓöÇ Lobby status (optional debug endpoint) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+
 @app.get("/lobby/status")
 def lobby_status():
     return {
@@ -800,7 +811,8 @@ def lobby_status():
         "active_games": len(active_games),
     }
 
-# ----------- Health / static --------------------------------------------------------
+# ΓöÇΓöÇΓöÇ Health / static ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+
 
 @app.get("/profile")
 def profile():
@@ -872,17 +884,24 @@ async def coach_free(req: FreeCoachRequest):
         raise HTTPException(500, f"Engine error: {e}")
 
     score_pawns = round(analysis["score_cp"] / 100, 2)
+
+    if not analysis.get("best_move"):
+        raise HTTPException(500, "Engine could not analyse this position. Please try again.")
+
     board = chess.Board(req.fen)
     turn = "White" if board.turn == chess.WHITE else "Black"
 
-    prompt = f"""You are Senkabala, an expert chess coach powered by a 2050 ELO engine.
-Analyze this position and give coaching advice to a club-level player.
+    # Let Claude parse the board independently — don't rely solely on engine eval
+    prompt = f"""You are Senkabala, an expert chess coach powered by a strong chess engine.
+Analyze this position carefully and give coaching advice to a club-level player.
 
 Position (FEN): {req.fen}
 Side to move: {turn}
-Engine evaluation: {'+' if score_pawns >= 0 else ''}{score_pawns} pawns (from White's perspective)
 Engine best move: {analysis['best_move']}
 Suggested continuation: {' '.join(analysis['pv'])}
+Engine evaluation: {'+' if score_pawns >= 0 else ''}{score_pawns} pawns (from White's perspective)
+
+IMPORTANT: Read the board position from the FEN yourself. Do not rely solely on the engine evaluation number — use your own chess understanding to verify what is happening tactically and strategically. If the position has obvious tactics (captures, forks, hanging pieces), mention them explicitly even if the eval seems off.
 """
     if req.played_move and req.played_move != analysis['best_move']:
         prompt += f"\nThe player just played: {req.played_move}\nBriefly explain why {analysis['best_move']} is better.\n"
@@ -986,6 +1005,7 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         "coach_limit": FREE_COACH_LIMIT,
     }
 
+
 class AnalyseRequest(BaseModel):
     fen: str
 
@@ -1002,8 +1022,9 @@ async def analyse_pos(req: AnalyseRequest):
             "pv":         analysis["pv"],
         }
     except Exception as e:
+        import traceback
+        print(f"analyse-position error: {traceback.format_exc()}", flush=True)
         raise HTTPException(500, f"Engine error: {e}")
-
 
 @app.get("/health")
 def health():

@@ -63,8 +63,9 @@
     /* ── Board ── */
     #board, #analysis-board { width: 100%; max-width: 520px; }
     @media (max-width: 600px) {
-      #board, #analysis-board { width: 100vw !important; max-width: 100vw !important; }
-      .panel { max-width: 100vw; padding: 0; gap: 8px; }
+      #board, #analysis-board { width: calc(100vw - 16px) !important; max-width: calc(100vw - 16px) !important; }
+      .panel { max-width: 100vw; padding: 0 8px; gap: 8px; }
+      .captured-bar, .user-bar { max-width: calc(100vw - 16px) !important; }
       body { padding: 8px 0; }
     }
 
@@ -111,7 +112,8 @@
     .analysis-input-row {
       display: flex;
       gap: 10px;
-      width: 480px;
+      width: 100%;
+      max-width: 480px;
     }
     #fen-input {
       flex: 1;
@@ -132,7 +134,8 @@
     .api-row {
       display: flex;
       gap: 10px;
-      width: 480px;
+      width: 100%;
+      max-width: 480px;
       align-items: center;
     }
     #api-key-input {
@@ -159,7 +162,8 @@
 
     /* Eval bar */
     .eval-bar-wrap {
-      width: 480px;
+      width: 100%;
+      max-width: 480px;
       height: 6px;
       background: #222;
       border-radius: 3px;
@@ -176,13 +180,15 @@
       font-size: 12px;
       color: #555;
       letter-spacing: 0.08em;
-      width: 480px;
+      width: 100%;
+      max-width: 480px;
       text-align: right;
     }
 
     /* Coach card */
     #coach-card {
-      width: 480px;
+      width: 100%;
+      max-width: 480px;
       background: #161616;
       border: 1px solid #2a2a2a;
       border-left: 3px solid #00ff9d44;
@@ -232,7 +238,8 @@
     }
     /* ── Candidate moves ── */
     .candidates-wrap {
-      width: 480px;
+      width: 100%;
+      max-width: 480px;
       background: #161616;
       border: 1px solid #2a2a2a;
       border-radius: 2px;
@@ -639,7 +646,7 @@
     <div id="status">Choose your color to begin.</div>
 
     <!-- Pre-game setup — hidden once game starts -->
-    <div id="pregame-setup" style="width:100%;max-width:480px;display:flex;flex-direction:column;gap:14px;align-items:center;">
+    <div id="pregame-setup" style="width:100%;display:flex;flex-direction:column;gap:14px;align-items:center;">
       <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;letter-spacing:0.1em;color:#555;text-transform:uppercase;">
           <span>Difficulty</span>
@@ -1068,7 +1075,7 @@ var analysisGame = new Chess();
 var analysisBoard = null;
 
 function setAnalysisStatus(msg) {
-  document.getElementById('analysis-status').textContent = msg;
+  document.getElementById('analysis-status').innerHTML = msg;
 }
 
 function initAnalysisBoard() {
@@ -1167,23 +1174,32 @@ function analysePosition() {
   })
   .then(r => r.json())
   .then(data => {
-      if (data.best_move) {
-        highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
-      }
-      updateEvalBar(data.eval_pawns || 0);
-      setAnalysisStatus('Best move: ' + (data.best_move || '?') + '  |  Eval: ' + (data.eval_pawns >= 0 ? '+' : '') + data.eval_pawns);
+    if (data.detail) {
+      setAnalysisStatus('Engine error: ' + data.detail);
       document.getElementById('btn-coach').disabled = false;
+      return;
+    }
+    if (data.best_move) {
+      highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
+    }
+    var evalStr = data.eval_pawns !== undefined
+      ? (data.eval_pawns >= 0 ? '+' : '') + data.eval_pawns
+      : '?';
+    updateEvalBar(data.eval_pawns || 0);
+    setAnalysisStatus('Best move: ' + (data.best_move || '?') + '  |  Eval: ' + evalStr + '  |  Use Coach Me for explanation.');
+    document.getElementById('btn-coach').disabled = false;
   })
+  .catch(() => {
+    setAnalysisStatus('Engine error — is the server running?');
+    document.getElementById('btn-coach').disabled = false;
+  });
 }
 
 function getCoaching() {
-    if (!currentUser) {
-    setAnalysisStatus('Sign in to use coaching.');
-    return;
-  }
+  if (!analysisBoard) initAnalysisBoard();
 
-  if (!analysisBoard || !analysisGame) {
-    setAnalysisStatus('Load a position first using the Analyse button.');
+  if (!currentUser) {
+    setAnalysisStatus('Sign in to use coaching.');
     return;
   }
 

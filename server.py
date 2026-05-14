@@ -177,26 +177,43 @@ def analyse_position(fen: str, think_time: float):
     board = chess.Board(fen)
     with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
         actual_time = max(think_time, 2.0)
-        info = engine.analyse(board, chess.engine.Limit(time=actual_time))
+        result = engine.analyse(board, chess.engine.Limit(time=actual_time))
 
-        # Best move from pv, fallback to play()
+        # engine.analyse() can return a list (multipv) or a single dict
+        info = result[0] if isinstance(result, list) else result
+
+        print(f"DEBUG info keys: {list(info.keys())}, score: {info.get('score')}, pv: {info.get('pv')}", flush=True)
+
+        # Best move
         if info.get("pv"):
             best_move = info["pv"][0].uci()
         else:
-            result = engine.play(board, chess.engine.Limit(time=1.0))
-            best_move = result.move.uci() if result.move else None
+            play_result = engine.play(board, chess.engine.Limit(time=1.0))
+            best_move = play_result.move.uci() if play_result.move else None
 
-        # Score with fallback
+        # Score
         score_obj = info.get("score")
-        score = score_obj.white().score(mate_score=10000) if score_obj else None
+        if score_obj is not None:
+            score = score_obj.white().score(mate_score=10000)
+        else:
+            score = None
+
+        # Fallback: try wtime/btime approach
         if score is None:
-            info2 = engine.analyse(board, chess.engine.Limit(time=1.0))
+            limit = chess.engine.Limit(
+                white_clock=3.0, black_clock=3.0, remaining_moves=1
+            )
+            info2 = engine.analyse(board, limit)
+            if isinstance(info2, list):
+                info2 = info2[0]
             score_obj2 = info2.get("score")
             score = score_obj2.white().score(mate_score=10000) if score_obj2 else 0
+
         if score is None:
             score = 0
 
         pv_moves = [m.uci() for m in info.get("pv", [])[:5]]
+        print(f"DEBUG final — best_move: {best_move}, score: {score}", flush=True)
 
     return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
 

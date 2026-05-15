@@ -173,39 +173,77 @@ def verify_key(x_api_key: str = Header(...)):
 # ΓöÇΓöÇΓöÇ Engine helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 def analyse_position(fen: str, think_time: float):
-    """Returns best_move (UCI), score in centipawns, and top PV moves."""
-    import re
+    """Returns best_move and score by talking directly to engine process."""
+    import subprocess, threading
+
     board = chess.Board(fen)
+    think_ms = int(max(think_time, 2.0) * 1000)
 
     best_move = None
     score = 0
     pv_moves = []
+    stderr_lines = []
 
-    with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-        actual_time = max(think_time, 2.0)
+    proc = subprocess.Popen(
+        [ENGINE_PATH],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1
+    )
 
-        # Use play() which reliably returns a move
-        # Capture the info from the play result
-        play_result = engine.play(
-            board,
-            chess.engine.Limit(time=actual_time),
-            info=chess.engine.INFO_ALL
-        )
+    def read_stderr():
+        for line in proc.stderr:
+            stderr_lines.append(line.strip())
 
-        if play_result.move:
-            best_move = play_result.move.uci()
+    t = threading.Thread(target=read_stderr, daemon=True)
+    t.start()
 
-        # Try to get score from play result info
-        if play_result.info:
-            score_obj = play_result.info.get("score")
-            if score_obj is not None:
-                score = score_obj.white().score(mate_score=10000) or 0
-            if play_result.info.get("pv"):
-                pv_moves = [m.uci() for m in play_result.info["pv"][:5]]
+    commands = f"uci\nucinewgame\nposition fen {board.fen()}\ngo movetime {think_ms}\n"
+    try:
+        stdout_data, _ = proc.communicate(input=commands, timeout=think_ms/1000 + 5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout_data, _ = proc.communicate()
+    t.join(timeout=2)
 
-        print(f"DEBUG play info keys: {list(play_result.info.keys()) if play_result.info else []}", flush=True)
-        print(f"DEBUG best_move: {best_move}, score: {score}", flush=True)
+    # Parse stdout for bestmove
+    for line in stdout_data.splitlines():
+        line = line.strip()
+        if line.startswith("bestmove"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
+                best_move = parts[1]
 
+    # Parse stderr for score and pv — engine writes info lines there
+    best_depth = -1
+    for line in stderr_lines:
+        if "score cp" in line and "depth" in line:
+            try:
+                parts = line.split()
+                depth = int(parts[parts.index("depth") + 1]) if "depth" in parts else 0
+                cp_idx = parts.index("cp")
+                cp = int(parts[cp_idx + 1])
+                if depth > best_depth:
+                    best_depth = depth
+                    score = cp
+                    # Parse pv from this line if present
+                    if "pv" in parts:
+                        pv_idx = parts.index("pv")
+                        pv_moves = parts[pv_idx + 1: pv_idx + 6]
+            except (ValueError, IndexError):
+                continue
+
+    # Score is from side-to-move perspective — convert to white's perspective
+    if board.turn == chess.BLACK:
+        score = -score
+
+    # Fallback best_move from pv
+    if not best_move and pv_moves:
+        best_move = pv_moves[0]
+
+    print(f"DEBUG analyse: best_move={best_move}, score={score}, depth={best_depth}", flush=True)
     return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
 
 # ΓöÇΓöÇΓöÇ Original /move endpoint (unchanged) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ

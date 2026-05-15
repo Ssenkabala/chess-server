@@ -174,46 +174,37 @@ def verify_key(x_api_key: str = Header(...)):
 
 def analyse_position(fen: str, think_time: float):
     """Returns best_move (UCI), score in centipawns, and top PV moves."""
+    import re
     board = chess.Board(fen)
+
+    best_move = None
+    score = 0
+    pv_moves = []
+
     with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
         actual_time = max(think_time, 2.0)
-        result = engine.analyse(board, chess.engine.Limit(time=actual_time))
 
-        # engine.analyse() can return a list (multipv) or a single dict
-        info = result[0] if isinstance(result, list) else result
+        # Use play() which reliably returns a move
+        # Capture the info from the play result
+        play_result = engine.play(
+            board,
+            chess.engine.Limit(time=actual_time),
+            info=chess.engine.INFO_ALL
+        )
 
-        print(f"DEBUG info keys: {list(info.keys())}, score: {info.get('score')}, pv: {info.get('pv')}", flush=True)
+        if play_result.move:
+            best_move = play_result.move.uci()
 
-        # Best move
-        if info.get("pv"):
-            best_move = info["pv"][0].uci()
-        else:
-            play_result = engine.play(board, chess.engine.Limit(time=1.0))
-            best_move = play_result.move.uci() if play_result.move else None
+        # Try to get score from play result info
+        if play_result.info:
+            score_obj = play_result.info.get("score")
+            if score_obj is not None:
+                score = score_obj.white().score(mate_score=10000) or 0
+            if play_result.info.get("pv"):
+                pv_moves = [m.uci() for m in play_result.info["pv"][:5]]
 
-        # Score
-        score_obj = info.get("score")
-        if score_obj is not None:
-            score = score_obj.white().score(mate_score=10000)
-        else:
-            score = None
-
-        # Fallback: try wtime/btime approach
-        if score is None:
-            limit = chess.engine.Limit(
-                white_clock=3.0, black_clock=3.0, remaining_moves=1
-            )
-            info2 = engine.analyse(board, limit)
-            if isinstance(info2, list):
-                info2 = info2[0]
-            score_obj2 = info2.get("score")
-            score = score_obj2.white().score(mate_score=10000) if score_obj2 else 0
-
-        if score is None:
-            score = 0
-
-        pv_moves = [m.uci() for m in info.get("pv", [])[:5]]
-        print(f"DEBUG final — best_move: {best_move}, score: {score}", flush=True)
+        print(f"DEBUG play info keys: {list(play_result.info.keys()) if play_result.info else []}", flush=True)
+        print(f"DEBUG best_move: {best_move}, score: {score}", flush=True)
 
     return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
 

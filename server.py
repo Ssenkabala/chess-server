@@ -478,8 +478,13 @@ async def send(ws: WebSocket, msg: dict):
 
 
 async def broadcast(game: dict, msg: dict):
-    await send(game["white_ws"], msg)
-    await send(game["black_ws"], msg)
+    # Prefer the dedicated game WebSocket; fall back to lobby ws; skip if None
+    w_ws = game.get("white_game_ws") or game.get("white_ws")
+    b_ws = game.get("black_game_ws") or game.get("black_ws")
+    if w_ws:
+        await send(w_ws, msg)
+    if b_ws:
+        await send(b_ws, msg)
 
 
 def deduct_clock(game: dict) -> float:
@@ -500,6 +505,10 @@ async def clock_loop(game_id: str):
         game = active_games.get(game_id)
         if not game or game["over"]:
             return
+
+        # Wait until both players have connected their game WebSockets before ticking
+        if not game.get("white_game_ws") or not game.get("black_game_ws"):
+            continue
 
         now = time.time()
         elapsed = now - game["last_move_ts"]
@@ -679,6 +688,7 @@ async def game_ws(ws: WebSocket, game_id: str):
 
     # Notify both players once both are connected
     if game.get("white_game_ws") and game.get("black_game_ws"):
+        game["last_move_ts"] = time.time()  # reset clock reference so timer starts fresh
         await broadcast(game, {"type": "both_connected"})
 
     try:
@@ -815,10 +825,12 @@ async def game_ws(ws: WebSocket, game_id: str):
                               old_white_profile.get("username", "?") if old_white_profile else "?")
                 ng["white_profile"]   = old_black_profile
                 ng["black_profile"]   = old_white_profile
+                # Clear stale lobby sockets — players will connect fresh via /ws/game/{new_game_id}
+                ng["white_ws"] = None
+                ng["black_ws"] = None
                 active_games[new_game_id] = ng
 
-                # Notify players — colors are swapped
-                # old black → new white; old white → new black
+                # Notify players on the OLD game sockets before they disconnect
                 await send(old_black_ws, {
                     "type": "rematch_start", "game_id": new_game_id, "color": "white"
                 })
@@ -1161,35 +1173,7 @@ def logo():
 
 @app.get("/favicon.ico")
 def favicon():
-    return FileResponse("favicon.ico")
-
-@app.get("/favicon_16x16.png")
-def favicon16():
-    return FileResponse("favicon_16x16.png")
-
-@app.get("/favicon_32x32.png")
-def favicon32():
-    return FileResponse("favicon_32x32.png")
-
-@app.get("/apple-touch-icon.png")
-def apple_touch():
-    return FileResponse("apple-touch-icon.png")
-
-@app.get("/android-chrome-192x192.png")
-def android192():
-    return FileResponse("android-chrome-192x192.png")
-
-@app.get("/android-chrome-512x512.png")
-def android512():
-    return FileResponse("android-chrome-512x512.png")
-
-@app.get("/site.webmanifest")
-def webmanifest():
-    return FileResponse("site.webmanifest", media_type="application/manifest+json")
-
-@app.get("/sitemap.xml")
-def sitemap():
-    return FileResponse("sitemap.xml", media_type="application/xml")
+    return FileResponse("logo.png")
 
 @app.get("/history")
 def history():

@@ -243,6 +243,7 @@ def analyse_position(fen: str, think_time: float):
     if not best_move and pv_moves:
         best_move = pv_moves[0]
 
+    print(f"DEBUG analyse: best_move={best_move}, score={score}, depth={best_depth}", flush=True)
     return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
 
 # ΓöÇΓöÇΓöÇ Original /move endpoint (unchanged) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -687,7 +688,7 @@ async def game_ws(ws: WebSocket, game_id: str):
             msg_type = data.get("type")
 
             if game["over"]:
-                if msg_type not in ("rematch_offer", "rematch_accept", "rematch_decline", "ping"):
+                if msg_type not in ("rematch_offer", "rematch_accept", "rematch_decline", "draw_claim", "ping"):
                     await send(ws, {"type": "error", "detail": "Game is over."})
                     continue
 
@@ -795,6 +796,26 @@ async def game_ws(ws: WebSocket, game_id: str):
                 await update_elos(game, "draw")
                 # Keep game alive briefly for rematch negotiation
                 asyncio.create_task(cleanup_game(game_id, delay=10))
+
+            elif msg_type == "draw_claim":
+                # Client claims draw by threefold repetition
+                reason = data.get("reason", "threefold_repetition")
+                board = game["board"]
+                valid = (
+                    (reason == "threefold_repetition" and board.is_repetition(3)) or
+                    board.is_fifty_moves() or
+                    board.is_insufficient_material()
+                )
+                if valid and not game["over"]:
+                    game["over"] = True
+                    await broadcast(game, {
+                        "type":   "gameover",
+                        "result": "draw",
+                        "reason": reason,
+                        "clock":  game["clock"],
+                    })
+                    await update_elos(game, "draw")
+                    asyncio.create_task(cleanup_game(game_id, delay=10))
             
             elif msg_type == "rematch_offer":
                 game["rematch_offered_by"] = color

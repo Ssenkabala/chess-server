@@ -296,11 +296,7 @@
 
   <div class="header">
     <a class="logo" href="/">Africhess</a>
-    <div style="display:flex;align-items:center;gap:10px;">
-      <a href="/profile" style="padding:5px 14px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">Profile</a>
-      <a href="/history" style="padding:5px 14px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">History</a>
-      <span class="header-right">5+0 · Blitz</span>
-    </div>
+    <span class="header-right">5+0 · Blitz</span>
   </div>
 
   <!-- ══ LOBBY SCREEN ══ -->
@@ -722,17 +718,25 @@ function onGameMessage(e) {
   }
 
   if (msg.type === 'rematch_start') {
-    const existingWs = gameWs;   // keep the live socket
+    // Close old socket cleanly — rematch needs a fresh connection to new game_id
+    if (gameWs) {
+      gameWs.onclose = null; // suppress "connection lost" UI
+      gameWs.close();
+      gameWs = null;
+    }
+
     gameId   = msg.game_id;
     myColor  = msg.color;
     gameOver = false;
     document.getElementById('overlay').classList.remove('active');
-    // Reset board state without touching the WebSocket
+
+    // Reset board state
     game     = new Chess();
     selectedSq = null;
     myTurn   = myColor === 'white';
     document.getElementById('move-list').innerHTML = '';
     resetClockDisplay();
+
     // Reinitialise board with new orientation
     board = Chessboard('board', {
       draggable: true,
@@ -755,16 +759,30 @@ function onGameMessage(e) {
     }, 200);
     updateTurnIndicator();
     startClockTick();
-    // Send claim then profile on the existing socket for the new game
-    existingWs.send(JSON.stringify({ type: 'claim', color: myColor }));
-    if (myProfile && currentUser) {
-      existingWs.send(JSON.stringify({
-        type:     'profile',
-        username: myProfile.username,
-        elo:      myProfile.elo,
-        user_id:  currentUser.id
-      }));
-    }
+
+    // Open a NEW WebSocket for the new game_id
+    gameWs = new WebSocket(WS_BASE + '/ws/game/' + gameId);
+    gameWs.onopen = () => {
+      gameWs.send(JSON.stringify({ type: 'claim', color: myColor }));
+      if (myProfile && currentUser) {
+        gameWs.send(JSON.stringify({
+          type:     'profile',
+          username: myProfile.username,
+          elo:      myProfile.elo,
+          user_id:  currentUser.id
+        }));
+      }
+      gameWs._ping = setInterval(() => {
+        if (gameWs && gameWs.readyState === WebSocket.OPEN) {
+          gameWs.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 20000);
+    };
+    gameWs.onmessage = onGameMessage;
+    gameWs.onclose   = () => {
+      if (gameWs && gameWs._ping) clearInterval(gameWs._ping);
+      if (!gameOver) showGameStatus('Connection lost.');
+    };
   }
 }
 
@@ -804,6 +822,11 @@ function onDrop(source, target) {
   if (game.game_over()) {
     // Server will send gameover message
     return;
+  }
+
+  // Claim draw on threefold repetition (chess.js fires at 3 reps; server needs the claim)
+  if (game.in_threefold_repetition()) {
+    sendGame({ type: 'draw_claim', reason: 'threefold_repetition' });
   }
 }
 

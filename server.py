@@ -32,7 +32,7 @@ ANTHROPIC_API_KEY    = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
 SUPABASE_URL         = os.getenv("SUPABASE_URL", "https://nbskgzsvygdmlvwbetxn.supabase.co")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")  # set on Railway
 
-# ─── Supabase admin client (service role ΓÇö bypasses RLS) ─────────────────────
+# ΓöÇΓöÇΓöÇ Supabase admin client (service role ΓÇö bypasses RLS) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 import httpx
 
 async def supabase_get_profile(user_id: str) -> dict | None:
@@ -68,7 +68,7 @@ async def supabase_update_elo(user_id: str, new_elo: int):
             json={"elo": new_elo}
         )
 
-# ─── Database setup ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇ Database setup ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 def init_db():
     conn = sqlite3.connect("users.db")
@@ -93,7 +93,7 @@ TIER_LIMITS = {
     "pro": 999999
 }
 
-# ────── Models ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇ Models ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 # Times in ms sent as wtime/btime with movestogo=1
 # Engine adds 200ms buffer to movetime, so we use wtime directly
@@ -121,7 +121,7 @@ class RegisterRequest(BaseModel):
     email: str
     tier: str = "free"  # set to "club"/"pro" after Stripe confirms payment
 
-# ────── Auth helper ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇ Auth helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 def verify_key(x_api_key: str = Header(...)):
     conn = sqlite3.connect("users.db")
@@ -170,7 +170,7 @@ def verify_key(x_api_key: str = Header(...)):
 
     return {"email": email, "tier": tier}
 
-# ────── Engine helper ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇ Engine helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 def analyse_position(fen: str, think_time: float):
     """Returns best_move and score by talking directly to engine process."""
@@ -243,10 +243,10 @@ def analyse_position(fen: str, think_time: float):
     if not best_move and pv_moves:
         best_move = pv_moves[0]
 
-    # analysis complete
+    print(f"DEBUG analyse: best_move={best_move}, score={score}, depth={best_depth}", flush=True)
     return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
 
-# Original /move endpoint (unchanged) 
+# ΓöÇΓöÇΓöÇ Original /move endpoint (unchanged) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 engine_semaphore = asyncio.Semaphore(3)
 
 @app.post("/move")
@@ -317,7 +317,7 @@ async def get_move(req: MoveRequest):
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-# ────── /coach endpoint ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇ /coach endpoint ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 @app.post("/coach")
 def coach(req: CoachRequest, user=Depends(verify_key)):
@@ -387,7 +387,7 @@ TIP: (one practical chess principle this position illustrates)
         "tier": user["tier"]
     }
 
-# ────── /register endpoint (call this from your Stripe webhook) ──────────────────────────────────
+# ΓöÇΓöÇΓöÇ /register endpoint (call this from your Stripe webhook) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 @app.post("/register")
 def register(req: RegisterRequest):
@@ -403,7 +403,7 @@ def register(req: RegisterRequest):
     return {"api_key": api_key, "tier": req.tier, "expires_at": expires}
 
 
-# ──── In-memory game state ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ In-memory game state ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 lobby_queue: list = []          # waiting players: [{"ws": ws, "guest_id": id}]
 active_games: dict = {}         # game_id ΓåÆ game state dict
@@ -411,9 +411,9 @@ active_games: dict = {}         # game_id ΓåÆ game state dict
 CLOCK_SECONDS = 300             # 5 minutes each side
 
 
-# ──── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ Helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
-# ────── ELO calculation ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇ ELO calculation ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str) -> int:
     diff  = my_elo - opp_elo   # positive = I am higher rated
@@ -540,7 +540,7 @@ def validate_and_push(game: dict, uci_move: str) -> chess.Move | None:
     return None
 
 
-# ────── ELO update helper ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇ ELO update helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 async def update_elos(game: dict, result: str):
     """
@@ -582,7 +582,7 @@ async def update_elos(game: dict, result: str):
     })
 
 
-# ──── WebSocket: Lobby (matchmaking) ────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ WebSocket: Lobby (matchmaking) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 @app.websocket("/ws/lobby")
 async def lobby(ws: WebSocket):
@@ -630,7 +630,7 @@ async def lobby(ws: WebSocket):
         lobby_queue[:] = [p for p in lobby_queue if p["guest_id"] != guest_id]
 
 
-# ──── WebSocket: Active game ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ WebSocket: Active game ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 @app.websocket("/ws/game/{game_id}")
 async def game_ws(ws: WebSocket, game_id: str):
@@ -693,11 +693,11 @@ async def game_ws(ws: WebSocket, game_id: str):
                     continue
 
 
-            # ──── Keepalive ping (ignore) ──────────────────────────────────────────────────────────────────────────────
+            # ΓöÇΓöÇ Keepalive ping (ignore) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
             if msg_type == "ping":
                 continue
 
-            # ──── Profile (sent on connect) ──────────────────────────────────────────────────────────────────────────
+            # ΓöÇΓöÇ Profile (sent on connect) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
             if msg_type == "profile":
                 profile = {
                     "username": data.get("username", "guest"),
@@ -720,7 +720,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                     })
                 continue
 
-            # ──── Move ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+            # ΓöÇΓöÇ Move ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
             if msg_type == "move":
                 # Only the player whose turn it is can move
                 expected = "w" if game["board"].turn == chess.WHITE else "b"
@@ -766,7 +766,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                         "turn":  "white" if game["board"].turn == chess.WHITE else "black",
                     })
 
-            # ──── Resign ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+            # ΓöÇΓöÇ Resign ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
             elif msg_type == "resign":
                 game["over"] = True
                 winner = "black" if color == "w" else "white"
@@ -780,7 +780,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                 # Keep game alive briefly for rematch negotiation
                 asyncio.create_task(cleanup_game(game_id, delay=10))
 
-            # ──── Draw offer (future) ──────────────────────────────────────────────────────────────────────────────────────
+            # ΓöÇΓöÇ Draw offer (future) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
             elif msg_type == "draw_offer":
                 opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
                 await send(opponent_ws, {"type": "draw_offer"})
@@ -848,7 +848,7 @@ async def game_ws(ws: WebSocket, game_id: str):
             active_games.pop(game_id, None)
 
 
-# ──── Lobby status (optional debug endpoint) ────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ Lobby status (optional debug endpoint) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 @app.get("/lobby/status")
 def lobby_status():
@@ -857,7 +857,7 @@ def lobby_status():
         "active_games": len(active_games),
     }
 
-# ────── Health / static ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇ Health / static ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 
 @app.get("/profile")
@@ -937,31 +937,91 @@ async def coach_free(req: FreeCoachRequest):
     board = chess.Board(req.fen)
     turn = "White" if board.turn == chess.WHITE else "Black"
 
-    # Let Claude parse the board independently — don't rely solely on engine eval
+    # Build human-readable piece list so Claude doesn't misread the FEN
+    piece_names = {
+        chess.PAWN: "Pawn", chess.KNIGHT: "Knight", chess.BISHOP: "Bishop",
+        chess.ROOK: "Rook", chess.QUEEN: "Queen", chess.KING: "King"
+    }
+    white_pieces, black_pieces = [], []
+    for sq in chess.SQUARES:
+        piece = board.piece_at(sq)
+        if piece:
+            sq_name = chess.square_name(sq)
+            name = f"{piece_names[piece.piece_type]} on {sq_name}"
+            if piece.color == chess.WHITE:
+                white_pieces.append(name)
+            else:
+                black_pieces.append(name)
+
+    # Describe the best move in human terms
+    best_uci = analysis['best_move']
+    best_move_desc = ""
+    if best_uci and len(best_uci) >= 4:
+        from_sq = chess.parse_square(best_uci[:2])
+        to_sq = chess.parse_square(best_uci[2:4])
+        moving_piece = board.piece_at(from_sq)
+        captured_piece = board.piece_at(to_sq)
+        from_name = chess.square_name(from_sq)
+        to_name = chess.square_name(to_sq)
+        piece_str = piece_names.get(moving_piece.piece_type, "Piece") if moving_piece else "Piece"
+        color_str = "White" if (moving_piece and moving_piece.color == chess.WHITE) else "Black"
+        if captured_piece:
+            cap_str = piece_names.get(captured_piece.piece_type, "piece")
+            best_move_desc = f"{color_str}'s {piece_str} on {from_name} captures the {cap_str} on {to_name}"
+        else:
+            best_move_desc = f"{color_str}'s {piece_str} moves from {from_name} to {to_name}"
+        # Check if it gives check
+        test_board = board.copy()
+        test_board.push(chess.Move(from_sq, to_sq))
+        if test_board.is_checkmate():
+            best_move_desc += " — CHECKMATE"
+        elif test_board.is_check():
+            best_move_desc += " (giving check)"
+
+    # Mate score display
+    if abs(score_pawns) >= 99:
+        eval_display = "Forced checkmate" if score_pawns < 0 else "Forced checkmate for White"
+    else:
+        eval_display = f"{'+' if score_pawns >= 0 else ''}{score_pawns} pawns (White's perspective)"
+
     prompt = f"""You are Senkabala, an expert chess coach powered by a strong chess engine.
-Analyze this position carefully and give coaching advice to a club-level player.
+Give coaching advice based on this EXACT position:
 
-Position (FEN): {req.fen}
 Side to move: {turn}
-Engine best move: {analysis['best_move']}
-Suggested continuation: {' '.join(analysis['pv'])}
-Engine evaluation: {'+' if score_pawns >= 0 else ''}{score_pawns} pawns (from White's perspective)
+Engine evaluation: {eval_display}
 
-IMPORTANT: Read the board position from the FEN yourself. Do not rely solely on the engine evaluation number — use your own chess understanding to verify what is happening tactically and strategically. If the position has obvious tactics (captures, forks, hanging pieces), mention them explicitly even if the eval seems off.
+White pieces: {', '.join(white_pieces) if white_pieces else 'none'}
+Black pieces: {', '.join(black_pieces) if black_pieces else 'none'}
+
+Engine best move: {best_move_desc}
+Suggested continuation (UCI): {' '.join(analysis['pv'][:3])}
+
+Base your entire response on the piece positions listed above. Do not invent pieces or squares not listed.
 """
-    if req.played_move and req.played_move != analysis['best_move']:
-        prompt += f"\nThe player just played: {req.played_move}\nBriefly explain why {analysis['best_move']} is better.\n"
-    elif req.played_move:
-        prompt += f"\nThe player found the best move: {req.played_move}. Confirm why this is strong.\n"
+    if req.played_move:
+        played_desc = ""
+        try:
+            from_sq2 = chess.parse_square(req.played_move[:2])
+            to_sq2 = chess.parse_square(req.played_move[2:4])
+            played_piece = board.piece_at(from_sq2)
+            p_str = piece_names.get(played_piece.piece_type, "Piece") if played_piece else "Piece"
+            played_desc = f"{p_str} from {req.played_move[:2]} to {req.played_move[2:4]}"
+        except Exception:
+            played_desc = req.played_move
+
+        if req.played_move != best_uci:
+            prompt += f"\nThe player just played: {played_desc}\nBriefly explain why the engine move is better.\n"
+        else:
+            prompt += f"\nThe player found the best move: {played_desc}. Confirm why this is strong.\n"
 
     if req.pgn:
-        prompt += f"\nGame PGN:\n{req.pgn}\n"
+        prompt += f"\nGame moves so far: {req.pgn}\n"
 
     prompt += """
 Respond in this exact format:
-ASSESSMENT: (1 sentence on who stands better and why)
-BEST MOVE: (explain the engine best move in plain English)
-PLAN: (2-3 sentences on the strategic plan)
+ASSESSMENT: (1 sentence on who stands better and why, based on the piece positions above)
+BEST MOVE: (explain the engine best move in plain English using the piece description provided)
+PLAN: (2-3 sentences on the strategic plan going forward)
 TIP: (one practical chess principle this position illustrates)
 """
 

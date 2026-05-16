@@ -3,17 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <title>Africhess</title>
-  <link rel="icon" type="image/x-icon" href="/favicon.ico">
-  <link rel="icon" type="image/png" sizes="16x16" href="/favicon_16x16.png">
-  <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-  <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#0a0a0a">
-  <meta name="description" content="Play chess against the AfriChess engine — 8 difficulty levels, move analysis, and AI coaching.">
-  <meta property="og:title" content="AfriChess — Play vs Engine">
-  <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
-  <meta property="og:url" content="https://www.africhess.org/play">
-
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
@@ -328,6 +317,49 @@
       margin-left: 4px;
     }
     .material-score.ahead { color: #00ff9d; }
+    /* ── Promotion picker ── */
+    .promo-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      z-index: 500;
+      align-items: center;
+      justify-content: center;
+    }
+    .promo-overlay.active { display: flex; }
+    .promo-box {
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 20px 24px;
+      text-align: center;
+    }
+    .promo-title {
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #555;
+      margin-bottom: 16px;
+    }
+    .promo-pieces {
+      display: flex;
+      gap: 8px;
+    }
+    .promo-piece {
+      width: 64px; height: 64px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 3px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .promo-piece:hover { border-color: #00ff9d; background: #0d1f17; }
+    .promo-piece img { width: 48px; height: 48px; }
+
     /* ── Auth modal ── */
     .auth-overlay {
       position: fixed;
@@ -871,17 +903,65 @@ function onDragStart(source, piece) {
   return true;
 }
 
-function onDrop(source, target) {
-  clearHighlights();
-  selectedSquare = null;
-  var move = game.move({ from: source, to: target, promotion: 'q' });
-  if (move === null) return 'snapback';
+function isPromotion(source, target) {
+  var piece = game.get(source);
+  if (!piece || piece.type !== 'p') return false;
+  var targetRank = target[1];
+  return (piece.color === 'w' && targetRank === '8') ||
+         (piece.color === 'b' && targetRank === '1');
+}
+
+function showPromotion(source, target, callback) {
+  var color = game.turn() === 'w' ? 'w' : 'b';
+  var pieces = ['q', 'r', 'b', 'n'];
+  var labels = { q:'Queen', r:'Rook', b:'Bishop', n:'Knight' };
+  var container = document.getElementById('promo-pieces');
+  container.innerHTML = '';
+  pieces.forEach(function(p) {
+    var div = document.createElement('div');
+    div.className = 'promo-piece';
+    div.title = labels[p];
+    var img = document.createElement('img');
+    img.src = 'img/chesspieces/wikipedia/' + color + p.toUpperCase() + '.png';
+    img.alt = labels[p];
+    div.appendChild(img);
+    div.onclick = function() {
+      document.getElementById('promo-overlay').classList.remove('active');
+      callback(p);
+    };
+    container.appendChild(div);
+  });
+  document.getElementById('promo-overlay').classList.add('active');
+}
+
+function executePlayerMove(source, target, promotion) {
+  var move = game.move({ from: source, to: target, promotion: promotion });
+  if (move === null) { board.position(game.fen()); return; }
   moveHistory.push(move.san);
+  board.position(game.fen());
   updateCapturedPieces();
   if (game.game_over()) { showResult(); return; }
   setStatus('Engine thinking...');
   engineThinking = true;
   setTimeout(getEngineMove, 150);
+}
+
+function onDrop(source, target) {
+  clearHighlights();
+  selectedSquare = null;
+  // Test legality with queen first (catches illegal moves cheaply)
+  var testMove = game.move({ from: source, to: target, promotion: 'q' });
+  if (testMove === null) return 'snapback';
+  game.undo(); // undo test — we'll re-apply with correct promotion
+
+  if (isPromotion(source, target)) {
+    board.position(game.fen()); // snap piece back visually while picker shows
+    showPromotion(source, target, function(promo) {
+      executePlayerMove(source, target, promo);
+    });
+    return 'snapback';
+  }
+  executePlayerMove(source, target, 'q');
 }
 
 function onSnapEnd() { board.position(game.fen()); }
@@ -896,16 +976,21 @@ function onSquareClick(square) {
     return;
   }
   if (selectedSquare) {
-    var move = game.move({ from: selectedSquare, to: square, promotion: 'q' });
+    var src = selectedSquare;
     clearHighlights();
     selectedSquare = null;
-    if (move === null) return;
-    moveHistory.push(move.san);
-    board.position(game.fen());
-    if (game.game_over()) { showResult(); return; }
-    setStatus('Engine thinking...');
-    engineThinking = true;
-    setTimeout(getEngineMove, 150);
+    // Test legality
+    var testMove = game.move({ from: src, to: square, promotion: 'q' });
+    if (testMove === null) return;
+    game.undo();
+
+    if (isPromotion(src, square)) {
+      showPromotion(src, square, function(promo) {
+        executePlayerMove(src, square, promo);
+      });
+      return;
+    }
+    executePlayerMove(src, square, 'q');
   }
 }
 
@@ -1630,6 +1715,14 @@ function closeMenuThenAuth() {
       <button class="username-btn" id="username-btn" onclick="submitUsername()">Set Username</button>
     </div>
   </div>
+
+<!-- Promotion picker -->
+<div class="promo-overlay" id="promo-overlay">
+  <div class="promo-box">
+    <div class="promo-title">Promote pawn to</div>
+    <div class="promo-pieces" id="promo-pieces"></div>
+  </div>
+</div>
 
 </body>
 </html>

@@ -4,17 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Africhess — Play</title>
-  <link rel="icon" type="image/x-icon" href="/favicon.ico">
-  <link rel="icon" type="image/png" sizes="16x16" href="/favicon_16x16.png">
-  <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-  <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#0a0a0a">
-  <meta name="description" content="Play live 5+0 blitz chess against other players on AfriChess.">
-  <meta property="og:title" content="AfriChess — Live Multiplayer">
-  <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
-  <meta property="og:url" content="https://www.africhess.org/multiplayer">
-
   <link rel="stylesheet" href="chessboard-1.0.0.min.css">
   <script src="jquery.min.js"></script>
   <script src="chessboard-1.0.0.min.js"></script>
@@ -265,6 +254,31 @@
     }
     .result-title.lose { color: var(--danger); }
     .result-title.draw { color: #aaa; }
+
+    /* ── Promotion picker ── */
+    .promo-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75); z-index: 500;
+      align-items: center; justify-content: center;
+    }
+    .promo-overlay.active { display: flex; }
+    .promo-box {
+      background: #111; border: 1px solid #333;
+      border-radius: 4px; padding: 20px 24px; text-align: center;
+    }
+    .promo-title {
+      font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+      color: #555; margin-bottom: 16px;
+    }
+    .promo-pieces { display: flex; gap: 8px; }
+    .promo-piece {
+      width: 64px; height: 64px; background: #1a1a1a;
+      border: 1px solid #333; border-radius: 3px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .promo-piece:hover { border-color: #00ff9d; background: #0d1f17; }
+    .promo-piece img { width: 48px; height: 48px; }
     .result-reason {
       font-size: 13px;
       color: var(--muted);
@@ -794,24 +808,62 @@ function onDragStart(source, piece) {
   return true;
 }
 
+function isPromotion(source, target) {
+  const piece = game.get(source);
+  if (!piece || piece.type !== 'p') return false;
+  return (piece.color === 'w' && target[1] === '8') ||
+         (piece.color === 'b' && target[1] === '1');
+}
+
+function showPromotion(source, target, callback) {
+  const color = myColor === 'white' ? 'w' : 'b';
+  const pieces = ['q','r','b','n'];
+  const labels = { q:'Queen', r:'Rook', b:'Bishop', n:'Knight' };
+  const container = document.getElementById('promo-pieces');
+  container.innerHTML = '';
+  pieces.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'promo-piece';
+    div.title = labels[p];
+    const img = document.createElement('img');
+    img.src = 'img/chesspieces/wikipedia/' + color + p.toUpperCase() + '.png';
+    img.alt = labels[p];
+    div.appendChild(img);
+    div.onclick = () => {
+      document.getElementById('promo-overlay').classList.remove('active');
+      callback(p);
+    };
+    container.appendChild(div);
+  });
+  document.getElementById('promo-overlay').classList.add('active');
+}
+
+function executeMove(source, target, promo) {
+  const move = game.move({ from: source, to: target, promotion: promo });
+  if (!move) { board.position(game.fen()); return; }
+  myTurn = false;
+  updateTurnIndicator();
+  board.position(game.fen());
+  sendGame({ type: 'move', move: move.from + move.to + (move.promotion || '') });
+  if (game.game_over()) return;
+  if (game.in_threefold_repetition()) {
+    sendGame({ type: 'draw_claim', reason: 'threefold_repetition' });
+  }
+}
+
 function onDrop(source, target) {
   clearHighlights();
   selectedSq = null;
+  const test = game.move({ from: source, to: target, promotion: 'q' });
+  if (!test) return 'snapback';
+  game.undo();
 
-  // Optimistic local move
-  const move = game.move({ from: source, to: target, promotion: 'q' });
-  if (!move) return 'snapback';
-
-  myTurn = false;
-  updateTurnIndicator();
-
-  // Send to server
-  sendGame({ type: 'move', move: move.from + move.to + (move.promotion || '') });
-
-  if (game.game_over()) {
-    // Server will send gameover message
-    return;
+  if (isPromotion(source, target)) {
+    board.position(game.fen());
+    showPromotion(source, target, promo => executeMove(source, target, promo));
+    return 'snapback';
   }
+  executeMove(source, target, 'q');
 }
 
 function onSquareClick(square) {
@@ -828,14 +880,18 @@ function onSquareClick(square) {
   }
 
   if (selectedSq) {
-    const move = game.move({ from: selectedSq, to: square, promotion: 'q' });
+    const src = selectedSq;
     clearHighlights();
     selectedSq = null;
-    if (!move) return;
-    board.position(game.fen());
-    myTurn = false;
-    updateTurnIndicator();
-    sendGame({ type: 'move', move: move.from + move.to + (move.promotion || '') });
+    const test = game.move({ from: src, to: square, promotion: 'q' });
+    if (!test) return;
+    game.undo();
+
+    if (isPromotion(src, square)) {
+      showPromotion(src, square, promo => executeMove(src, square, promo));
+      return;
+    }
+    executeMove(src, square, 'q');
   }
 }
 function isMobile() {
@@ -1051,6 +1107,15 @@ function goToLobby() {
 // ═══════════════════════════════════════════════════════════════
 bootAuth();
 </script>
+
+<!-- Promotion picker -->
+<div class="promo-overlay" id="promo-overlay">
+  <div class="promo-box">
+    <div class="promo-title">Promote pawn to</div>
+    <div class="promo-pieces" id="promo-pieces"></div>
+  </div>
+</div>
+
 </body>
 </html>
 

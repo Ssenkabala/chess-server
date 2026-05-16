@@ -1182,9 +1182,17 @@ function analysePosition() {
     if (data.best_move) {
       highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
     }
-    var evalStr = data.eval_pawns !== undefined
-      ? (data.eval_pawns >= 0 ? '+' : '') + data.eval_pawns
-      : '?';
+    var evalStr;
+    if (data.eval_pawns !== undefined) {
+      var abs = Math.abs(data.eval_pawns);
+      if (abs >= 99) {
+        evalStr = data.eval_pawns > 0 ? '#' : '-#';
+      } else {
+        evalStr = (data.eval_pawns >= 0 ? '+' : '') + data.eval_pawns;
+      }
+    } else {
+      evalStr = '?';
+    }
     updateEvalBar(data.eval_pawns || 0);
     setAnalysisStatus('Best move: ' + (data.best_move || '?') + '  |  Eval: ' + evalStr + '  |  Use Coach Me for explanation.');
     document.getElementById('btn-coach').disabled = false;

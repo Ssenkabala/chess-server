@@ -32,7 +32,7 @@ ANTHROPIC_API_KEY    = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
 SUPABASE_URL         = os.getenv("SUPABASE_URL", "https://nbskgzsvygdmlvwbetxn.supabase.co")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")  # set on Railway
 
-# ΓöÇΓöÇΓöÇ Supabase admin client (service role ΓÇö bypasses RLS) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ─── Supabase admin client (service role ΓÇö bypasses RLS) ─────────────────────
 import httpx
 
 async def supabase_get_profile(user_id: str) -> dict | None:
@@ -68,7 +68,7 @@ async def supabase_update_elo(user_id: str, new_elo: int):
             json={"elo": new_elo}
         )
 
-# ΓöÇΓöÇΓöÇ Database setup ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ─── Database setup ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def init_db():
     conn = sqlite3.connect("users.db")
@@ -93,7 +93,7 @@ TIER_LIMITS = {
     "pro": 999999
 }
 
-# ΓöÇΓöÇΓöÇ Models ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ────── Models ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 # Times in ms sent as wtime/btime with movestogo=1
 # Engine adds 200ms buffer to movetime, so we use wtime directly
@@ -121,7 +121,7 @@ class RegisterRequest(BaseModel):
     email: str
     tier: str = "free"  # set to "club"/"pro" after Stripe confirms payment
 
-# ΓöÇΓöÇΓöÇ Auth helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ────── Auth helper ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def verify_key(x_api_key: str = Header(...)):
     conn = sqlite3.connect("users.db")
@@ -170,7 +170,7 @@ def verify_key(x_api_key: str = Header(...)):
 
     return {"email": email, "tier": tier}
 
-# ΓöÇΓöÇΓöÇ Engine helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ────── Engine helper ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def analyse_position(fen: str, think_time: float):
     """Returns best_move and score by talking directly to engine process."""
@@ -243,10 +243,10 @@ def analyse_position(fen: str, think_time: float):
     if not best_move and pv_moves:
         best_move = pv_moves[0]
 
-    print(f"DEBUG analyse: best_move={best_move}, score={score}, depth={best_depth}", flush=True)
+    # analysis complete
     return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
 
-# ΓöÇΓöÇΓöÇ Original /move endpoint (unchanged) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# Original /move endpoint (unchanged) 
 engine_semaphore = asyncio.Semaphore(3)
 
 @app.post("/move")
@@ -317,7 +317,7 @@ async def get_move(req: MoveRequest):
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-# ΓöÇΓöÇΓöÇ /coach endpoint ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ────── /coach endpoint ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.post("/coach")
 def coach(req: CoachRequest, user=Depends(verify_key)):
@@ -387,7 +387,7 @@ TIP: (one practical chess principle this position illustrates)
         "tier": user["tier"]
     }
 
-# ΓöÇΓöÇΓöÇ /register endpoint (call this from your Stripe webhook) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ────── /register endpoint (call this from your Stripe webhook) ──────────────────────────────────
 
 @app.post("/register")
 def register(req: RegisterRequest):
@@ -403,7 +403,7 @@ def register(req: RegisterRequest):
     return {"api_key": api_key, "tier": req.tier, "expires_at": expires}
 
 
-# ΓöÇΓöÇ In-memory game state ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ──── In-memory game state ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 lobby_queue: list = []          # waiting players: [{"ws": ws, "guest_id": id}]
 active_games: dict = {}         # game_id ΓåÆ game state dict
@@ -411,9 +411,9 @@ active_games: dict = {}         # game_id ΓåÆ game state dict
 CLOCK_SECONDS = 300             # 5 minutes each side
 
 
-# ΓöÇΓöÇ Helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ──── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-# ΓöÇΓöÇΓöÇ ELO calculation ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ────── ELO calculation ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str) -> int:
     diff  = my_elo - opp_elo   # positive = I am higher rated
@@ -540,7 +540,7 @@ def validate_and_push(game: dict, uci_move: str) -> chess.Move | None:
     return None
 
 
-# ΓöÇΓöÇΓöÇ ELO update helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ────── ELO update helper ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def update_elos(game: dict, result: str):
     """
@@ -582,7 +582,7 @@ async def update_elos(game: dict, result: str):
     })
 
 
-# ΓöÇΓöÇ WebSocket: Lobby (matchmaking) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ──── WebSocket: Lobby (matchmaking) ────────────────────────────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws/lobby")
 async def lobby(ws: WebSocket):
@@ -630,7 +630,7 @@ async def lobby(ws: WebSocket):
         lobby_queue[:] = [p for p in lobby_queue if p["guest_id"] != guest_id]
 
 
-# ΓöÇΓöÇ WebSocket: Active game ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ──── WebSocket: Active game ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws/game/{game_id}")
 async def game_ws(ws: WebSocket, game_id: str):
@@ -693,11 +693,11 @@ async def game_ws(ws: WebSocket, game_id: str):
                     continue
 
 
-            # ΓöÇΓöÇ Keepalive ping (ignore) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            # ──── Keepalive ping (ignore) ──────────────────────────────────────────────────────────────────────────────
             if msg_type == "ping":
                 continue
 
-            # ΓöÇΓöÇ Profile (sent on connect) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            # ──── Profile (sent on connect) ──────────────────────────────────────────────────────────────────────────
             if msg_type == "profile":
                 profile = {
                     "username": data.get("username", "guest"),
@@ -720,7 +720,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                     })
                 continue
 
-            # ΓöÇΓöÇ Move ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            # ──── Move ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
             if msg_type == "move":
                 # Only the player whose turn it is can move
                 expected = "w" if game["board"].turn == chess.WHITE else "b"
@@ -766,7 +766,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                         "turn":  "white" if game["board"].turn == chess.WHITE else "black",
                     })
 
-            # ΓöÇΓöÇ Resign ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            # ──── Resign ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
             elif msg_type == "resign":
                 game["over"] = True
                 winner = "black" if color == "w" else "white"
@@ -780,7 +780,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                 # Keep game alive briefly for rematch negotiation
                 asyncio.create_task(cleanup_game(game_id, delay=10))
 
-            # ΓöÇΓöÇ Draw offer (future) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            # ──── Draw offer (future) ──────────────────────────────────────────────────────────────────────────────────────
             elif msg_type == "draw_offer":
                 opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
                 await send(opponent_ws, {"type": "draw_offer"})
@@ -848,7 +848,7 @@ async def game_ws(ws: WebSocket, game_id: str):
             active_games.pop(game_id, None)
 
 
-# ΓöÇΓöÇ Lobby status (optional debug endpoint) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ──── Lobby status (optional debug endpoint) ────────────────────────────────────────────────────────────────────────
 
 @app.get("/lobby/status")
 def lobby_status():
@@ -857,7 +857,7 @@ def lobby_status():
         "active_games": len(active_games),
     }
 
-# ΓöÇΓöÇΓöÇ Health / static ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ────── Health / static ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
 @app.get("/profile")

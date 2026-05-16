@@ -693,6 +693,8 @@
     <div class="controls">
       <button onclick="resetGame()">New Game</button>
       <button onclick="if(board) board.flip()">Flip Board</button>
+      <button id="btn-resign" onclick="resignGame()" style="display:none;background:#1a0000;color:#ff4444;border-color:#ff444433;">Resign</button>
+      <button id="btn-replay" onclick="replayGame()" style="display:none;">Replay</button>
     </div>
   </div>
 
@@ -772,19 +774,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }, { passive: false });
   }
 });
-
-// ── Board resize: force chessboard.js to match container width ──
-function resizeBoards() {
-  var maxW = window.innerWidth <= 600 ? window.innerWidth - 16 : 520;
-  ['board', 'analysis-board'].forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) el.style.width = maxW + 'px';
-  });
-  if (typeof board !== 'undefined' && board) board.resize();
-  if (typeof analysisBoard !== 'undefined' && analysisBoard) analysisBoard.resize();
-}
-window.addEventListener('resize', resizeBoards);
-window.addEventListener('load', resizeBoards);
 
 const API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
   ? 'http://127.0.0.1:8000'
@@ -971,11 +960,46 @@ function showResult() {
   }
 
   setStatus(resultText);
+  document.getElementById('btn-resign').style.display = 'none';
+  document.getElementById('btn-replay').style.display = '';
 
   // Save game if user is signed in
   var pgn = buildPGN(game, resultKey);
   var colorName = playerColor === 'w' ? 'white' : 'black';
   saveGame(pgn, resultKey, colorName);
+}
+
+function resignGame() {
+  if (!gameStarted || game.game_over()) return;
+  var resultKey = playerColor === 'w' ? 'black' : 'white';
+  setStatus('You resigned. Engine wins.');
+  gameStarted = false;
+  document.getElementById('btn-resign').style.display = 'none';
+  document.getElementById('btn-replay').style.display = '';
+  var pgn = buildPGN(game, resultKey);
+  var colorName = playerColor === 'w' ? 'white' : 'black';
+  saveGame(pgn, resultKey, colorName);
+}
+
+function replayGame() {
+  if (!moveHistory || moveHistory.length === 0) return;
+  var replayMoves = moveHistory.slice();
+  var replayChess = new Chess();
+  board.position('start');
+  board.orientation(playerColor === 'w' ? 'white' : 'black');
+  var i = 0;
+  document.getElementById('btn-replay').style.display = 'none';
+  function playNext() {
+    if (i >= replayMoves.length) {
+      document.getElementById('btn-replay').style.display = '';
+      return;
+    }
+    replayChess.move(replayMoves[i]);
+    board.position(replayChess.fen());
+    i++;
+    setTimeout(playNext, 600);
+  }
+  playNext();
 }
 
 function startGame(color) {
@@ -987,6 +1011,8 @@ function startGame(color) {
   engineThinking = false;
   selectedSquare = null;
   game = new Chess();
+  document.getElementById('btn-resign').style.display = '';
+  document.getElementById('btn-replay').style.display = 'none';
   document.getElementById('btn-white').classList.toggle('active', color === 'white');
   document.getElementById('btn-black').classList.toggle('active', color === 'black');
   $('#board').empty();
@@ -1000,7 +1026,6 @@ function startGame(color) {
     onSnapEnd: onSnapEnd,
     onSquareClick: onSquareClick
   });
-  resizeBoards();
   if (playerColor === 'b') {
     setStatus('Engine thinking...');
     engineThinking = true;
@@ -1112,7 +1137,7 @@ function initAnalysisBoard() {
     },
     onSnapEnd: function() { analysisBoard.position(analysisGame.fen()); }
   });
-  resizeBoards();
+
   // Manual click-to-move — use native DOM, not jQuery
   document.getElementById('analysis-board').addEventListener('click', function(e) {
     var squareEl = e.target.closest('[data-square]');

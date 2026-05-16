@@ -286,7 +286,6 @@
   </a>
   <div class="nav-right">
     <div class="nav-user" id="nav-user">Loading...</div>
-    <a href="/profile" style="padding:7px 18px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">Profile</a>
     <a href="/play" style="padding:7px 18px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">← Play</a>
   </div>
 </div>
@@ -358,8 +357,12 @@ sb.auth.getSession().then(({ data }) => {
     return;
   }
   const user = data.session.user;
-  document.getElementById('nav-user').innerHTML =
-    '<span>' + (user.email || 'Signed in') + '</span>';
+  // Fetch username from profiles instead of showing email
+  sb.from('profiles').select('username').eq('user_id', user.id).single()
+    .then(({ data: profile }) => {
+      const name = profile && profile.username ? profile.username : (user.email || 'Signed in');
+      document.getElementById('nav-user').innerHTML = '<span>' + name + '</span>';
+    });
   loadGames(user.id);
 });
 

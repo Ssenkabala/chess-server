@@ -3,6 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <title>Africhess</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon_16x16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="description" content="Play chess against the AfriChess engine — 8 difficulty levels, move analysis, and AI coaching.">
+  <meta property="og:title" content="AfriChess — Play vs Engine">
+  <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
+  <meta property="og:url" content="https://www.africhess.org/play">
+
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
@@ -693,8 +704,6 @@
     <div class="controls">
       <button onclick="resetGame()">New Game</button>
       <button onclick="if(board) board.flip()">Flip Board</button>
-      <button id="btn-resign" onclick="resignGame()" style="display:none;background:#1a0000;color:#ff4444;border-color:#ff444433;">Resign</button>
-      <button id="btn-replay" onclick="replayGame()" style="display:none;">Replay</button>
     </div>
   </div>
 
@@ -960,46 +969,11 @@ function showResult() {
   }
 
   setStatus(resultText);
-  document.getElementById('btn-resign').style.display = 'none';
-  document.getElementById('btn-replay').style.display = '';
 
   // Save game if user is signed in
   var pgn = buildPGN(game, resultKey);
   var colorName = playerColor === 'w' ? 'white' : 'black';
   saveGame(pgn, resultKey, colorName);
-}
-
-function resignGame() {
-  if (!gameStarted || game.game_over()) return;
-  var resultKey = playerColor === 'w' ? 'black' : 'white';
-  setStatus('You resigned. Engine wins.');
-  gameStarted = false;
-  document.getElementById('btn-resign').style.display = 'none';
-  document.getElementById('btn-replay').style.display = '';
-  var pgn = buildPGN(game, resultKey);
-  var colorName = playerColor === 'w' ? 'white' : 'black';
-  saveGame(pgn, resultKey, colorName);
-}
-
-function replayGame() {
-  if (!moveHistory || moveHistory.length === 0) return;
-  var replayMoves = moveHistory.slice();
-  var replayChess = new Chess();
-  board.position('start');
-  board.orientation(playerColor === 'w' ? 'white' : 'black');
-  var i = 0;
-  document.getElementById('btn-replay').style.display = 'none';
-  function playNext() {
-    if (i >= replayMoves.length) {
-      document.getElementById('btn-replay').style.display = '';
-      return;
-    }
-    replayChess.move(replayMoves[i]);
-    board.position(replayChess.fen());
-    i++;
-    setTimeout(playNext, 600);
-  }
-  playNext();
 }
 
 function startGame(color) {
@@ -1011,8 +985,6 @@ function startGame(color) {
   engineThinking = false;
   selectedSquare = null;
   game = new Chess();
-  document.getElementById('btn-resign').style.display = '';
-  document.getElementById('btn-replay').style.display = 'none';
   document.getElementById('btn-white').classList.toggle('active', color === 'white');
   document.getElementById('btn-black').classList.toggle('active', color === 'black');
   $('#board').empty();

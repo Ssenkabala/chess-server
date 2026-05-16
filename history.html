@@ -4,6 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AfriChess — My Games</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon_16x16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="description" content="Your AfriChess game history — review past games, track your ELO progress.">
+  <meta property="og:title" content="AfriChess — My Games">
+  <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
+  <meta property="og:url" content="https://www.africhess.org/history">
+
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
@@ -357,12 +368,8 @@ sb.auth.getSession().then(({ data }) => {
     return;
   }
   const user = data.session.user;
-  // Fetch username from profiles instead of showing email
-  sb.from('profiles').select('username').eq('user_id', user.id).single()
-    .then(({ data: profile }) => {
-      const name = profile && profile.username ? profile.username : (user.email || 'Signed in');
-      document.getElementById('nav-user').innerHTML = '<span>' + name + '</span>';
-    });
+  document.getElementById('nav-user').innerHTML =
+    '<span>' + (user.email || 'Signed in') + '</span>';
   loadGames(user.id);
 });
 

@@ -688,7 +688,7 @@ async def game_ws(ws: WebSocket, game_id: str):
             msg_type = data.get("type")
 
             if game["over"]:
-                if msg_type not in ("rematch_offer", "rematch_accept", "rematch_decline", "draw_claim", "ping"):
+                if msg_type not in ("rematch_offer", "rematch_accept", "rematch_decline", "ping"):
                     await send(ws, {"type": "error", "detail": "Game is over."})
                     continue
 
@@ -796,26 +796,6 @@ async def game_ws(ws: WebSocket, game_id: str):
                 await update_elos(game, "draw")
                 # Keep game alive briefly for rematch negotiation
                 asyncio.create_task(cleanup_game(game_id, delay=10))
-
-            elif msg_type == "draw_claim":
-                # Client claims draw by threefold repetition
-                reason = data.get("reason", "threefold_repetition")
-                board = game["board"]
-                valid = (
-                    (reason == "threefold_repetition" and board.is_repetition(3)) or
-                    board.is_fifty_moves() or
-                    board.is_insufficient_material()
-                )
-                if valid and not game["over"]:
-                    game["over"] = True
-                    await broadcast(game, {
-                        "type":   "gameover",
-                        "result": "draw",
-                        "reason": reason,
-                        "clock":  game["clock"],
-                    })
-                    await update_elos(game, "draw")
-                    asyncio.create_task(cleanup_game(game_id, delay=10))
             
             elif msg_type == "rematch_offer":
                 game["rematch_offered_by"] = color
@@ -1181,7 +1161,35 @@ def logo():
 
 @app.get("/favicon.ico")
 def favicon():
-    return FileResponse("logo.png")
+    return FileResponse("favicon.ico")
+
+@app.get("/favicon_16x16.png")
+def favicon16():
+    return FileResponse("favicon_16x16.png")
+
+@app.get("/favicon_32x32.png")
+def favicon32():
+    return FileResponse("favicon_32x32.png")
+
+@app.get("/apple-touch-icon.png")
+def apple_touch():
+    return FileResponse("apple-touch-icon.png")
+
+@app.get("/android-chrome-192x192.png")
+def android192():
+    return FileResponse("android-chrome-192x192.png")
+
+@app.get("/android-chrome-512x512.png")
+def android512():
+    return FileResponse("android-chrome-512x512.png")
+
+@app.get("/site.webmanifest")
+def webmanifest():
+    return FileResponse("site.webmanifest", media_type="application/manifest+json")
+
+@app.get("/sitemap.xml")
+def sitemap():
+    return FileResponse("sitemap.xml", media_type="application/xml")
 
 @app.get("/history")
 def history():

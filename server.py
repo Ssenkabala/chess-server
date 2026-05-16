@@ -243,7 +243,6 @@ def analyse_position(fen: str, think_time: float):
     if not best_move and pv_moves:
         best_move = pv_moves[0]
 
-    print(f"DEBUG analyse: best_move={best_move}, score={score}, depth={best_depth}", flush=True)
     return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
 
 # ΓöÇΓöÇΓöÇ Original /move endpoint (unchanged) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ

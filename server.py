@@ -1173,7 +1173,35 @@ def logo():
 
 @app.get("/favicon.ico")
 def favicon():
-    return FileResponse("logo.png")
+    return FileResponse("favicon.ico")
+
+@app.get("/favicon_16x16.png")
+def favicon16():
+    return FileResponse("favicon_16x16.png")
+
+@app.get("/favicon_32x32.png")
+def favicon32():
+    return FileResponse("favicon_32x32.png")
+
+@app.get("/apple-touch-icon.png")
+def apple_touch():
+    return FileResponse("apple-touch-icon.png")
+
+@app.get("/android-chrome-192x192.png")
+def android192():
+    return FileResponse("android-chrome-192x192.png")
+
+@app.get("/android-chrome-512x512.png")
+def android512():
+    return FileResponse("android-chrome-512x512.png")
+
+@app.get("/site.webmanifest")
+def webmanifest():
+    return FileResponse("site.webmanifest", media_type="application/manifest+json")
+
+@app.get("/sitemap.xml")
+def sitemap():
+    return FileResponse("sitemap.xml", media_type="application/xml")
 
 @app.get("/history")
 def history():

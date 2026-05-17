@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 import asyncio
 import uuid
 import time
+import hmac
+import hashlib
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio, uuid, time
 
@@ -31,6 +33,14 @@ ENGINE_PATH = "./engines/engine.exe" if os.name == "nt" else "./engines/engine"
 ANTHROPIC_API_KEY    = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
 SUPABASE_URL         = os.getenv("SUPABASE_URL", "https://nbskgzsvygdmlvwbetxn.supabase.co")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")  # set on Railway
+
+# Lemon Squeezy
+LS_SIGNING_SECRET  = os.getenv("LEMONSQUEEZY_SIGNING_SECRET", "")
+LS_CLUB_VARIANT    = int(os.getenv("LS_CLUB_VARIANT_ID", "1667817"))
+LS_PRO_VARIANT     = int(os.getenv("LS_PRO_VARIANT_ID",  "1667860"))
+
+# Coach limits per plan
+COACH_LIMITS = {"free": 10, "club": 200, "pro": 999999}
 
 # ΓöÇΓöÇΓöÇ Supabase admin client (service role ΓÇö bypasses RLS) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 import httpx
@@ -243,7 +253,6 @@ def analyse_position(fen: str, think_time: float):
     if not best_move and pv_moves:
         best_move = pv_moves[0]
 
-    print(f"DEBUG analyse: best_move={best_move}, score={score}, depth={best_depth}", flush=True)
     return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
 
 # ΓöÇΓöÇΓöÇ Original /move endpoint (unchanged) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -698,7 +707,7 @@ async def game_ws(ws: WebSocket, game_id: str):
             msg_type = data.get("type")
 
             if game["over"]:
-                if msg_type not in ("rematch_offer", "rematch_accept", "rematch_decline", "ping"):
+                if msg_type not in ("rematch_offer", "rematch_accept", "rematch_decline", "draw_claim", "ping"):
                     await send(ws, {"type": "error", "detail": "Game is over."})
                     continue
 
@@ -806,7 +815,26 @@ async def game_ws(ws: WebSocket, game_id: str):
                 await update_elos(game, "draw")
                 # Keep game alive briefly for rematch negotiation
                 asyncio.create_task(cleanup_game(game_id, delay=10))
-            
+
+            elif msg_type == "draw_claim":
+                reason = data.get("reason", "threefold_repetition")
+                board  = game["board"]
+                valid  = (
+                    (reason == "threefold_repetition" and board.is_repetition(3)) or
+                    board.is_fifty_moves() or
+                    board.is_insufficient_material()
+                )
+                if valid and not game["over"]:
+                    game["over"] = True
+                    await broadcast(game, {
+                        "type":   "gameover",
+                        "result": "draw",
+                        "reason": reason,
+                        "clock":  game["clock"],
+                    })
+                    await update_elos(game, "draw")
+                    asyncio.create_task(cleanup_game(game_id, delay=10))
+
             elif msg_type == "rematch_offer":
                 game["rematch_offered_by"] = color
                 opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
@@ -885,7 +913,23 @@ class FreeCoachRequest(BaseModel):
     user_id: str
     think_time: float = 0.5
 
-FREE_COACH_LIMIT = 5  # uses per day
+FREE_COACH_LIMIT = 10  # free tier daily limit (kept for legacy refs)
+
+async def get_user_plan(user_id: str) -> str:
+    """Return plan for user: free / club / pro"""
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/subscriptions",
+                params={"user_id": f"eq.{user_id}", "select": "plan,status"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            rows = r.json()
+        if rows and rows[0].get("status") == "active":
+            return rows[0].get("plan", "free")
+    except Exception:
+        pass
+    return "free"
 
 @app.post("/coach-free")
 async def coach_free(req: FreeCoachRequest):
@@ -914,8 +958,13 @@ async def coach_free(req: FreeCoachRequest):
     if reset_date != today:
         uses_today = 0
 
-    if uses_today >= FREE_COACH_LIMIT:
-        raise HTTPException(429, f"Daily limit of {FREE_COACH_LIMIT} coach uses reached. Upgrade for unlimited access.")
+    # Get plan-based limit
+    plan = await get_user_plan(req.user_id)
+    daily_limit = COACH_LIMITS.get(plan, COACH_LIMITS["free"])
+
+    if uses_today >= daily_limit:
+        upgrade_msg = "Upgrade to Club ($5/mo) for 200 analyses/day." if plan == "free" else "Daily limit reached."
+        raise HTTPException(429, upgrade_msg)
 
     # Increment usage
     async with httpx.AsyncClient() as client:
@@ -1056,7 +1105,7 @@ TIP: (one practical chess principle this position illustrates)
         "pv": analysis["pv"],
         "coaching": explanation,
         "uses_today": uses_today + 1,
-        "uses_remaining": FREE_COACH_LIMIT - (uses_today + 1),
+        "uses_remaining": max(0, daily_limit - (uses_today + 1)),
     }
 
 # ─── Profile stats endpoint ───────────────────────────────────────────────────
@@ -1119,7 +1168,7 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         "recent_games": games[:10],
         "elo_history": elo_history[-20:],
         "coach_uses_today": uses_today,
-        "coach_uses_remaining": FREE_COACH_LIMIT - uses_today,
+        "coach_uses_remaining": max(0, FREE_COACH_LIMIT - uses_today),
         "coach_limit": FREE_COACH_LIMIT,
     }
 
@@ -1170,6 +1219,89 @@ def landing():
 @app.get("/logo.png")
 def logo():
     return FileResponse("logo.png")
+
+
+# ── Lemon Squeezy Webhook ─────────────────────────────────────────
+from fastapi import Request
+
+@app.post("/api/lemon-webhook")
+async def lemon_webhook(request: Request):
+    """Receives subscription events from Lemon Squeezy and updates Supabase."""
+    body = await request.body()
+
+    # Verify signature
+    sig = request.headers.get("x-signature", "")
+    if LS_SIGNING_SECRET:
+        expected = hmac.new(
+            LS_SIGNING_SECRET.encode(),
+            body,
+            hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            raise HTTPException(400, "Invalid signature")
+
+    import json
+    payload = json.loads(body)
+    event     = payload.get("meta", {}).get("event_name", "")
+    attrs     = payload.get("data", {}).get("attributes", {})
+    variant_id = int(attrs.get("variant_id", 0))
+    status     = attrs.get("status", "")
+    ls_sub_id  = str(payload.get("data", {}).get("id", ""))
+    ls_cust_id = str(attrs.get("customer_id", ""))
+    renews_at  = attrs.get("renews_at")
+    user_email = attrs.get("user_email", "")
+
+    # Map variant → plan
+    if variant_id == LS_CLUB_VARIANT:
+        plan = "club"
+    elif variant_id == LS_PRO_VARIANT:
+        plan = "pro"
+    else:
+        return {"ok": True, "note": "unknown variant, ignored"}
+
+    # Map LS status → our status
+    sub_status = "active" if status in ("active", "on_trial") else "cancelled"
+
+    # Find user_id from email via Supabase auth
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/auth/v1/admin/users",
+            params={"filter": f"email=={user_email}"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        data = r.json()
+        users = data.get("users", [])
+
+    if not users:
+        # Store by email for now — will link when user next logs in
+        return {"ok": True, "note": "user not found, skipped"}
+
+    user_id = users[0]["id"]
+
+    # Upsert into subscriptions table
+    sub_row = {
+        "user_id":         user_id,
+        "plan":            plan if sub_status == "active" else "free",
+        "ls_subscription_id": ls_sub_id,
+        "ls_customer_id":  ls_cust_id,
+        "status":          sub_status,
+        "renews_at":       renews_at,
+        "updated_at":      datetime.utcnow().isoformat()
+    }
+
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            f"{SUPABASE_URL}/rest/v1/subscriptions",
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=minimal"
+            },
+            json=sub_row
+        )
+
+    return {"ok": True, "plan": plan, "status": sub_status}
 
 @app.get("/favicon.ico")
 def favicon():

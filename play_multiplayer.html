@@ -4,6 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Africhess — Play</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon_16x16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="description" content="Play live 5+0 blitz chess against other players on AfriChess.">
+  <meta property="og:title" content="AfriChess — Live Multiplayer">
+  <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
+  <meta property="og:url" content="https://www.africhess.org/multiplayer">
   <link rel="stylesheet" href="chessboard-1.0.0.min.css">
   <script src="jquery.min.js"></script>
   <script src="chessboard-1.0.0.min.js"></script>
@@ -321,7 +331,11 @@
 
   <div class="header">
     <a class="logo" href="/">Africhess</a>
-    <span class="header-right">5+0 · Blitz</span>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <a href="/profile" style="padding:5px 14px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">Profile</a>
+      <a href="/history" style="padding:5px 14px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">History</a>
+      <span class="header-right">5+0 · Blitz</span>
+    </div>
   </div>
 
   <!-- ══ LOBBY SCREEN ══ -->
@@ -743,52 +757,46 @@ function onGameMessage(e) {
   }
 
   if (msg.type === 'rematch_start') {
-    const existingWs = gameWs;   // keep the live socket
+    if (gameWs) { gameWs.onclose = null; gameWs.close(); gameWs = null; }
+
     gameId   = msg.game_id;
     myColor  = msg.color;
     gameOver = false;
     document.getElementById('overlay').classList.remove('active');
-    // Reset board state without touching the WebSocket
-    game     = new Chess();
+
+    game = new Chess();
     selectedSq = null;
-    myTurn   = myColor === 'white';
+    myTurn = myColor === 'white';
     document.getElementById('move-list').innerHTML = '';
     resetClockDisplay();
-    // Reinitialise board with new orientation
+
     board = Chessboard('board', {
-      draggable: true,
-      position:  'start',
-      orientation: myColor,
+      draggable: true, position: 'start', orientation: myColor,
       pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
-      onDragStart: onDragStart,
-      onDrop:      onDrop,
-      onSnapEnd:   () => board.position(game.fen()),
+      onDragStart: onDragStart, onDrop: onDrop,
+      onSnapEnd: () => board.position(game.fen()),
       onSquareClick: onSquareClick,
     });
-    setTimeout(function() {
-      $('#board').off('click.sq').on('click.sq', '.square-55d63', function() {
-        var sq = null;
-        $(this).attr('class').split(' ').forEach(function(c) {
-          if (c.startsWith('square-') && c !== 'square-55d63') sq = c.replace('square-', '');
-        });
-        if (sq) onSquareClick(sq);
-      });
-    }, 200);
     updateTurnIndicator();
     startClockTick();
-    // Send claim then profile on the existing socket for the new game
-    existingWs.send(JSON.stringify({ type: 'claim', color: myColor }));
-    if (myProfile && currentUser) {
-      existingWs.send(JSON.stringify({
-        type:     'profile',
-        username: myProfile.username,
-        elo:      myProfile.elo,
-        user_id:  currentUser.id
-      }));
-    }
+
+    gameWs = new WebSocket(WS_BASE + '/ws/game/' + gameId);
+    gameWs.onopen = () => {
+      gameWs.send(JSON.stringify({ type: 'claim', color: myColor }));
+      if (myProfile && currentUser) {
+        gameWs.send(JSON.stringify({ type: 'profile', username: myProfile.username, elo: myProfile.elo, user_id: currentUser.id }));
+      }
+      gameWs._ping = setInterval(() => {
+        if (gameWs && gameWs.readyState === WebSocket.OPEN) gameWs.send(JSON.stringify({ type: 'ping' }));
+      }, 20000);
+    };
+    gameWs.onmessage = onGameMessage;
+    gameWs.onclose = () => {
+      if (gameWs && gameWs._ping) clearInterval(gameWs._ping);
+      if (!gameOver) showGameStatus('Connection lost.');
+    };
   }
 }
-
 function sendGame(obj) {
   if (gameWs && gameWs.readyState === WebSocket.OPEN) {
     gameWs.send(JSON.stringify(obj));

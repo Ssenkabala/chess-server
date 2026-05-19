@@ -188,6 +188,26 @@
       font-family: 'Georgia', serif;
     }
 
+    /* ── Country selector ── */
+    .country-row {
+      display: flex; align-items: center; gap: 12px;
+      margin-top: 10px;
+    }
+    .country-select {
+      background: var(--bg3); border: 1px solid var(--border);
+      color: var(--text); font-family: Georgia,serif; font-size: 12px;
+      padding: 6px 10px; border-radius: 3px; cursor: pointer;
+      letter-spacing: 0.05em; flex: 1;
+    }
+    .country-select:focus { outline: none; border-color: var(--green); }
+    .btn-save-country {
+      padding: 6px 16px; background: var(--green); color: #000;
+      border: none; font-family: Georgia,serif; font-size: 11px;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      cursor: pointer; border-radius: 2px; white-space: nowrap;
+    }
+    .country-saved { font-size: 11px; color: var(--green); letter-spacing: 0.08em; }
+
     @media (max-width: 500px) {
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
       .profile-header { flex-direction: column; text-align: center; }
@@ -205,6 +225,7 @@
     <a onclick="window.location.href='/play'">Play</a>
     <a onclick="window.location.href='/multiplayer'">Live</a>
     <a onclick="window.location.href='/history'">History</a>
+    <a onclick="window.location.href='/tournaments'">Tournaments</a>
     <a id="nav-signout" onclick="signOut()" style="display:none">Sign Out</a>
   </div>
 </div>
@@ -249,6 +270,7 @@ async function loadProfile() {
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
     renderProfile(data);
+    setCountryDropdown(data.country);
   } catch (e) {
     document.getElementById('page-content').innerHTML =
       `<div class="loading">Error loading profile: ${e.message}</div>`;
@@ -269,6 +291,67 @@ function renderProfile(d) {
         <div class="profile-username">${d.username || 'Unknown'}</div>
         <div class="profile-elo">${d.elo}<span>ELO</span></div>
         ${since ? `<div class="profile-since">Member since ${since}</div>` : ''}
+        <div class="country-row">
+          <select class="country-select" id="country-select" onchange="countryChanged()">
+            <option value="">🌍 Select country</option>
+            <option value="DZ">🇩🇿 Algeria</option>
+            <option value="AO">🇦🇴 Angola</option>
+            <option value="BJ">🇧🇯 Benin</option>
+            <option value="BW">🇧🇼 Botswana</option>
+            <option value="BF">🇧🇫 Burkina Faso</option>
+            <option value="BI">🇧🇮 Burundi</option>
+            <option value="CM">🇨🇲 Cameroon</option>
+            <option value="CV">🇨🇻 Cape Verde</option>
+            <option value="CF">🇨🇫 Central African Republic</option>
+            <option value="TD">🇹🇩 Chad</option>
+            <option value="KM">🇰🇲 Comoros</option>
+            <option value="CG">🇨🇬 Congo</option>
+            <option value="CD">🇨🇩 DR Congo</option>
+            <option value="DJ">🇩🇯 Djibouti</option>
+            <option value="EG">🇪🇬 Egypt</option>
+            <option value="GQ">🇬🇶 Equatorial Guinea</option>
+            <option value="ER">🇪🇷 Eritrea</option>
+            <option value="SZ">🇸🇿 Eswatini</option>
+            <option value="ET">🇪🇹 Ethiopia</option>
+            <option value="GA">🇬🇦 Gabon</option>
+            <option value="GM">🇬🇲 Gambia</option>
+            <option value="GH">🇬🇭 Ghana</option>
+            <option value="GN">🇬🇳 Guinea</option>
+            <option value="GW">🇬🇼 Guinea-Bissau</option>
+            <option value="CI">🇨🇮 Ivory Coast</option>
+            <option value="KE">🇰🇪 Kenya</option>
+            <option value="LS">🇱🇸 Lesotho</option>
+            <option value="LR">🇱🇷 Liberia</option>
+            <option value="LY">🇱🇾 Libya</option>
+            <option value="MG">🇲🇬 Madagascar</option>
+            <option value="MW">🇲🇼 Malawi</option>
+            <option value="ML">🇲🇱 Mali</option>
+            <option value="MR">🇲🇷 Mauritania</option>
+            <option value="MU">🇲🇺 Mauritius</option>
+            <option value="MA">🇲🇦 Morocco</option>
+            <option value="MZ">🇲🇿 Mozambique</option>
+            <option value="NA">🇳🇦 Namibia</option>
+            <option value="NE">🇳🇪 Niger</option>
+            <option value="NG">🇳🇬 Nigeria</option>
+            <option value="RW">🇷🇼 Rwanda</option>
+            <option value="ST">🇸🇹 São Tomé & Príncipe</option>
+            <option value="SN">🇸🇳 Senegal</option>
+            <option value="SC">🇸🇨 Seychelles</option>
+            <option value="SL">🇸🇱 Sierra Leone</option>
+            <option value="SO">🇸🇴 Somalia</option>
+            <option value="ZA">🇿🇦 South Africa</option>
+            <option value="SS">🇸🇸 South Sudan</option>
+            <option value="SD">🇸🇩 Sudan</option>
+            <option value="TZ">🇹🇿 Tanzania</option>
+            <option value="TG">🇹🇬 Togo</option>
+            <option value="TN">🇹🇳 Tunisia</option>
+            <option value="UG">🇺🇬 Uganda</option>
+            <option value="ZM">🇿🇲 Zambia</option>
+            <option value="ZW">🇿🇼 Zimbabwe</option>
+          </select>
+          <button class="btn-save-country" id="btn-save-country" onclick="saveCountry()" style="display:none;">Save</button>
+          <span class="country-saved" id="country-saved" style="display:none;">✓ Saved</span>
+        </div>
       </div>
     </div>
 
@@ -414,6 +497,45 @@ function formatOpponent(opponent) {
     return 'Engine · ' + (labels[lvl] || 'Lvl ' + lvl);
   }
   return opponent;
+}
+
+let _currentCountry = '';
+
+function countryChanged() {
+  const sel = document.getElementById('country-select');
+  const btn = document.getElementById('btn-save-country');
+  const saved = document.getElementById('country-saved');
+  saved.style.display = 'none';
+  btn.style.display = sel.value !== _currentCountry ? '' : 'none';
+}
+
+async function saveCountry() {
+  const sel   = document.getElementById('country-select');
+  const btn   = document.getElementById('btn-save-country');
+  const saved = document.getElementById('country-saved');
+  const val   = sel.value;
+  btn.disabled = true;
+  btn.textContent = '...';
+  const { error } = await sb.from('profiles')
+    .update({ country: val || null })
+    .eq('user_id', currentUser.id);
+  if (!error) {
+    _currentCountry = val;
+    btn.style.display = 'none';
+    saved.style.display = '';
+    setTimeout(() => { saved.style.display = 'none'; }, 2000);
+  } else {
+    btn.textContent = 'Save';
+    btn.disabled = false;
+    console.error('Country save failed:', error.message);
+  }
+}
+
+function setCountryDropdown(country) {
+  if (!country) return;
+  _currentCountry = country;
+  const sel = document.getElementById('country-select');
+  if (sel) sel.value = country;
 }
 
 async function signOut() {

@@ -333,6 +333,7 @@
     <a class="logo" href="/">Africhess</a>
     <div style="display:flex;align-items:center;gap:10px;">
       <a href="/profile" style="padding:5px 14px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">Profile</a>
+      <a href="/tournaments" style="padding:5px 14px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">Tournaments</a>
       <a href="/history" style="padding:5px 14px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">History</a>
       <span class="header-right">5+0 · Blitz</span>
     </div>
@@ -393,7 +394,8 @@
 
   <!-- ══ GAME OVER OVERLAY ══ -->
   <div class="overlay" id="overlay">
-    <div class="result-card">
+    <div class="result-card" style="position:relative;">
+      <button onclick="document.getElementById('overlay').classList.remove('active')" style="position:absolute;top:8px;right:10px;background:none;border:none;color:#555;font-size:18px;cursor:pointer;line-height:1;padding:4px 6px;" title="Close">✕</button>
       <div class="result-title" id="result-title">Draw</div>
       <div class="result-reason" id="result-reason">by agreement</div>
       <div class="session-score" id="session-score" style="display:none; justify-content:center; margin-top:4px;">
@@ -1061,25 +1063,30 @@ function showOverlay(result, reason) {
   const old = document.getElementById('btn-decline');
   if (old) old.remove();
 
-  // Save multiplayer game
+  // Save multiplayer game — delay 2s so opponent_profile has time to arrive
   if (sb && currentUser && multiMoveHistory.length > 0) {
     var pgn = '';
     multiMoveHistory.forEach(function(uci, i) {
       if (i % 2 === 0) pgn += (Math.floor(i/2) + 1) + '. ';
       pgn += uci + ' ';
     });
-    sb.from('games').insert({
-      user_id:      currentUser.id,
-      pgn:          pgn.trim(),
-      result:       result,
-      player_color: myColor,
-      opponent:     opponentUsername ? 'human:' + opponentUsername : 'human',
-      player_elo_before: myProfile ? (myProfile.eloBefore || myProfile.elo) : null,
-      player_elo_after:  myProfile ? myProfile.elo : null,
-    }).then(function(res) {
-      if (res.error) console.error('Multiplayer save failed:', res.error.message);
-      else console.log('Multiplayer game saved.');
-    });
+    var savedPgn    = pgn.trim();
+    var savedResult = result;
+    var savedColor  = myColor;
+    setTimeout(function() {
+      sb.from('games').insert({
+        user_id:      currentUser.id,
+        pgn:          savedPgn,
+        result:       savedResult,
+        player_color: savedColor,
+        opponent:     opponentUsername ? 'human:' + opponentUsername : 'human',
+        player_elo_before: myProfile ? (myProfile.eloBefore || myProfile.elo) : null,
+        player_elo_after:  myProfile ? myProfile.elo : null,
+      }).then(function(res) {
+        if (res.error) console.error('Multiplayer save failed:', res.error.message);
+        else console.log('Multiplayer game saved. Opponent:', opponentUsername);
+      });
+    }, 2000);
   }
   // Reset for next game
   multiMoveHistory = [];

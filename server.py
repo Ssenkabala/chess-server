@@ -700,6 +700,34 @@ async def game_ws(ws: WebSocket, game_id: str):
         game["last_move_ts"] = time.time()  # reset clock reference so timer starts fresh
         await broadcast(game, {"type": "both_connected"})
 
+        # If one player already sent their profile, push it to the other immediately
+        if color == "w" and game.get("black_profile"):
+            await send(ws, {
+                "type":     "opponent_profile",
+                "username": game["black_profile"]["username"],
+                "elo":      game["black_profile"]["elo"],
+            })
+        elif color == "b" and game.get("white_profile"):
+            await send(ws, {
+                "type":     "opponent_profile",
+                "username": game["white_profile"]["username"],
+                "elo":      game["white_profile"]["elo"],
+            })
+
+        # If one player already sent their profile, push it to the other immediately
+        if color == "w" and game.get("black_profile"):
+            await send(ws, {
+                "type":     "opponent_profile",
+                "username": game["black_profile"]["username"],
+                "elo":      game["black_profile"]["elo"],
+            })
+        elif color == "b" and game.get("white_profile"):
+            await send(ws, {
+                "type":     "opponent_profile",
+                "username": game["white_profile"]["username"],
+                "elo":      game["white_profile"]["elo"],
+            })
+
     try:
         while True:
             data = await ws.receive_json()
@@ -1160,6 +1188,7 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         "username": profile.get("username"),
         "elo": profile.get("elo", 1500),
         "created_at": profile.get("created_at"),
+        "country": profile.get("country"),
         "wins": wins,
         "losses": losses,
         "draws": draws,
@@ -1303,6 +1332,288 @@ async def lemon_webhook(request: Request):
 
     return {"ok": True, "plan": plan, "status": sub_status}
 
+
+
+# ═══════════════════════════════════════════════════════════════
+#  TOURNAMENT ENGINE
+# ═══════════════════════════════════════════════════════════════
+
+class TournamentStartRequest(BaseModel):
+    tournament_id: str
+    user_id: str
+
+class TournamentResultRequest(BaseModel):
+    game_id: str       # tournament_games.id
+    result: str        # 'white' | 'black' | 'draw'
+    user_id: str
+
+
+def swiss_pair(players: list, existing_games: list) -> list:
+    """
+    Simple Swiss pairing:
+    - Sort by score desc, then ELO desc
+    - Pair adjacent players, avoiding repeat pairings
+    - Unpaired player gets a bye (1 point)
+    Returns list of (white, black) tuples where each is a player dict.
+    """
+    # Build set of already-played pairs
+    played = set()
+    for g in existing_games:
+        played.add((g['white_id'], g['black_id']))
+        played.add((g['black_id'], g['white_id']))
+
+    ranked = sorted(players, key=lambda p: (-p.get('score', 0), -p.get('elo', 1500)))
+    paired = []
+    used   = set()
+
+    for i, p1 in enumerate(ranked):
+        if p1['user_id'] in used:
+            continue
+        for j in range(i + 1, len(ranked)):
+            p2 = ranked[j]
+            if p2['user_id'] in used:
+                continue
+            if (p1['user_id'], p2['user_id']) not in played:
+                # Alternate colours: higher score gets white
+                paired.append((p1, p2))
+                used.add(p1['user_id'])
+                used.add(p2['user_id'])
+                break
+
+    # Handle bye (odd player out)
+    for p in ranked:
+        if p['user_id'] not in used:
+            paired.append((p, None))  # None = bye
+
+    return paired
+
+
+@app.post("/api/tournament/start")
+async def start_tournament(req: TournamentStartRequest):
+    """Start a tournament and generate round 1 pairings."""
+    if not SUPABASE_SERVICE_KEY:
+        raise HTTPException(503, "Service unavailable")
+
+    async with httpx.AsyncClient() as client:
+        # Verify requester created the tournament
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournaments",
+            params={"id": f"eq.{req.tournament_id}", "select": "*"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        ts = r.json()
+        if not ts:
+            raise HTTPException(404, "Tournament not found")
+        t = ts[0]
+        if t['created_by'] != req.user_id:
+            raise HTTPException(403, "Only the creator can start the tournament")
+        if t['status'] != 'upcoming':
+            raise HTTPException(400, "Tournament already started or completed")
+
+        # Get players
+        r2 = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournament_players",
+            params={"tournament_id": f"eq.{req.tournament_id}", "select": "*"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        players = r2.json()
+        if len(players) < 2:
+            raise HTTPException(400, "Need at least 2 players to start")
+
+        # Generate round 1 pairings
+        pairs = swiss_pair(players, [])
+        games_to_insert = []
+        for white, black in pairs:
+            if black is None:
+                # Bye — award 1 point
+                await client.patch(
+                    f"{SUPABASE_URL}/rest/v1/tournament_players",
+                    params={"tournament_id": f"eq.{req.tournament_id}", "user_id": f"eq.{white['user_id']}"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                             "Content-Type": "application/json"},
+                    json={"score": white.get('score', 0) + 1}
+                )
+                continue
+            games_to_insert.append({
+                "tournament_id":  req.tournament_id,
+                "round":          1,
+                "white_id":       white['user_id'],
+                "black_id":       black['user_id'],
+                "white_username": white['username'],
+                "black_username": black['username'],
+            })
+
+        # Insert pairings
+        if games_to_insert:
+            await client.post(
+                f"{SUPABASE_URL}/rest/v1/tournament_games",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"},
+                json=games_to_insert
+            )
+
+        # Mark tournament active
+        await client.patch(
+            f"{SUPABASE_URL}/rest/v1/tournaments",
+            params={"id": f"eq.{req.tournament_id}"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json"},
+            json={"status": "active"}
+        )
+
+    return {"ok": True, "round": 1, "pairings": len(games_to_insert)}
+
+
+@app.post("/api/tournament/next-round")
+async def next_round(req: TournamentStartRequest):
+    """Generate pairings for the next round after all current round games are done."""
+    if not SUPABASE_SERVICE_KEY:
+        raise HTTPException(503, "Service unavailable")
+
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournaments",
+            params={"id": f"eq.{req.tournament_id}", "select": "*"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        t = r.json()[0]
+        if t['created_by'] != req.user_id:
+            raise HTTPException(403, "Only the creator can advance rounds")
+
+        # Get all tournament games to find current round
+        r2 = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournament_games",
+            params={"tournament_id": f"eq.{req.tournament_id}", "select": "*", "order": "round.desc"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        all_games = r2.json()
+        if not all_games:
+            raise HTTPException(400, "No games found")
+
+        current_round = all_games[0]['round']
+        if current_round >= t['rounds']:
+            # Complete the tournament
+            await client.patch(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{req.tournament_id}"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json"},
+                json={"status": "completed"}
+            )
+            return {"ok": True, "completed": True}
+
+        # Check all current round games have results
+        current_games = [g for g in all_games if g['round'] == current_round]
+        pending = [g for g in current_games if not g.get('result')]
+        if pending:
+            raise HTTPException(400, f"{len(pending)} game(s) still pending in round {current_round}")
+
+        # Get updated players
+        r3 = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournament_players",
+            params={"tournament_id": f"eq.{req.tournament_id}", "select": "*"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        players = r3.json()
+
+        next_r = current_round + 1
+        pairs = swiss_pair(players, all_games)
+        games_to_insert = []
+        for white, black in pairs:
+            if black is None:
+                await client.patch(
+                    f"{SUPABASE_URL}/rest/v1/tournament_players",
+                    params={"tournament_id": f"eq.{req.tournament_id}", "user_id": f"eq.{white['user_id']}"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                             "Content-Type": "application/json"},
+                    json={"score": white.get('score', 0) + 1}
+                )
+                continue
+            games_to_insert.append({
+                "tournament_id":  req.tournament_id,
+                "round":          next_r,
+                "white_id":       white['user_id'],
+                "black_id":       black['user_id'],
+                "white_username": white['username'],
+                "black_username": black['username'],
+            })
+
+        if games_to_insert:
+            await client.post(
+                f"{SUPABASE_URL}/rest/v1/tournament_games",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"},
+                json=games_to_insert
+            )
+
+    return {"ok": True, "round": next_r, "pairings": len(games_to_insert)}
+
+
+@app.post("/api/tournament/result")
+async def submit_result(req: TournamentResultRequest):
+    """Submit a game result and update player scores."""
+    if not SUPABASE_SERVICE_KEY:
+        raise HTTPException(503, "Service unavailable")
+    if req.result not in ('white', 'black', 'draw'):
+        raise HTTPException(400, "Invalid result")
+
+    async with httpx.AsyncClient() as client:
+        # Get the game
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournament_games",
+            params={"id": f"eq.{req.game_id}", "select": "*"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        games = r.json()
+        if not games:
+            raise HTTPException(404, "Game not found")
+        g = games[0]
+        if g.get('result'):
+            raise HTTPException(400, "Result already submitted")
+
+        # Only white or black player can submit
+        if req.user_id not in (g['white_id'], g['black_id']):
+            raise HTTPException(403, "Not a player in this game")
+
+        # Update game result
+        await client.patch(
+            f"{SUPABASE_URL}/rest/v1/tournament_games",
+            params={"id": f"eq.{req.game_id}"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json"},
+            json={"result": req.result, "played_at": datetime.utcnow().isoformat()}
+        )
+
+        # Award points: win=1, draw=0.5, loss=0
+        tid = g['tournament_id']
+
+        async def add_score(uid, pts):
+            r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}", "select": "score"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            current = r.json()[0].get('score', 0) if r.json() else 0
+            await client.patch(
+                f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json"},
+                json={"score": current + pts}
+            )
+
+        if req.result == 'white':
+            await add_score(g['white_id'], 1)
+            await add_score(g['black_id'], 0)
+        elif req.result == 'black':
+            await add_score(g['white_id'], 0)
+            await add_score(g['black_id'], 1)
+        else:
+            await add_score(g['white_id'], 0.5)
+            await add_score(g['black_id'], 0.5)
+
+    return {"ok": True, "result": req.result}
+
 @app.get("/favicon.ico")
 def favicon():
     return FileResponse("favicon.ico")
@@ -1338,6 +1649,10 @@ def sitemap():
 @app.get("/history")
 def history():
     return FileResponse("history.html")
+
+@app.get("/tournaments")
+def tournaments():
+    return FileResponse("tournament.html")
 
 @app.get("/chessboard-1.0.0.min.css")
 def cb_css():

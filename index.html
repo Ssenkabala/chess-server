@@ -73,10 +73,13 @@
     /* ── Board ── */
     #board, #analysis-board { width: 100%; max-width: 520px; }
     @media (max-width: 600px) {
-      #board, #analysis-board { width: calc(100vw - 16px) !important; max-width: calc(100vw - 16px) !important; }
-      .panel { max-width: 100vw; padding: 0 8px; gap: 8px; }
-      .captured-bar, .user-bar { max-width: calc(100vw - 16px) !important; }
-      body { padding: 8px 0; }
+      #board, #analysis-board {
+        width: calc(100vw - 8px) !important;
+        max-width: calc(100vw - 8px) !important;
+      }
+      .panel { max-width: 100vw; padding: 0 4px; gap: 6px; }
+      .captured-bar, .user-bar { max-width: calc(100vw - 8px) !important; }
+      body { padding: 4px 0; }
     }
 
     .highlight-square {
@@ -796,25 +799,62 @@
 // Prevent page scroll when dragging pieces on mobile
 document.addEventListener('DOMContentLoaded', function() {
   var boardEl = document.getElementById('board');
-  if (boardEl) {
-    boardEl.addEventListener('touchmove', function(e) {
-      e.preventDefault();
-    }, { passive: false });
-  }
+  if (!boardEl) return;
+
+  // Prevent scroll while touching board
+  boardEl.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+  }, { passive: false });
+
+  // Native touch-to-move for mobile — bypasses chessboard.js click issues
+  var touchStartX, touchStartY;
+  boardEl.addEventListener('touchstart', function(e) {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+
+  boardEl.addEventListener('touchend', function(e) {
+    // Only treat as tap if finger barely moved (not a swipe/scroll)
+    var dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
+    var dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
+    if (dx > 10 || dy > 10) return;
+
+    // Find which square was tapped
+    var touch = e.changedTouches[0];
+    var el = document.elementFromPoint(touch.clientX, touch.clientY);
+    while (el && el !== boardEl) {
+      var classes = el.className || '';
+      var match = typeof classes === 'string' && classes.match(/square-([a-h][1-8])/);
+      if (match) {
+        e.preventDefault();
+        onSquareClick(match[1]);
+        return;
+      }
+      el = el.parentElement;
+    }
+  }, { passive: false });
 });
 
 // ── Board resize: force chessboard.js to match container width ──
 function resizeBoards() {
-  var maxW = window.innerWidth <= 600 ? window.innerWidth - 16 : 520;
+  var isMob = window.innerWidth <= 600;
+  var maxW = isMob ? window.innerWidth - 8 : Math.min(520, window.innerWidth - 32);
   ['board', 'analysis-board'].forEach(function(id) {
     var el = document.getElementById(id);
-    if (el) el.style.width = maxW + 'px';
+    if (el) {
+      el.style.width = maxW + 'px';
+      el.style.maxWidth = maxW + 'px';
+      // Also force chessboard.js inner table
+      var tbl = el.querySelector('table');
+      if (tbl) { tbl.style.width = maxW + 'px'; tbl.style.height = maxW + 'px'; }
+    }
   });
   if (typeof board !== 'undefined' && board) board.resize();
   if (typeof analysisBoard !== 'undefined' && analysisBoard) analysisBoard.resize();
 }
 window.addEventListener('resize', resizeBoards);
 window.addEventListener('load', resizeBoards);
+window.addEventListener('orientationchange', function() { setTimeout(resizeBoards, 200); });
 
 const API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
   ? 'http://127.0.0.1:8000'

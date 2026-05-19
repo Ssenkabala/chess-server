@@ -1663,6 +1663,147 @@ async def update_country(request: Request, authorization: str = Header(None)):
         raise HTTPException(500, f"Update failed: {r.text}")
     return {"ok": True, "country": country}
 
+
+@app.post("/api/create-tournament")
+async def create_tournament(request: Request, authorization: str = Header(None)):
+    """Create a tournament — server-side to avoid client RLS issues."""
+    user_id = await verify_jwt(authorization)
+    body = await request.json()
+
+    required = ["name", "format", "time_control", "rounds", "max_players", "starts_at"]
+    for field in required:
+        if field not in body:
+            raise HTTPException(400, f"Missing field: {field}")
+
+    row = {
+        "name":         body["name"],
+        "description":  body.get("description") or None,
+        "format":       body["format"],
+        "time_control": body["time_control"],
+        "rounds":       int(body["rounds"]),
+        "max_players":  int(body["max_players"]),
+        "country":      body.get("country") or None,
+        "starts_at":    body["starts_at"],
+        "created_by":   user_id,
+        "status":       "upcoming",
+    }
+
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{SUPABASE_URL}/rest/v1/tournaments",
+            headers={
+                "apikey":        SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type":  "application/json",
+                "Prefer":        "return=representation"
+            },
+            json=row
+        )
+    if r.status_code not in (200, 201):
+        raise HTTPException(500, f"Create failed: {r.text}")
+    created = r.json()
+    return {"ok": True, "tournament": created[0] if created else {}}
+
+
+@app.post("/api/join-tournament")
+async def join_tournament(request: Request, authorization: str = Header(None)):
+    """Join a tournament — server-side to avoid client RLS issues."""
+    user_id = await verify_jwt(authorization)
+    body = await request.json()
+    tournament_id = body.get("tournament_id")
+    if not tournament_id:
+        raise HTTPException(400, "Missing tournament_id")
+
+    # Get tournament to check country restriction
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournaments",
+            params={"id": f"eq.{tournament_id}", "select": "country,max_players,status"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        ts = r.json()
+        if not ts:
+            raise HTTPException(404, "Tournament not found")
+        t = ts[0]
+
+        if t["status"] != "upcoming":
+            raise HTTPException(400, "Tournament is not open for registration")
+
+        # Check country restriction
+        if t.get("country"):
+            profile_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{user_id}", "select": "country,username,elo"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            profile = profile_r.json()
+            if not profile or profile[0].get("country") != t["country"]:
+                raise HTTPException(403, "You must be from the required country to join this tournament")
+            prof = profile[0]
+        else:
+            profile_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{user_id}", "select": "country,username,elo"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            profile = profile_r.json()
+            prof = profile[0] if profile else {}
+
+        # Check not already joined
+        existing = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournament_players",
+            params={"tournament_id": f"eq.{tournament_id}", "user_id": f"eq.{user_id}", "select": "id"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        if existing.json():
+            raise HTTPException(400, "Already registered")
+
+        # Check not full
+        count_r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournament_players",
+            params={"tournament_id": f"eq.{tournament_id}", "select": "id"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        if len(count_r.json()) >= t["max_players"]:
+            raise HTTPException(400, "Tournament is full")
+
+        # Insert player
+        r2 = await client.post(
+            f"{SUPABASE_URL}/rest/v1/tournament_players",
+            headers={
+                "apikey":        SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type":  "application/json",
+                "Prefer":        "return=minimal"
+            },
+            json={
+                "tournament_id": tournament_id,
+                "user_id":       user_id,
+                "username":      prof.get("username"),
+                "country":       prof.get("country"),
+                "elo":           prof.get("elo", 1500),
+            }
+        )
+    if r2.status_code not in (200, 201):
+        raise HTTPException(500, f"Join failed: {r2.text}")
+    return {"ok": True}
+
+
+@app.delete("/api/leave-tournament")
+async def leave_tournament(request: Request, authorization: str = Header(None)):
+    """Leave a tournament."""
+    user_id = await verify_jwt(authorization)
+    body = await request.json()
+    tournament_id = body.get("tournament_id")
+
+    async with httpx.AsyncClient() as client:
+        await client.delete(
+            f"{SUPABASE_URL}/rest/v1/tournament_players",
+            params={"tournament_id": f"eq.{tournament_id}", "user_id": f"eq.{user_id}"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+    return {"ok": True}
+
 @app.get("/favicon.ico")
 def favicon():
     return FileResponse("favicon.ico")

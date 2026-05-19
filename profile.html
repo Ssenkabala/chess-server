@@ -516,9 +516,16 @@ async function saveCountry() {
   const val   = sel.value;
   btn.disabled = true;
   btn.textContent = '...';
+  // Verify session is still active before writing
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) {
+    alert('Your session has expired. Please sign in again.');
+    window.location.href = '/play';
+    return;
+  }
   const { error } = await sb.from('profiles')
     .update({ country: val || null })
-    .eq('user_id', currentUser.id);
+    .eq('user_id', session.user.id);
   if (!error) {
     _currentCountry = val;
     btn.style.display = 'none';

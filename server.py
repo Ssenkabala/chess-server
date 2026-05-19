@@ -34,6 +34,9 @@ ANTHROPIC_API_KEY    = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
 SUPABASE_URL         = os.getenv("SUPABASE_URL", "https://nbskgzsvygdmlvwbetxn.supabase.co")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")  # set on Railway
 
+# Tournament race condition guard
+_tournament_locks: set = set()
+
 # Lemon Squeezy
 LS_SIGNING_SECRET  = os.getenv("LEMONSQUEEZY_SIGNING_SECRET", "")
 LS_CLUB_VARIANT    = int(os.getenv("LS_CLUB_VARIANT_ID", "1667817"))
@@ -41,6 +44,25 @@ LS_PRO_VARIANT     = int(os.getenv("LS_PRO_VARIANT_ID",  "1667860"))
 
 # Coach limits per plan
 COACH_LIMITS = {"free": 10, "club": 200, "pro": 999999}
+
+
+async def verify_jwt(authorization: str) -> str:
+    """Verify Supabase JWT and return the user_id. Raises 401 if invalid."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing or invalid authorization header")
+    token = authorization.split(" ", 1)[1]
+    # Verify token against Supabase auth API
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "apikey":        SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {token}"
+            }
+        )
+    if r.status_code != 200:
+        raise HTTPException(401, "Invalid or expired session token")
+    return r.json().get("id", "")
 
 # ΓöÇΓöÇΓöÇ Supabase admin client (service role ΓÇö bypasses RLS) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 import httpx
@@ -1389,10 +1411,16 @@ def swiss_pair(players: list, existing_games: list) -> list:
 
 
 @app.post("/api/tournament/start")
-async def start_tournament(req: TournamentStartRequest):
+async def start_tournament(req: TournamentStartRequest, authorization: str = Header(None)):
     """Start a tournament and generate round 1 pairings."""
     if not SUPABASE_SERVICE_KEY:
         raise HTTPException(503, "Service unavailable")
+    user_id = await verify_jwt(authorization)
+    lock_key = f"start_{req.tournament_id}"
+    if lock_key in _tournament_locks:
+        raise HTTPException(429, "Tournament start already in progress")
+    _tournament_locks.add(lock_key)
+    try:
 
     async with httpx.AsyncClient() as client:
         # Verify requester created the tournament
@@ -1405,7 +1433,7 @@ async def start_tournament(req: TournamentStartRequest):
         if not ts:
             raise HTTPException(404, "Tournament not found")
         t = ts[0]
-        if t['created_by'] != req.user_id:
+        if t['created_by'] != user_id:
             raise HTTPException(403, "Only the creator can start the tournament")
         if t['status'] != 'upcoming':
             raise HTTPException(400, "Tournament already started or completed")
@@ -1461,14 +1489,21 @@ async def start_tournament(req: TournamentStartRequest):
             json={"status": "active"}
         )
 
-    return {"ok": True, "round": 1, "pairings": len(games_to_insert)}
+    finally:
+        _tournament_locks.discard(f"start_{req.tournament_id}")
 
 
 @app.post("/api/tournament/next-round")
-async def next_round(req: TournamentStartRequest):
+async def next_round(req: TournamentStartRequest, authorization: str = Header(None)):
     """Generate pairings for the next round after all current round games are done."""
     if not SUPABASE_SERVICE_KEY:
         raise HTTPException(503, "Service unavailable")
+    user_id = await verify_jwt(authorization)
+    lock_key = f"next_{req.tournament_id}"
+    if lock_key in _tournament_locks:
+        raise HTTPException(429, "Round generation already in progress")
+    _tournament_locks.add(lock_key)
+    try:
 
     async with httpx.AsyncClient() as client:
         r = await client.get(
@@ -1477,7 +1512,7 @@ async def next_round(req: TournamentStartRequest):
             headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
         t = r.json()[0]
-        if t['created_by'] != req.user_id:
+        if t['created_by'] != user_id:
             raise HTTPException(403, "Only the creator can advance rounds")
 
         # Get all tournament games to find current round
@@ -1546,14 +1581,16 @@ async def next_round(req: TournamentStartRequest):
                 json=games_to_insert
             )
 
-    return {"ok": True, "round": next_r, "pairings": len(games_to_insert)}
+    finally:
+        _tournament_locks.discard(f"next_{req.tournament_id}")
 
 
 @app.post("/api/tournament/result")
-async def submit_result(req: TournamentResultRequest):
+async def submit_result(req: TournamentResultRequest, authorization: str = Header(None)):
     """Submit a game result and update player scores."""
     if not SUPABASE_SERVICE_KEY:
         raise HTTPException(503, "Service unavailable")
+    user_id = await verify_jwt(authorization)
     if req.result not in ('white', 'black', 'draw'):
         raise HTTPException(400, "Invalid result")
 
@@ -1572,7 +1609,7 @@ async def submit_result(req: TournamentResultRequest):
             raise HTTPException(400, "Result already submitted")
 
         # Only white or black player can submit
-        if req.user_id not in (g['white_id'], g['black_id']):
+        if user_id not in (g['white_id'], g['black_id']):
             raise HTTPException(403, "Not a player in this game")
 
         # Update game result

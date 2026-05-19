@@ -575,6 +575,26 @@ async function viewTournament(id) {
     }
   }
 
+  // Real-time subscription — update view when standings or pairings change
+  // Unsubscribe previous channel if any
+  if (window._tournamentChannel) {
+    sb.removeChannel(window._tournamentChannel);
+  }
+  window._tournamentChannel = sb.channel('tournament-' + id)
+    .on('postgres_changes', {
+      event: '*', schema: 'public', table: 'tournament_players',
+      filter: 'tournament_id=eq.' + id
+    }, () => viewTournament(id))
+    .on('postgres_changes', {
+      event: '*', schema: 'public', table: 'tournament_games',
+      filter: 'tournament_id=eq.' + id
+    }, () => viewTournament(id))
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'tournaments',
+      filter: 'id=eq.' + id
+    }, () => viewTournament(id))
+    .subscribe();
+
   content.innerHTML = `
     <div class="detail-header">
       <div style="flex:1">
@@ -617,15 +637,21 @@ async function viewTournament(id) {
 }
 
 function showList() {
+  if (window._tournamentChannel) {
+    sb.removeChannel(window._tournamentChannel);
+    window._tournamentChannel = null;
+  }
   document.getElementById('list-view').classList.remove('hidden');
   document.getElementById('detail-view').classList.remove('active');
 }
 
 async function joinTournament(id) {
   if (!currentUser) { window.location.href = '/play'; return; }
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = '/play'; return; }
   const { error } = await sb.from('tournament_players').insert({
     tournament_id: id,
-    user_id:       currentUser.id,
+    user_id:       session.user.id,
     username:      currentProfile?.username,
     country:       currentProfile?.country,
     elo:           currentProfile?.elo,
@@ -667,11 +693,15 @@ async function createTournament() {
   if (!name) { errEl.textContent = 'Please enter a tournament name.'; return; }
   if (!starts) { errEl.textContent = 'Please set a start date and time.'; return; }
 
+  // Verify session before writing
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { errEl.textContent = 'Session expired. Please sign in again.'; return; }
+
   const { data, error } = await sb.from('tournaments').insert({
     name, description: desc || null, format, time_control: time,
     rounds, max_players: maxP, country: country || null,
     starts_at: new Date(starts).toISOString(),
-    created_by: currentUser.id, status: 'upcoming',
+    created_by: session.user.id, status: 'upcoming',
   }).select().single();
 
   if (error) { errEl.textContent = error.message; return; }
@@ -680,11 +710,19 @@ async function createTournament() {
   viewTournament(data.id);
 }
 
+async function getAuthHeader() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = '/play'; return null; }
+  return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` };
+}
+
 async function startTournament(id) {
   if (!currentUser) return;
+  const headers = await getAuthHeader();
+  if (!headers) return;
   const r = await fetch('/api/tournament/start', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ tournament_id: id, user_id: currentUser.id })
   });
   const data = await r.json();
@@ -694,9 +732,11 @@ async function startTournament(id) {
 
 async function nextRound(id) {
   if (!currentUser) return;
+  const headers = await getAuthHeader();
+  if (!headers) return;
   const r = await fetch('/api/tournament/next-round', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ tournament_id: id, user_id: currentUser.id })
   });
   const data = await r.json();

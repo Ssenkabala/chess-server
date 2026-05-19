@@ -74,11 +74,12 @@
     #board, #analysis-board { width: 100%; max-width: 520px; }
     @media (max-width: 600px) {
       #board, #analysis-board {
-        width: calc(100vw - 8px) !important;
-        max-width: calc(100vw - 8px) !important;
+        width: calc(100vw - 12px) !important;
+        max-width: calc(100vw - 12px) !important;
+        margin: 0 auto;
       }
-      .panel { max-width: 100vw; padding: 0 4px; gap: 6px; }
-      .captured-bar, .user-bar { max-width: calc(100vw - 8px) !important; }
+      .panel { max-width: 100vw; padding: 0 6px; gap: 6px; }
+      .captured-bar, .user-bar { max-width: calc(100vw - 12px) !important; }
       body { padding: 4px 0; }
     }
 
@@ -806,7 +807,7 @@ document.addEventListener('DOMContentLoaded', function() {
     e.preventDefault();
   }, { passive: false });
 
-  // Native touch-to-move for mobile — bypasses chessboard.js click issues
+  // Native touch-to-move — uses data-square attribute (reliable on all mobile browsers)
   var touchStartX, touchStartY;
   boardEl.addEventListener('touchstart', function(e) {
     touchStartX = e.touches[0].clientX;
@@ -814,20 +815,18 @@ document.addEventListener('DOMContentLoaded', function() {
   }, { passive: true });
 
   boardEl.addEventListener('touchend', function(e) {
-    // Only treat as tap if finger barely moved (not a swipe/scroll)
     var dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
     var dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
-    if (dx > 10 || dy > 10) return;
+    if (dx > 10 || dy > 10) return; // swipe/scroll, not a tap
 
-    // Find which square was tapped
     var touch = e.changedTouches[0];
     var el = document.elementFromPoint(touch.clientX, touch.clientY);
+    // Walk up DOM to find the square element with data-square attribute
     while (el && el !== boardEl) {
-      var classes = el.className || '';
-      var match = typeof classes === 'string' && classes.match(/square-([a-h][1-8])/);
-      if (match) {
+      var sq = el.getAttribute('data-square');
+      if (sq) {
         e.preventDefault();
-        onSquareClick(match[1]);
+        onSquareClick(sq);
         return;
       }
       el = el.parentElement;
@@ -1149,6 +1148,11 @@ function startGame(color) {
     onSquareClick: onSquareClick
   });
   resizeBoards();
+  // jQuery click handler using data-square — works on desktop and as fallback on mobile
+  $('#board').off('click.sq').on('click.sq', '.square-55d63', function() {
+    var sq = $(this).attr('data-square');
+    if (sq) onSquareClick(sq);
+  });
   if (playerColor === 'b') {
     setStatus('Engine thinking...');
     engineThinking = true;

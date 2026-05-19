@@ -164,8 +164,12 @@
 
     /* Board */
     #board { width: 480px; }
-    @media (max-width: 520px) {
-      #board { width: calc(100vw - 32px); }
+    @media (max-width: 600px) {
+      #board {
+        width: calc(100vw - 12px) !important;
+        max-width: calc(100vw - 12px) !important;
+        margin: 0 auto;
+      }
     }
 
     /* Status bar */
@@ -563,11 +567,32 @@ function cancelLobby() {
 // Prevent page scroll when dragging pieces on mobile
 document.addEventListener('DOMContentLoaded', function() {
   var boardEl = document.getElementById('board');
-  if (boardEl) {
-    boardEl.addEventListener('touchmove', function(e) {
-      e.preventDefault();
-    }, { passive: false });
-  }
+  if (!boardEl) return;
+
+  // Prevent scroll while touching board
+  boardEl.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+  }, { passive: false });
+
+  // Native tap-to-move using data-square attribute
+  var touchStartX, touchStartY;
+  boardEl.addEventListener('touchstart', function(e) {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+
+  boardEl.addEventListener('touchend', function(e) {
+    var dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
+    var dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
+    if (dx > 10 || dy > 10) return; // swipe, not tap
+    var touch = e.changedTouches[0];
+    var el = document.elementFromPoint(touch.clientX, touch.clientY);
+    while (el && el !== boardEl) {
+      var sq = el.getAttribute('data-square');
+      if (sq) { e.preventDefault(); onSquareClick(sq); return; }
+      el = el.parentElement;
+    }
+  }, { passive: false });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -603,17 +628,11 @@ function startGame() {
     onSquareClick: onSquareClick,
   });
 
-  // chessboard.js suppresses onSquareClick when draggable:true.
-  // Bind our own handler so click-to-move works alongside dragging.
-  setTimeout(function() {
-    $('#board').off('click.sq').on('click.sq', '.square-55d63', function() {
-      var sq = null;
-      $(this).attr('class').split(' ').forEach(function(c) {
-        if (c.startsWith('square-') && c !== 'square-55d63') sq = c.replace('square-', '');
-      });
-      if (sq) onSquareClick(sq);
-    });
-  }, 200);
+  // Click-to-move using data-square (reliable on desktop and mobile)
+  $('#board').off('click.sq').on('click.sq', '.square-55d63', function() {
+    var sq = $(this).attr('data-square');
+    if (sq) onSquareClick(sq);
+  });
 
   resetClockDisplay();
   updateTurnIndicator();

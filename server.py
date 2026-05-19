@@ -1421,77 +1421,70 @@ async def start_tournament(req: TournamentStartRequest, authorization: str = Hea
         raise HTTPException(429, "Tournament start already in progress")
     _tournament_locks.add(lock_key)
     try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{req.tournament_id}", "select": "*"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            ts = r.json()
+            if not ts:
+                raise HTTPException(404, "Tournament not found")
+            t = ts[0]
+            if t["created_by"] != user_id:
+                raise HTTPException(403, "Only the creator can start the tournament")
+            if t["status"] != "upcoming":
+                raise HTTPException(400, "Tournament already started or completed")
 
-    async with httpx.AsyncClient() as client:
-        # Verify requester created the tournament
-        r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournaments",
-            params={"id": f"eq.{req.tournament_id}", "select": "*"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        ts = r.json()
-        if not ts:
-            raise HTTPException(404, "Tournament not found")
-        t = ts[0]
-        if t['created_by'] != user_id:
-            raise HTTPException(403, "Only the creator can start the tournament")
-        if t['status'] != 'upcoming':
-            raise HTTPException(400, "Tournament already started or completed")
+            r2 = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"tournament_id": f"eq.{req.tournament_id}", "select": "*"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            players = r2.json()
+            if len(players) < 2:
+                raise HTTPException(400, "Need at least 2 players to start")
 
-        # Get players
-        r2 = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournament_players",
-            params={"tournament_id": f"eq.{req.tournament_id}", "select": "*"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        players = r2.json()
-        if len(players) < 2:
-            raise HTTPException(400, "Need at least 2 players to start")
+            pairs = swiss_pair(players, [])
+            games_to_insert = []
+            for white, black in pairs:
+                if black is None:
+                    await client.patch(
+                        f"{SUPABASE_URL}/rest/v1/tournament_players",
+                        params={"tournament_id": f"eq.{req.tournament_id}", "user_id": f"eq.{white['user_id']}"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                 "Content-Type": "application/json"},
+                        json={"score": white.get("score", 0) + 1}
+                    )
+                    continue
+                games_to_insert.append({
+                    "tournament_id":  req.tournament_id,
+                    "round":          1,
+                    "white_id":       white["user_id"],
+                    "black_id":       black["user_id"],
+                    "white_username": white["username"],
+                    "black_username": black["username"],
+                })
 
-        # Generate round 1 pairings
-        pairs = swiss_pair(players, [])
-        games_to_insert = []
-        for white, black in pairs:
-            if black is None:
-                # Bye — award 1 point
-                await client.patch(
-                    f"{SUPABASE_URL}/rest/v1/tournament_players",
-                    params={"tournament_id": f"eq.{req.tournament_id}", "user_id": f"eq.{white['user_id']}"},
+            if games_to_insert:
+                await client.post(
+                    f"{SUPABASE_URL}/rest/v1/tournament_games",
                     headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                             "Content-Type": "application/json"},
-                    json={"score": white.get('score', 0) + 1}
+                             "Content-Type": "application/json", "Prefer": "return=minimal"},
+                    json=games_to_insert
                 )
-                continue
-            games_to_insert.append({
-                "tournament_id":  req.tournament_id,
-                "round":          1,
-                "white_id":       white['user_id'],
-                "black_id":       black['user_id'],
-                "white_username": white['username'],
-                "black_username": black['username'],
-            })
 
-        # Insert pairings
-        if games_to_insert:
-            await client.post(
-                f"{SUPABASE_URL}/rest/v1/tournament_games",
+            await client.patch(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{req.tournament_id}"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                         "Content-Type": "application/json", "Prefer": "return=minimal"},
-                json=games_to_insert
+                         "Content-Type": "application/json"},
+                json={"status": "active"}
             )
 
-        # Mark tournament active
-        await client.patch(
-            f"{SUPABASE_URL}/rest/v1/tournaments",
-            params={"id": f"eq.{req.tournament_id}"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                     "Content-Type": "application/json"},
-            json={"status": "active"}
-        )
-
+        return {"ok": True, "round": 1, "pairings": len(games_to_insert)}
     finally:
         _tournament_locks.discard(f"start_{req.tournament_id}")
-
 
 @app.post("/api/tournament/next-round")
 async def next_round(req: TournamentStartRequest, authorization: str = Header(None)):
@@ -1504,86 +1497,81 @@ async def next_round(req: TournamentStartRequest, authorization: str = Header(No
         raise HTTPException(429, "Round generation already in progress")
     _tournament_locks.add(lock_key)
     try:
-
-    async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournaments",
-            params={"id": f"eq.{req.tournament_id}", "select": "*"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        t = r.json()[0]
-        if t['created_by'] != user_id:
-            raise HTTPException(403, "Only the creator can advance rounds")
-
-        # Get all tournament games to find current round
-        r2 = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournament_games",
-            params={"tournament_id": f"eq.{req.tournament_id}", "select": "*", "order": "round.desc"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        all_games = r2.json()
-        if not all_games:
-            raise HTTPException(400, "No games found")
-
-        current_round = all_games[0]['round']
-        if current_round >= t['rounds']:
-            # Complete the tournament
-            await client.patch(
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
                 f"{SUPABASE_URL}/rest/v1/tournaments",
-                params={"id": f"eq.{req.tournament_id}"},
-                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                         "Content-Type": "application/json"},
-                json={"status": "completed"}
+                params={"id": f"eq.{req.tournament_id}", "select": "*"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             )
-            return {"ok": True, "completed": True}
+            t = r.json()[0]
+            if t["created_by"] != user_id:
+                raise HTTPException(403, "Only the creator can advance rounds")
 
-        # Check all current round games have results
-        current_games = [g for g in all_games if g['round'] == current_round]
-        pending = [g for g in current_games if not g.get('result')]
-        if pending:
-            raise HTTPException(400, f"{len(pending)} game(s) still pending in round {current_round}")
+            r2 = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_games",
+                params={"tournament_id": f"eq.{req.tournament_id}", "select": "*", "order": "round.desc"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            all_games = r2.json()
+            if not all_games:
+                raise HTTPException(400, "No games found")
 
-        # Get updated players
-        r3 = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournament_players",
-            params={"tournament_id": f"eq.{req.tournament_id}", "select": "*"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        players = r3.json()
-
-        next_r = current_round + 1
-        pairs = swiss_pair(players, all_games)
-        games_to_insert = []
-        for white, black in pairs:
-            if black is None:
+            current_round = all_games[0]["round"]
+            if current_round >= t["rounds"]:
                 await client.patch(
-                    f"{SUPABASE_URL}/rest/v1/tournament_players",
-                    params={"tournament_id": f"eq.{req.tournament_id}", "user_id": f"eq.{white['user_id']}"},
+                    f"{SUPABASE_URL}/rest/v1/tournaments",
+                    params={"id": f"eq.{req.tournament_id}"},
                     headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                              "Content-Type": "application/json"},
-                    json={"score": white.get('score', 0) + 1}
+                    json={"status": "completed"}
                 )
-                continue
-            games_to_insert.append({
-                "tournament_id":  req.tournament_id,
-                "round":          next_r,
-                "white_id":       white['user_id'],
-                "black_id":       black['user_id'],
-                "white_username": white['username'],
-                "black_username": black['username'],
-            })
+                return {"ok": True, "completed": True}
 
-        if games_to_insert:
-            await client.post(
-                f"{SUPABASE_URL}/rest/v1/tournament_games",
-                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                         "Content-Type": "application/json", "Prefer": "return=minimal"},
-                json=games_to_insert
+            current_games = [g for g in all_games if g["round"] == current_round]
+            pending = [g for g in current_games if not g.get("result")]
+            if pending:
+                raise HTTPException(400, f"{len(pending)} game(s) still pending in round {current_round}")
+
+            r3 = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"tournament_id": f"eq.{req.tournament_id}", "select": "*"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             )
+            players = r3.json()
 
+            next_r = current_round + 1
+            pairs = swiss_pair(players, all_games)
+            games_to_insert = []
+            for white, black in pairs:
+                if black is None:
+                    await client.patch(
+                        f"{SUPABASE_URL}/rest/v1/tournament_players",
+                        params={"tournament_id": f"eq.{req.tournament_id}", "user_id": f"eq.{white['user_id']}"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                 "Content-Type": "application/json"},
+                        json={"score": white.get("score", 0) + 1}
+                    )
+                    continue
+                games_to_insert.append({
+                    "tournament_id":  req.tournament_id,
+                    "round":          next_r,
+                    "white_id":       white["user_id"],
+                    "black_id":       black["user_id"],
+                    "white_username": white["username"],
+                    "black_username": black["username"],
+                })
+
+            if games_to_insert:
+                await client.post(
+                    f"{SUPABASE_URL}/rest/v1/tournament_games",
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                             "Content-Type": "application/json", "Prefer": "return=minimal"},
+                    json=games_to_insert
+                )
+
+        return {"ok": True, "round": next_r, "pairings": len(games_to_insert)}
     finally:
         _tournament_locks.discard(f"next_{req.tournament_id}")
-
 
 @app.post("/api/tournament/result")
 async def submit_result(req: TournamentResultRequest, authorization: str = Header(None)):

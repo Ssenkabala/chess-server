@@ -1639,6 +1639,30 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
 
     return {"ok": True, "result": req.result}
 
+
+@app.post("/api/update-country")
+async def update_country(request: Request, authorization: str = Header(None)):
+    """Update user country — verified server-side to avoid client RLS issues."""
+    user_id = await verify_jwt(authorization)
+    body = await request.json()
+    country = body.get("country", None)
+
+    async with httpx.AsyncClient() as client:
+        r = await client.patch(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{user_id}"},
+            headers={
+                "apikey":        SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type":  "application/json",
+                "Prefer":        "return=minimal"
+            },
+            json={"country": country}
+        )
+    if r.status_code not in (200, 204):
+        raise HTTPException(500, f"Update failed: {r.text}")
+    return {"ok": True, "country": country}
+
 @app.get("/favicon.ico")
 def favicon():
     return FileResponse("favicon.ico")

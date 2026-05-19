@@ -516,25 +516,32 @@ async function saveCountry() {
   const val   = sel.value;
   btn.disabled = true;
   btn.textContent = '...';
-  // Verify session is still active before writing
+  // Use server endpoint — avoids client-side RLS/auth issues
   const { data: { session } } = await sb.auth.getSession();
   if (!session) {
     alert('Your session has expired. Please sign in again.');
     window.location.href = '/play';
     return;
   }
-  const { error } = await sb.from('profiles')
-    .update({ country: val || null })
-    .eq('user_id', session.user.id);
-  if (!error) {
+  try {
+    const r = await fetch('/api/update-country', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify({ country: val || null })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Update failed');
     _currentCountry = val;
     btn.style.display = 'none';
     saved.style.display = '';
     setTimeout(() => { saved.style.display = 'none'; }, 2000);
-  } else {
+  } catch (err) {
     btn.textContent = 'Save';
     btn.disabled = false;
-    console.error('Country save failed:', error.message);
+    console.error('Country save failed:', err.message);
   }
 }
 

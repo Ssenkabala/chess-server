@@ -1804,6 +1804,40 @@ async def leave_tournament(request: Request, authorization: str = Header(None)):
         )
     return {"ok": True}
 
+
+@app.get("/api/tournaments")
+async def get_tournaments(status: str = "upcoming"):
+    """Get tournaments list — server-side to avoid RLS issues."""
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournaments",
+            params={"status": f"eq.{status}", "select": "*",
+                    "order": "starts_at.asc" if status != "completed" else "starts_at.desc"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+    return r.json()
+
+
+@app.get("/api/tournaments/{tournament_id}")
+async def get_tournament(tournament_id: str):
+    """Get single tournament with players and games."""
+    async with httpx.AsyncClient() as client:
+        t_r, p_r, g_r = await asyncio.gather(
+            client.get(f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{tournament_id}", "select": "*"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}),
+            client.get(f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"tournament_id": f"eq.{tournament_id}", "select": "*", "order": "score.desc"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}),
+            client.get(f"{SUPABASE_URL}/rest/v1/tournament_games",
+                params={"tournament_id": f"eq.{tournament_id}", "select": "*", "order": "round.asc"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}),
+        )
+    ts = t_r.json()
+    if not ts:
+        raise HTTPException(404, "Tournament not found")
+    return {"tournament": ts[0], "players": p_r.json(), "games": g_r.json()}
+
 @app.get("/favicon.ico")
 def favicon():
     return FileResponse("favicon.ico")

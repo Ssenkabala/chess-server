@@ -307,23 +307,23 @@
     <div class="modal-title">Create Tournament</div>
 
     <div class="field">
-      <label>Tournament Name</label>
+      <label for="t-name">Tournament Name</label>
       <input type="text" id="t-name" placeholder="e.g. East Africa Blitz Open">
     </div>
     <div class="field">
-      <label>Description (optional)</label>
+      <label for="t-desc">Description (optional)</label>
       <textarea id="t-desc" placeholder="Open to all players from East Africa..."></textarea>
     </div>
     <div class="field-row">
       <div class="field">
-        <label>Format</label>
+        <label for="t-format">Format</label>
         <select id="t-format">
           <option value="swiss">Swiss</option>
           <option value="roundrobin">Round Robin</option>
         </select>
       </div>
       <div class="field">
-        <label>Time Control</label>
+        <label for="t-time">Time Control</label>
         <select id="t-time">
           <option value="3+0">3+0 Bullet</option>
           <option value="5+0" selected>5+0 Blitz</option>
@@ -333,7 +333,7 @@
     </div>
     <div class="field-row">
       <div class="field">
-        <label>Rounds</label>
+        <label for="t-rounds">Rounds</label>
         <select id="t-rounds">
           <option value="3">3</option>
           <option value="5" selected>5</option>
@@ -342,7 +342,7 @@
         </select>
       </div>
       <div class="field">
-        <label>Max Players</label>
+        <label for="t-max">Max Players</label>
         <select id="t-max">
           <option value="8">8</option>
           <option value="16" selected>16</option>
@@ -352,7 +352,7 @@
       </div>
     </div>
     <div class="field">
-      <label>Country Restriction (optional)</label>
+      <label for="t-country">Country Restriction (optional)</label>
       <select id="t-country">
         <option value="">🌍 Open to all</option>
         <option value="DZ">🇩🇿 Algeria</option>
@@ -388,7 +388,7 @@
       </select>
     </div>
     <div class="field">
-      <label>Start Date & Time</label>
+      <label for="t-starts">Start Date & Time</label>
       <input type="datetime-local" id="t-starts">
     </div>
 
@@ -436,10 +436,15 @@ async function init() {
     currentUser = session.user;
     document.getElementById('nav-signout').style.display = 'block';
     document.getElementById('btn-create').style.display = '';
-    // Load profile for country
-    const { data: prof } = await sb.from('profiles')
-      .select('username,elo,country').eq('user_id', currentUser.id).single();
-    currentProfile = prof;
+    // Load profile via server
+    try {
+      const pr = await fetch(`/api/profile/${currentUser.id}`,
+        { headers: { 'x-user-id': currentUser.id } });
+      if (pr.ok) {
+        const pd = await pr.json();
+        currentProfile = { username: pd.username, elo: pd.elo, country: pd.country };
+      }
+    } catch(e) { console.warn('Profile load failed', e); }
   }
   loadTournaments();
 }
@@ -456,17 +461,15 @@ async function loadTournaments() {
   const grid = document.getElementById('t-grid');
   grid.innerHTML = '<div class="loading"><span class="spinner"></span>Loading...</div>';
 
-  const { data, error } = await sb.from('tournaments')
-    .select('*')
-    .eq('status', currentTab)
-    .order('starts_at', { ascending: currentTab !== 'completed' });
+  try {
+    const r = await fetch(`/api/tournaments?status=${currentTab}`);
+    if (!r.ok) throw new Error('Failed to load');
+    const data = await r.json();
+    if (!data || !data.length) {
+      grid.innerHTML = `<div class="empty">No ${currentTab} tournaments.</div>`; return;
+    }
 
-  if (error) { grid.innerHTML = '<div class="empty">Error loading tournaments.</div>'; return; }
-  if (!data || !data.length) {
-    grid.innerHTML = `<div class="empty">No ${currentTab} tournaments.</div>`; return;
-  }
-
-  grid.innerHTML = data.map(t => {
+    grid.innerHTML = data.map(t => {
     const starts = new Date(t.starts_at);
     const timeStr = starts.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) +
                     ' · ' + starts.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
@@ -489,7 +492,10 @@ async function loadTournaments() {
           <div class="t-starts">${timeStr}</div>
         </div>
       </div>`;
-  }).join('');
+    }).join('');
+  } catch(e) {
+    grid.innerHTML = '<div class="empty">Error loading tournaments.</div>';
+  }
 }
 
 async function viewTournament(id) {
@@ -499,12 +505,18 @@ async function viewTournament(id) {
   detail.classList.add('active');
   content.innerHTML = '<div class="loading"><span class="spinner"></span>Loading...</div>';
 
-  // Load tournament + players + games
-  const [{ data: t }, { data: players }, { data: games }] = await Promise.all([
-    sb.from('tournaments').select('*').eq('id', id).single(),
-    sb.from('tournament_players').select('*').eq('tournament_id', id).order('score', { ascending: false }),
-    sb.from('tournament_games').select('*').eq('tournament_id', id).order('round'),
-  ]);
+  // Load tournament + players + games via server
+  let t, players, games;
+  try {
+    const r = await fetch(`/api/tournaments/${id}`);
+    if (!r.ok) throw new Error('Not found');
+    const data = await r.json();
+    t = data.tournament;
+    players = data.players;
+    games = data.games;
+  } catch(e) {
+    content.innerHTML = '<div class="empty">Error loading tournament.</div>'; return;
+  }
 
   if (!t) { content.innerHTML = '<div class="empty">Tournament not found.</div>'; return; }
 

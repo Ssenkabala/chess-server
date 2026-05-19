@@ -587,25 +587,13 @@ async function viewTournament(id) {
     }
   }
 
-  // Real-time subscription — update view when standings or pairings change
-  // Unsubscribe previous channel if any
-  if (window._tournamentChannel) {
-    sb.removeChannel(window._tournamentChannel);
-  }
-  window._tournamentChannel = sb.channel('tournament-' + id)
-    .on('postgres_changes', {
-      event: '*', schema: 'public', table: 'tournament_players',
-      filter: 'tournament_id=eq.' + id
-    }, () => viewTournament(id))
-    .on('postgres_changes', {
-      event: '*', schema: 'public', table: 'tournament_games',
-      filter: 'tournament_id=eq.' + id
-    }, () => viewTournament(id))
-    .on('postgres_changes', {
-      event: 'UPDATE', schema: 'public', table: 'tournaments',
-      filter: 'id=eq.' + id
-    }, () => viewTournament(id))
-    .subscribe();
+  // Poll for updates every 10 seconds instead of real-time WebSocket
+  if (window._tournamentPoll) clearInterval(window._tournamentPoll);
+  window._tournamentPoll = setInterval(() => {
+    if (document.getElementById('detail-view').classList.contains('active')) {
+      viewTournament(id);
+    }
+  }, 10000);
 
   content.innerHTML = `
     <div class="detail-header">
@@ -649,9 +637,9 @@ async function viewTournament(id) {
 }
 
 function showList() {
-  if (window._tournamentChannel) {
-    sb.removeChannel(window._tournamentChannel);
-    window._tournamentChannel = null;
+  if (window._tournamentPoll) {
+    clearInterval(window._tournamentPoll);
+    window._tournamentPoll = null;
   }
   document.getElementById('list-view').classList.remove('hidden');
   document.getElementById('detail-view').classList.remove('active');

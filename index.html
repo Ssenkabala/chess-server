@@ -71,7 +71,7 @@
     .panel.active { display: flex; }
 
     /* ── Board ── */
-    #board, #analysis-board { width: 480px; max-width: 480px; }
+    #board, #analysis-board { width: 480px; }
     @media (max-width: 600px) {
       #board, #analysis-board {
         width: calc(100vw - 12px) !important;
@@ -1096,6 +1096,7 @@ function startGame(color) {
   document.getElementById('btn-resign').style.display = '';
   document.getElementById('btn-replay').style.display = 'none';
   $('#board').empty();
+  var boardSize = window.innerWidth <= 600 ? window.innerWidth - 12 : 480;
   board = Chessboard('board', {
     draggable: true,
     position: 'start',
@@ -1104,12 +1105,8 @@ function startGame(color) {
     onDragStart: onDragStart,
     onDrop: onDrop,
     onSnapEnd: onSnapEnd,
-  });
-  board.resize();
-  // jQuery click handler using data-square — works on desktop and as fallback on mobile
-  $('#board').off('click.sq').on('click.sq', '.square-55d63', function() {
-    var sq = $(this).attr('data-square');
-    if (sq) onSquareClick(sq);
+    onSquareClick: onSquareClick,
+    width: boardSize,
   });
   if (playerColor === 'b') {
     setStatus('Engine thinking...');

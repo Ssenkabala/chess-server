@@ -806,26 +806,12 @@ document.addEventListener('DOMContentLoaded', function() {
   }, { passive: false });
 });
 
-// ── Board resize: force chessboard.js to match container width ──
-function getBoardSize() {
-  return window.innerWidth <= 600
-    ? window.innerWidth - 12
-    : Math.min(480, window.innerWidth - 32);
-}
+// ── Board resize ──
 function resizeBoards() {
-  var sz = getBoardSize();
-  ['board', 'analysis-board'].forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) {
-      el.style.width = sz + 'px';
-      el.style.maxWidth = sz + 'px';
-    }
-  });
   if (typeof board !== 'undefined' && board) board.resize();
   if (typeof analysisBoard !== 'undefined' && analysisBoard) analysisBoard.resize();
 }
 window.addEventListener('resize', resizeBoards);
-window.addEventListener('load', resizeBoards);
 window.addEventListener('orientationchange', function() { setTimeout(resizeBoards, 200); });
 
 const API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
@@ -1111,17 +1097,15 @@ function startGame(color) {
   document.getElementById('btn-replay').style.display = 'none';
   $('#board').empty();
   board = Chessboard('board', {
-    draggable: true,          // keep true on mobile — chessboard.js handles touch drag natively
+    draggable: true,
     position: 'start',
     orientation: color,
     pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
     onDragStart: onDragStart,
     onDrop: onDrop,
     onSnapEnd: onSnapEnd,
-    onSquareClick: onSquareClick,
-    width: getBoardSize()
   });
-  resizeBoards();
+  board.resize();
   // jQuery click handler using data-square — works on desktop and as fallback on mobile
   $('#board').off('click.sq').on('click.sq', '.square-55d63', function() {
     var sq = $(this).attr('data-square');

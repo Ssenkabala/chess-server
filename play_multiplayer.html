@@ -470,13 +470,27 @@ async function bootAuth() {
     if (profile) {
       myProfile = profile;
     } else {
-      // No profile — send them to play page to set username first
       alert('Please set your username before playing multiplayer.');
       window.location.href = '/play';
       return;
     }
   }
-  // Guest or logged-in with profile — both can enter lobby
+
+  // Check if launched from Arena tournament (has game_id + color in URL)
+  const params = new URLSearchParams(window.location.search);
+  const urlGameId = params.get('game_id');
+  const urlColor  = params.get('color');
+  tournamentId    = params.get('tournament_id') || null;
+  tournamentDbId  = params.get('tournament_db_id') || null;
+
+  if (urlGameId && urlColor && currentUser) {
+    // Skip lobby — join pre-created tournament game directly
+    gameId   = urlGameId;
+    myColor  = urlColor;
+    startGame();
+    return;
+  }
+
   connectLobby();
 }
 // ═══════════════════════════════════════════════════════════════
@@ -494,6 +508,8 @@ let gameWs    = null;
 let myColor   = null;   // 'white' | 'black'
 let myId      = null;
 let gameId    = null;
+let tournamentId    = null;   // set when launched from an Arena tournament
+let tournamentDbId  = null;   // tournament_games.id for result submission
 let game      = new Chess();
 let board     = null;
 let selectedSq = null;
@@ -1074,13 +1090,43 @@ function showOverlay(result, reason) {
   }
   reasonEl.textContent = reasonText;
   updateSessionScore(result);
-  document.getElementById('btn-rematch').textContent = 'Rematch';
-  document.getElementById('btn-rematch').disabled = false;
-  document.getElementById('btn-rematch').onclick = offerRematch;
-  document.getElementById('rematch-status').textContent = '';
   // Remove any stale decline button
-  const old = document.getElementById('btn-decline');
-  if (old) old.remove();
+  const oldDecline = document.getElementById('btn-decline');
+  if (oldDecline) oldDecline.remove();
+
+  if (tournamentId) {
+    // Arena game — show "Back to Tournament" instead of rematch
+    document.getElementById('btn-rematch').textContent = 'Back to Tournament';
+    document.getElementById('btn-rematch').disabled = false;
+    document.getElementById('btn-rematch').onclick = () => {
+      window.location.href = '/tournaments#' + tournamentId;
+    };
+    document.getElementById('rematch-status').textContent = 'Next game will be assigned automatically.';
+  } else {
+    document.getElementById('btn-rematch').textContent = 'Rematch';
+    document.getElementById('btn-rematch').disabled = false;
+    document.getElementById('btn-rematch').onclick = offerRematch;
+    document.getElementById('rematch-status').textContent = '';
+  }
+
+  // Submit tournament result if this was an Arena game
+  if (tournamentDbId && currentUser) {
+    sb.auth.getSession().then(({ data }) => {
+      if (!data.session) return;
+      fetch('/api/tournament/result', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + data.session.access_token,
+        },
+        body: JSON.stringify({
+          game_id: tournamentDbId,
+          result:  result,
+          user_id: currentUser.id,
+        })
+      }).catch(e => console.warn('Tournament result submit failed:', e));
+    });
+  }
 
   // Save multiplayer game — delay 2s so opponent_profile has time to arrive
   if (sb && currentUser && multiMoveHistory.length > 0) {

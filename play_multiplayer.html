@@ -628,12 +628,6 @@ function startGame() {
     onSquareClick: onSquareClick,
   });
 
-  // Click-to-move using data-square (reliable on desktop and mobile)
-  $('#board').off('click.sq').on('click.sq', '.square-55d63', function() {
-    var sq = $(this).attr('data-square');
-    if (sq) onSquareClick(sq);
-  });
-
   resetClockDisplay();
   updateTurnIndicator();
   startClockTick();

@@ -421,7 +421,7 @@
 
 <script>
 const SUPABASE_URL  = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
-const SUPABASE_ANON = 'sb_publishable_g5BEYnjhPatfmnHG3jNQTQ_fzgKOy4s';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ic2tnenN2eWdkbWx2d2JldHhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQxMTM3NDIsImV4cCI6MjA1OTY4OTc0Mn0.BKA2G4fGlhMjJQlHgT8KaHSBjIREbdBQiQsKjy2CkP8';
 let sb;
 try {
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
@@ -626,6 +626,12 @@ function startGame() {
     onDrop: onDrop,
     onSnapEnd: () => board.position(game.fen()),
     onSquareClick: onSquareClick,
+  });
+
+  // Click-to-move using data-square (reliable on desktop and mobile)
+  $('#board').off('click.sq').on('click.sq', '.square-55d63', function() {
+    var sq = $(this).attr('data-square');
+    if (sq) onSquareClick(sq);
   });
 
   resetClockDisplay();

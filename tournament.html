@@ -587,7 +587,10 @@ async function viewTournament(id) {
     }
   }
 
-  // Poll for updates every 10 seconds instead of real-time WebSocket
+  // Connect to Arena WebSocket (noop for non-arena or non-active)
+  connectTournamentWs(id, t);
+
+  // Poll standings every 10s
   if (window._tournamentPoll) clearInterval(window._tournamentPoll);
   window._tournamentPoll = setInterval(() => {
     if (document.getElementById('detail-view').classList.contains('active')) {
@@ -612,6 +615,11 @@ async function viewTournament(id) {
       <div>${actionBtn}</div>
     </div>
 
+    <!-- Arena status bar -->
+    <div id="arena-status" style="display:none;background:#0d1f0d;border:1px solid #00ff9d44;
+      border-radius:4px;padding:14px 18px;margin-bottom:16px;font-size:13px;color:#00ff9d;
+      line-height:1.6;"></div>
+
     <!-- Standings -->
     <div class="section">
       <div class="section-hdr">
@@ -621,14 +629,24 @@ async function viewTournament(id) {
       <div>
         ${(players||[]).length === 0
           ? '<div class="empty" style="padding:20px;">No players yet. Be the first to join!</div>'
-          : (players||[]).map((p, i) => `
-            <div class="player-row">
-              <div class="player-rank">${i+1}</div>
-              <div class="player-country">${FLAG(p.country)}</div>
-              <div class="player-name">${p.username}</div>
-              <div class="player-elo">${p.elo || '?'} ELO</div>
-              <div class="player-score">${p.score || 0}</div>
-            </div>`).join('')}
+          : (() => {
+              // Lobby: sort by ELO desc. Active/completed: sort by score desc then ELO desc
+              const sorted = [...(players||[])].sort((a, b) => {
+                if (t.status === 'upcoming') {
+                  return (b.elo || 1500) - (a.elo || 1500);
+                }
+                const scoreDiff = (b.score || 0) - (a.score || 0);
+                return scoreDiff !== 0 ? scoreDiff : (b.elo || 1500) - (a.elo || 1500);
+              });
+              return sorted.map((p, i) => `
+                <div class="player-row">
+                  <div class="player-rank">${i+1}</div>
+                  <div class="player-country">${FLAG(p.country)}</div>
+                  <div class="player-name">${p.username}</div>
+                  <div class="player-elo">${p.elo || '?'} ELO</div>
+                  <div class="player-score">${p.score || 0}</div>
+                </div>`).join('');
+            })()}
       </div>
     </div>
 
@@ -641,6 +659,7 @@ function showList() {
     clearInterval(window._tournamentPoll);
     window._tournamentPoll = null;
   }
+  disconnectTournamentWs();
   document.getElementById('list-view').classList.remove('hidden');
   document.getElementById('detail-view').classList.remove('active');
 }
@@ -712,12 +731,8 @@ async function createTournament() {
   const headers = await getAuthHeader();
   if (!headers) { errEl.textContent = 'Session expired. Please sign in again.'; return; }
 
-  const body = {
-    name, description: desc || null, format, time_control: time,
-    country: country || null,
-    starts_at: new Date(starts).toISOString(),
-    max_players: 9999,
-  };
+  const body = { name, description: desc || null, format, time_control: time,
+                 country: country || null, starts_at: new Date(starts).toISOString() };
   if (format === 'arena') {
     body.duration_minutes = parseInt(document.getElementById('t-duration').value);
     body.rounds = 0;
@@ -727,9 +742,7 @@ async function createTournament() {
 
   try {
     const r = await fetch('/api/create-tournament', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body)
+      method: 'POST', headers, body: JSON.stringify(body)
     });
     const data = await r.json();
     if (!r.ok) { errEl.textContent = data.detail || 'Create failed'; return; }
@@ -779,6 +792,90 @@ async function nextRound(id) {
 async function signOut() {
   await sb.auth.signOut();
   window.location.href = '/';
+}
+
+// ── Arena WebSocket ──────────────────────────────────────────────
+let tournamentWs = null;
+let currentTournamentId = null;
+let _arenaCountdown = null;
+
+function connectTournamentWs(tid, tournament) {
+  if (tournamentWs) { tournamentWs.close(); tournamentWs = null; }
+  currentTournamentId = tid;
+  if (!currentUser) return;
+  if (tournament.format !== 'arena') return;
+  // Connect whether upcoming or active — server will pair when active
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  tournamentWs = new WebSocket(`${proto}://${location.host}/ws/tournament/${tid}`);
+
+  tournamentWs.onopen = () => {
+    const score = 0; // fresh connection, server has the score
+    tournamentWs.send(JSON.stringify({
+      user_id:  currentUser.id,
+      username: currentProfile ? currentProfile.username : (currentUser.email || 'player'),
+      elo:      currentProfile ? (currentProfile.elo || 1500) : 1500,
+      score,
+    }));
+    tournamentWs._ping = setInterval(() => {
+      if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN)
+        tournamentWs.send(JSON.stringify({ type: 'ping' }));
+    }, 20000);
+  };
+
+  tournamentWs.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'pong' || msg.type === 'connected') return;
+      if (msg.type === 'game_ready') showArenaGameReady(msg);
+      if (msg.type === 'game_over') {
+        hideArenaCountdown();
+        if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN)
+          tournamentWs.send(JSON.stringify({ type: 'available', score: 0 }));
+        showArenaStatus('Game over. Waiting for next pairing...');
+      }
+    } catch(e) {}
+  };
+
+  tournamentWs.onclose = () => {
+    if (tournamentWs && tournamentWs._ping) clearInterval(tournamentWs._ping);
+  };
+}
+
+function showArenaGameReady(msg) {
+  const el = document.getElementById('arena-status');
+  if (!el) return;
+  el.innerHTML = `<strong>♟ Game ready!</strong> You play <strong>${msg.color}</strong> vs <strong>${msg.opponent}</strong> (${msg.opponent_elo} ELO)<br>
+    <span id="arena-countdown" style="font-size:12px;color:#aaa;">Redirecting in 5...</span>`;
+  el.style.display = '';
+  let secs = 5;
+  _arenaCountdown = setInterval(() => {
+    secs--;
+    const cd = document.getElementById('arena-countdown');
+    if (cd) cd.textContent = `Redirecting in ${secs}...`;
+    if (secs <= 0) {
+      clearInterval(_arenaCountdown);
+      const url = `/multiplayer?game_id=${msg.game_id}&color=${msg.color}&tournament_id=${currentTournamentId}&tournament_db_id=${msg.tournament_db_id || ''}`;
+      window.location.href = url;
+    }
+  }, 1000);
+}
+
+function hideArenaCountdown() {
+  if (_arenaCountdown) { clearInterval(_arenaCountdown); _arenaCountdown = null; }
+}
+
+function showArenaStatus(text) {
+  const el = document.getElementById('arena-status');
+  if (el) { el.innerHTML = text; el.style.display = ''; }
+}
+
+function disconnectTournamentWs() {
+  hideArenaCountdown();
+  if (tournamentWs) {
+    if (tournamentWs._ping) clearInterval(tournamentWs._ping);
+    tournamentWs.close();
+    tournamentWs = null;
+  }
 }
 
 init();

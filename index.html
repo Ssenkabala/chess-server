@@ -799,7 +799,7 @@
 
 
 
-// ── Board resize ──
+// ── Board resize: force chessboard.js to match container width ──
 function resizeBoards() {
   if (typeof board !== 'undefined' && board) board.resize();
   if (typeof analysisBoard !== 'undefined' && analysisBoard) analysisBoard.resize();
@@ -1089,7 +1089,7 @@ function startGame(color) {
   document.getElementById('btn-resign').style.display = '';
   document.getElementById('btn-replay').style.display = 'none';
   $('#board').empty();
-  var boardSize = window.innerWidth <= 600 ? window.innerWidth - 12 : 480;
+  var boardPx = window.innerWidth <= 600 ? window.innerWidth - 12 : 480;
   board = Chessboard('board', {
     draggable: true,
     position: 'start',
@@ -1099,7 +1099,7 @@ function startGame(color) {
     onDrop: onDrop,
     onSnapEnd: onSnapEnd,
     onSquareClick: onSquareClick,
-    width: boardSize,
+    width: boardPx,
   });
   resizeBoards();
   // jQuery click handler using data-square — works on desktop and as fallback on mobile

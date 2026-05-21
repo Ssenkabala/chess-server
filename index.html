@@ -71,16 +71,16 @@
     .panel.active { display: flex; }
 
     /* ── Board ── */
-    #board, #analysis-board { width: 480px; }
+    #board, #analysis-board { width: 480px; max-width: 480px; margin: 0 auto; }
     @media (max-width: 600px) {
       #board, #analysis-board {
-        width: calc(100vw - 12px) !important;
-        max-width: calc(100vw - 12px) !important;
+        width: calc(100vw - 24px) !important;
+        max-width: calc(100vw - 24px) !important;
         margin: 0 auto;
       }
-      .panel { max-width: 100vw; padding: 0 6px; gap: 6px; }
-      .captured-bar, .user-bar { max-width: calc(100vw - 12px) !important; }
-      body { padding: 4px 0; }
+      .panel { max-width: 100vw; padding: 0 12px; gap: 6px; }
+      .captured-bar, .user-bar { max-width: calc(100vw - 24px) !important; }
+      body { padding: 8px 0; }
     }
 
     .highlight-square {
@@ -800,12 +800,20 @@
 
 
 // ── Board resize: force chessboard.js to match container width ──
+function getBoardPx() {
+  return window.innerWidth <= 600 ? window.innerWidth - 24 : 480;
+}
 function resizeBoards() {
-  if (typeof board !== 'undefined' && board) board.resize();
-  if (typeof analysisBoard !== 'undefined' && analysisBoard) analysisBoard.resize();
+  var px = getBoardPx();
+  ['board', 'analysis-board'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.width = px + 'px';
+  });
+  if (typeof board !== 'undefined' && board && board.resize) board.resize();
+  if (typeof analysisBoard !== 'undefined' && analysisBoard && analysisBoard.resize) analysisBoard.resize();
 }
 window.addEventListener('resize', resizeBoards);
-window.addEventListener('orientationchange', function() { setTimeout(resizeBoards, 200); });
+window.addEventListener('orientationchange', function() { setTimeout(resizeBoards, 150); });
 
 const API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
   ? 'http://127.0.0.1:8000'
@@ -1088,8 +1096,12 @@ function startGame(color) {
   document.getElementById('btn-black').classList.toggle('active', color === 'black');
   document.getElementById('btn-resign').style.display = '';
   document.getElementById('btn-replay').style.display = 'none';
-  $('#board').empty();
-  var boardPx = window.innerWidth <= 600 ? window.innerWidth - 12 : 480;
+  // Compute board pixel size before chessboard.js reads the element
+  var _bpx = window.innerWidth <= 600 ? window.innerWidth - 24 : 480;
+  var _bel = document.getElementById('board');
+  _bel.style.width = _bpx + 'px';
+  _bel.innerHTML = '';
+
   board = Chessboard('board', {
     draggable: true,
     position: 'start',
@@ -1098,12 +1110,18 @@ function startGame(color) {
     onDragStart: onDragStart,
     onDrop: onDrop,
     onSnapEnd: onSnapEnd,
-    onSquareClick: onSquareClick,
-    width: boardPx,
+    width: _bpx,
   });
-  resizeBoards();
-  // jQuery click handler using data-square — works on desktop and as fallback on mobile
 
+  // Single jQuery delegation — .off() prevents stacking on repeated startGame calls.
+  // No onSquareClick in config — avoids double-fire with this handler.
+  $('#board').off('click.sq').on('click.sq', '.square-55d63', function(e) {
+    // Ignore synthetic mouse events that follow touchend
+    if (e.originalEvent && e.originalEvent.sourceCapabilities &&
+        e.originalEvent.sourceCapabilities.firesTouchEvents) return;
+    var sq = $(this).attr('data-square');
+    if (sq) onSquareClick(sq);
+  });
   if (playerColor === 'b') {
     setStatus('Engine thinking...');
     engineThinking = true;

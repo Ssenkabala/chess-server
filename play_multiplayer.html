@@ -476,20 +476,7 @@ async function bootAuth() {
       return;
     }
   }
-  // Check for tournament game_id in URL (Arena game launch)
-  const params = new URLSearchParams(window.location.search);
-  const urlGameId = params.get('game_id');
-  const urlColor  = params.get('color');
-  window._tournamentId    = params.get('tournament_id') || null;
-  window._tournamentDbId  = params.get('tournament_db_id') || null;
-
-  if (urlGameId && urlColor && currentUser) {
-    gameId  = urlGameId;
-    myColor = urlColor;
-    startGame();
-    return;
-  }
-
+  // Guest or logged-in with profile — both can enter lobby
   connectLobby();
 }
 // ═══════════════════════════════════════════════════════════════
@@ -578,36 +565,6 @@ function cancelLobby() {
   location.href = '/';
 }
 // Prevent page scroll when dragging pieces on mobile
-document.addEventListener('DOMContentLoaded', function() {
-  var boardEl = document.getElementById('board');
-  if (!boardEl) return;
-
-  // Prevent scroll while touching board
-  boardEl.addEventListener('touchmove', function(e) {
-    e.preventDefault();
-  }, { passive: false });
-
-  // Native tap-to-move using data-square attribute
-  var touchStartX, touchStartY;
-  boardEl.addEventListener('touchstart', function(e) {
-    touchStartX = e.touches[0].clientX;
-    touchStartY = e.touches[0].clientY;
-  }, { passive: true });
-
-  boardEl.addEventListener('touchend', function(e) {
-    var dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
-    var dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
-    if (dx > 10 || dy > 10) return; // swipe, not tap
-    var touch = e.changedTouches[0];
-    var el = document.elementFromPoint(touch.clientX, touch.clientY);
-    while (el && el !== boardEl) {
-      var sq = el.getAttribute('data-square');
-      if (sq) { e.preventDefault(); onSquareClick(sq); return; }
-      el = el.parentElement;
-    }
-  }, { passive: false });
-});
-
 // ═══════════════════════════════════════════════════════════════
 //  GAME INIT
 // ═══════════════════════════════════════════════════════════════
@@ -629,7 +586,11 @@ function startGame() {
   }
   document.getElementById('name-opponent').textContent = 'Opponent (' + opponentColor + ')';
 
-  // Board orientation
+  // Compute board pixel size before chessboard.js reads the element
+  var _bpx = window.innerWidth <= 600 ? window.innerWidth - 24 : 480;
+  var _bel = document.getElementById('board');
+  _bel.style.width = _bpx + 'px';
+
   board = Chessboard('board', {
     draggable: true,
     position: 'start',
@@ -638,7 +599,23 @@ function startGame() {
     onDragStart: onDragStart,
     onDrop: onDrop,
     onSnapEnd: () => board.position(game.fen()),
-    onSquareClick: onSquareClick,
+    width: _bpx,
+  });
+
+  // Single jQuery delegation for click-to-move.
+  // sourceCapabilities check blocks synthetic mouse events after touchend.
+  $('#board').off('click.sq').on('click.sq', '.square-55d63', function(e) {
+    if (e.originalEvent && e.originalEvent.sourceCapabilities &&
+        e.originalEvent.sourceCapabilities.firesTouchEvents) return;
+    var sq = $(this).attr('data-square');
+    if (sq) onSquareClick(sq);
+  });
+
+  // Resize hook
+  window.addEventListener('resize', function() {
+    var px = window.innerWidth <= 600 ? window.innerWidth - 24 : 480;
+    document.getElementById('board').style.width = px + 'px';
+    if (board && board.resize) board.resize();
   });
 
   resetClockDisplay();
@@ -798,12 +775,20 @@ function onGameMessage(e) {
     document.getElementById('move-list').innerHTML = '';
     resetClockDisplay();
 
+    var _rpx = window.innerWidth <= 600 ? window.innerWidth - 24 : 480;
+    document.getElementById('board').style.width = _rpx + 'px';
     board = Chessboard('board', {
       draggable: true, position: 'start', orientation: myColor,
       pieceTheme: 'img/chesspieces/wikipedia/{piece}.png',
       onDragStart: onDragStart, onDrop: onDrop,
       onSnapEnd: () => board.position(game.fen()),
-      onSquareClick: onSquareClick,
+      width: _rpx,
+    });
+    $('#board').off('click.sq').on('click.sq', '.square-55d63', function(e) {
+      if (e.originalEvent && e.originalEvent.sourceCapabilities &&
+          e.originalEvent.sourceCapabilities.firesTouchEvents) return;
+      var sq = $(this).attr('data-square');
+      if (sq) onSquareClick(sq);
     });
     updateTurnIndicator();
     startClockTick();
@@ -1081,35 +1066,13 @@ function showOverlay(result, reason) {
   }
   reasonEl.textContent = reasonText;
   updateSessionScore(result);
+  document.getElementById('btn-rematch').textContent = 'Rematch';
+  document.getElementById('btn-rematch').disabled = false;
+  document.getElementById('btn-rematch').onclick = offerRematch;
+  document.getElementById('rematch-status').textContent = '';
   // Remove any stale decline button
-  const oldBtn = document.getElementById('btn-decline');
-  if (oldBtn) oldBtn.remove();
-
-  if (window._tournamentId) {
-    // Arena game — submit result and show Back to Tournament
-    if (window._tournamentDbId) {
-      sb && sb.auth.getSession().then(({ data }) => {
-        if (!data.session) return;
-        fetch('/api/tournament/result', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json',
-                     'Authorization': 'Bearer ' + data.session.access_token },
-          body: JSON.stringify({ game_id: window._tournamentDbId, result, user_id: currentUser && currentUser.id })
-        }).catch(e => console.warn('Tournament result submit failed:', e));
-      });
-    }
-    document.getElementById('btn-rematch').textContent = 'Back to Tournament';
-    document.getElementById('btn-rematch').disabled = false;
-    document.getElementById('btn-rematch').onclick = () => {
-      window.location.href = '/tournaments#' + window._tournamentId;
-    };
-    document.getElementById('rematch-status').textContent = 'Next game will be assigned automatically.';
-  } else {
-    document.getElementById('btn-rematch').textContent = 'Rematch';
-    document.getElementById('btn-rematch').disabled = false;
-    document.getElementById('btn-rematch').onclick = offerRematch;
-    document.getElementById('rematch-status').textContent = '';
-  }
+  const old = document.getElementById('btn-decline');
+  if (old) old.remove();
 
   // Save multiplayer game — delay 2s so opponent_profile has time to arrive
   if (sb && currentUser && multiMoveHistory.length > 0) {

@@ -317,9 +317,9 @@
     <div class="field-row">
       <div class="field">
         <label for="t-format">Format</label>
-        <select id="t-format" onchange="onFormatChange()">
-          <option value="arena" selected>Arena</option>
+        <select id="t-format">
           <option value="swiss">Swiss</option>
+          <option value="roundrobin">Round Robin</option>
         </select>
       </div>
       <div class="field">
@@ -332,22 +332,22 @@
       </div>
     </div>
     <div class="field-row">
-      <div class="field" id="row-duration">
-        <label for="t-duration">Duration</label>
-        <select id="t-duration">
-          <option value="30">30 minutes</option>
-          <option value="60" selected>60 minutes</option>
-          <option value="90">90 minutes</option>
-          <option value="120">2 hours</option>
-        </select>
-      </div>
-      <div class="field" id="row-rounds" style="display:none">
+      <div class="field">
         <label for="t-rounds">Rounds</label>
         <select id="t-rounds">
           <option value="3">3</option>
           <option value="5" selected>5</option>
           <option value="7">7</option>
           <option value="9">9</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="t-max">Max Players</label>
+        <select id="t-max">
+          <option value="8">8</option>
+          <option value="16" selected>16</option>
+          <option value="32">32</option>
+          <option value="64">64</option>
         </select>
       </div>
     </div>
@@ -481,7 +481,7 @@ async function loadTournaments() {
           <div class="t-name">${t.name}</div>
           <div class="t-meta">
             <span>⏱ ${t.time_control}</span>
-            <span>📋 ${t.format === 'arena' ? 'Arena' : t.format === 'arena' ? 'Arena' : t.format === 'swiss' ? 'Swiss' : 'Round Robin'}</span>
+            <span>📋 ${t.format === 'swiss' ? 'Swiss' : 'Round Robin'}</span>
             <span>🔄 ${t.rounds} rounds</span>
             <span>${countryStr}</span>
           </div>
@@ -603,7 +603,7 @@ async function viewTournament(id) {
         <div>
           <span class="tag ${t.status === 'active' ? 'green' : ''}">${t.status.toUpperCase()}</span>
           <span class="tag">⏱ ${t.time_control}</span>
-          <span class="tag">${t.format === 'arena' ? 'Arena' : t.format === 'arena' ? 'Arena' : t.format === 'swiss' ? 'Swiss' : 'Round Robin'}</span>
+          <span class="tag">${t.format === 'swiss' ? 'Swiss' : 'Round Robin'}</span>
           <span class="tag">${t.rounds} rounds</span>
           ${t.country ? `<span class="tag">${FLAG(t.country)} ${COUNTRY_NAMES[t.country]}</span>` : ''}
         </div>
@@ -691,17 +691,13 @@ function closeCreate() {
   document.getElementById('create-error').textContent = '';
 }
 
-function onFormatChange() {
-  const fmt = document.getElementById('t-format').value;
-  document.getElementById('row-duration').style.display = fmt === 'arena' ? '' : 'none';
-  document.getElementById('row-rounds').style.display   = fmt === 'arena' ? 'none' : '';
-}
-
 async function createTournament() {
   const name    = document.getElementById('t-name').value.trim();
   const desc    = document.getElementById('t-desc').value.trim();
   const format  = document.getElementById('t-format').value;
   const time    = document.getElementById('t-time').value;
+  const rounds  = parseInt(document.getElementById('t-rounds').value);
+  const maxP    = parseInt(document.getElementById('t-max').value);
   const country = document.getElementById('t-country').value;
   const starts  = document.getElementById('t-starts').value;
   const errEl   = document.getElementById('create-error');
@@ -712,25 +708,15 @@ async function createTournament() {
   const headers = await getAuthHeader();
   if (!headers) { errEl.textContent = 'Session expired. Please sign in again.'; return; }
 
-  const body = {
-    name, description: desc || null, format, time_control: time,
-    country: country || null,
-    starts_at: new Date(starts).toISOString(),
-    max_players: 9999,  // no restriction
-  };
-
-  if (format === 'arena') {
-    body.duration_minutes = parseInt(document.getElementById('t-duration').value);
-    body.rounds = 0;
-  } else {
-    body.rounds = parseInt(document.getElementById('t-rounds').value);
-  }
-
   try {
     const r = await fetch('/api/create-tournament', {
       method: 'POST',
       headers,
-      body: JSON.stringify(body)
+      body: JSON.stringify({
+        name, description: desc || null, format, time_control: time,
+        rounds, max_players: maxP, country: country || null,
+        starts_at: new Date(starts).toISOString(),
+      })
     });
     const data = await r.json();
     if (!r.ok) { errEl.textContent = data.detail || 'Create failed'; return; }

@@ -803,7 +803,6 @@ async function bootAuth() {
     if (profile) {
       myProfile = profile;
     } else {
-      // No profile — send them to play page to set username first
       alert('Please set your username before playing multiplayer.');
       window.location.href = '/play';
       return;
@@ -813,8 +812,9 @@ async function bootAuth() {
   const params = new URLSearchParams(window.location.search);
   const urlGameId = params.get('game_id');
   const urlColor  = params.get('color');
-  window._tournamentId    = params.get('tournament_id') || null;
-  window._tournamentDbId  = params.get('tournament_db_id') || null;
+  window._tournamentId      = params.get('tournament_id') || null;
+  window._tournamentDbId    = params.get('tournament_db_id') || null;
+  window._timeControl       = params.get('time_control') || null;  // e.g. "3+0", "5+0", "10+0"
 
   if (urlGameId && urlColor && currentUser) {
     gameId  = urlGameId;
@@ -1018,10 +1018,11 @@ function startGame() {
     // Send profile so server can share with opponent and calculate ELO
     if (myProfile && currentUser) {
       gameWs.send(JSON.stringify({
-        type:     'profile',
-        username: myProfile.username,
-        elo:      myProfile.elo,
-        user_id:  currentUser.id
+        type:         'profile',
+        username:     myProfile.username,
+        elo:          myProfile.elo,
+        user_id:      currentUser.id,
+        time_control: window._timeControl || null,
       }));
     }
     // Keepalive — Railway kills idle connections after ~30s
@@ -1174,7 +1175,7 @@ function onGameMessage(e) {
     gameWs.onopen = () => {
       gameWs.send(JSON.stringify({ type: 'claim', color: myColor }));
       if (myProfile && currentUser) {
-        gameWs.send(JSON.stringify({ type: 'profile', username: myProfile.username, elo: myProfile.elo, user_id: currentUser.id }));
+        gameWs.send(JSON.stringify({ type: 'profile', username: myProfile.username, elo: myProfile.elo, user_id: currentUser.id, time_control: window._timeControl || null }));
       }
       gameWs._ping = setInterval(() => {
         if (gameWs && gameWs.readyState === WebSocket.OPEN) gameWs.send(JSON.stringify({ type: 'ping' }));
@@ -1355,22 +1356,21 @@ function appendMove(uci) {
 function showOverlay(result, reason) {
   const overlay = document.getElementById('overlay');
   if (overlay.classList.contains('active')) return;
-  const title   = document.getElementById('result-title');
-  const reasonEl = document.getElementById('result-reason');
-
-  if (overlay.classList.contains('active')) return; // already showing, don't double-count
   overlay.classList.add('active');
 
+  const title    = document.getElementById('result-title');
+  const reasonEl = document.getElementById('result-reason');
+
   const reasonText = {
-    checkmate:   'by checkmate',
-    timeout:     'on time',
-    resignation: 'by resignation',
-    disconnect:  'opponent disconnected',
-    stalemate:   'stalemate',
-    agreement:   'by agreement',
-    insufficient_material: 'insufficient material',
-    seventyfive_moves:     '75-move rule',
-    fivefold_repetition:   'fivefold repetition',
+    checkmate:              'by checkmate',
+    timeout:                'on time',
+    resignation:            'by resignation',
+    disconnect:             'opponent disconnected',
+    stalemate:              'stalemate',
+    agreement:              'by agreement',
+    insufficient_material:  'insufficient material',
+    seventyfive_moves:      '75-move rule',
+    fivefold_repetition:    'fivefold repetition',
   }[reason] || reason;
 
   if (result === 'draw') {
@@ -1385,29 +1385,52 @@ function showOverlay(result, reason) {
   }
   reasonEl.textContent = reasonText;
   updateSessionScore(result);
+
   const oldDecline = document.getElementById('btn-decline');
   if (oldDecline) oldDecline.remove();
 
   if (window._tournamentId) {
-    // Auto-submit tournament result
-    if (window._tournamentDbId) {
-      sb && sb.auth.getSession().then(({ data }) => {
-        if (!data.session) return;
-        fetch('/api/tournament/result', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json',
-                     'Authorization': 'Bearer ' + data.session.access_token },
-          body: JSON.stringify({ game_id: window._tournamentDbId, result,
-                                 user_id: currentUser && currentUser.id })
-        }).catch(e => console.warn('Tournament result submit failed:', e));
-      });
-    }
     document.getElementById('btn-rematch').textContent = 'Back to Tournament';
     document.getElementById('btn-rematch').disabled = false;
     document.getElementById('btn-rematch').onclick = () => {
       window.location.href = '/tournaments#' + window._tournamentId;
     };
-    document.getElementById('rematch-status').textContent = 'Next game will be assigned automatically.';
+    document.getElementById('rematch-status').textContent = 'Submitting result…';
+
+    // Submit tournament result
+    if (window._tournamentDbId) {
+      sb && sb.auth.getSession().then(({ data }) => {
+        if (!data.session) {
+          document.getElementById('rematch-status').textContent = 'Session expired — result not saved.';
+          return;
+        }
+        fetch('/api/tournament/result', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + data.session.access_token
+          },
+          body: JSON.stringify({
+            game_id:      window._tournamentDbId,
+            result,
+            user_id:      currentUser && currentUser.id,
+            time_control: window._timeControl || null,
+          })
+        })
+        .then(r => r.json())
+        .then(data => {
+          if (data.error) {
+            document.getElementById('rematch-status').textContent = 'Result submit failed.';
+          } else {
+            document.getElementById('rematch-status').textContent =
+              'Result recorded. Next game will be assigned automatically.';
+          }
+        })
+        .catch(() => {
+          document.getElementById('rematch-status').textContent = 'Could not submit result — check connection.';
+        });
+      });
+    }
   } else {
     document.getElementById('btn-rematch').textContent = 'Rematch';
     document.getElementById('btn-rematch').disabled = false;
@@ -1415,7 +1438,7 @@ function showOverlay(result, reason) {
     document.getElementById('rematch-status').textContent = '';
   }
 
-  // Save multiplayer game — delay 2s so opponent_profile has time to arrive
+  // Save multiplayer game to history — delay 2s so opponent_profile has time to arrive
   if (sb && currentUser && multiMoveHistory.length > 0) {
     var pgn = '';
     multiMoveHistory.forEach(function(uci, i) {
@@ -1427,11 +1450,11 @@ function showOverlay(result, reason) {
     var savedColor  = myColor;
     setTimeout(function() {
       sb.from('games').insert({
-        user_id:      currentUser.id,
-        pgn:          savedPgn,
-        result:       savedResult,
-        player_color: savedColor,
-        opponent:     opponentUsername ? 'human:' + opponentUsername : 'human',
+        user_id:           currentUser.id,
+        pgn:               savedPgn,
+        result:            savedResult,
+        player_color:      savedColor,
+        opponent:          opponentUsername ? 'human:' + opponentUsername : 'human',
         player_elo_before: myProfile ? (myProfile.eloBefore || myProfile.elo) : null,
         player_elo_after:  myProfile ? myProfile.elo : null,
       }).then(function(res) {
@@ -1440,7 +1463,6 @@ function showOverlay(result, reason) {
       });
     }, 2000);
   }
-  // Reset for next game
   multiMoveHistory = [];
 }
 

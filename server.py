@@ -459,34 +459,53 @@ tournament_player_game: dict = {}
 
 # ΓöÇΓöÇΓöÇ ELO calculation ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
-def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str) -> int:
-    diff  = my_elo - opp_elo   # positive = I am higher rated
-    tiers = int(diff / 100)    # truncate toward zero
-    base  = 7
-
+def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str,
+             time_control: str | None = None) -> int:
+    """
+    Standard ELO with K-factor adjusted by time control and rating level.
+    winner_color: 'white' | 'black' | 'draw'
+    """
     if winner_color == 'draw':
-        return my_elo
-
-    if winner_color == my_color:
-        # I won — gain less if I was favored (higher), more if underdog (lower)
-        if tiers >= 0:
-            # I am higher rated — expected win — gain less
-            effect = base * (0.5 ** tiers)
-        else:
-            # I am lower rated — upset win — gain more
-            effect = base * (1.5 ** abs(tiers))
-        effect = max(1, round(effect))
+        score = 0.5
+    elif winner_color == my_color:
+        score = 1.0
     else:
-        # I lost — lose less if I was underdog (lower), more if favored (higher)
-        if tiers <= 0:
-            # I am lower rated — expected loss — lose less
-            effect = base * (0.5 ** abs(tiers))
-        else:
-            # I am higher rated — upset loss — lose more
-            effect = base * (1.5 ** tiers)
-        effect = -max(1, round(effect))
+        score = 0.0
 
-    return max(100, my_elo + int(effect))
+    expected = 1 / (1 + 10 ** ((opp_elo - my_elo) / 400))
+    k = k_factor(time_control, my_elo)
+    new_elo = round(my_elo + k * (score - expected))
+    return max(100, new_elo)
+
+
+def k_factor(time_control: str | None, elo: int) -> int:
+    """
+    Return ELO K-factor based on time control and current rating.
+    Faster time controls = more volatile = higher K.
+    Lower-rated players also get a higher K so they converge faster.
+    """
+    base_minutes = 5  # default to blitz if unknown
+    if time_control:
+        try:
+            base_minutes = int(time_control.split('+')[0])
+        except (ValueError, IndexError):
+            pass
+
+    if base_minutes <= 2:
+        k = 40    # Bullet  (< 3 min)
+    elif base_minutes <= 5:
+        k = 32    # Blitz   (3–5 min)
+    elif base_minutes <= 15:
+        k = 24    # Rapid   (6–15 min)
+    else:
+        k = 16    # Classical (> 15 min)
+
+    # New / developing players change faster
+    if elo < 1400:
+        k = min(k + 8, 40)
+
+    return k
+
 
 async def cleanup_game(game_id: str, delay: int = 10):
     await asyncio.sleep(delay)
@@ -614,25 +633,31 @@ async def update_elos(game: dict, result: str):
 
     w_elo_old = wp["elo"]
     b_elo_old = bp["elo"]
+    tc = game.get("time_control")  # set from profile message or tournament
 
-    w_elo_new = calc_elo(w_elo_old, b_elo_old, "white", result)
-    b_elo_new = calc_elo(b_elo_old, w_elo_old, "black", result)
+    w_elo_new = calc_elo(w_elo_old, b_elo_old, "white", result, tc)
+    b_elo_new = calc_elo(b_elo_old, w_elo_old, "black", result, tc)
 
     # Persist to Supabase
     await supabase_update_elo(wp["user_id"], w_elo_new)
     await supabase_update_elo(bp["user_id"], b_elo_new)
 
-    # Notify players
-    await send(game["white_ws"], {
-        "type":    "elo_update",
-        "old_elo": w_elo_old,
-        "new_elo": w_elo_new,
-    })
-    await send(game["black_ws"], {
-        "type":    "elo_update",
-        "old_elo": b_elo_old,
-        "new_elo": b_elo_new,
-    })
+    # Notify players — prefer game WS (reliable), fall back to lobby WS
+    w_ws = game.get("white_game_ws") or game.get("white_ws")
+    b_ws = game.get("black_game_ws") or game.get("black_ws")
+
+    if w_ws:
+        await send(w_ws, {
+            "type":    "elo_update",
+            "old_elo": w_elo_old,
+            "new_elo": w_elo_new,
+        })
+    if b_ws:
+        await send(b_ws, {
+            "type":    "elo_update",
+            "old_elo": b_elo_old,
+            "new_elo": b_elo_new,
+        })
 
 
 # ΓöÇΓöÇ WebSocket: Lobby (matchmaking) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -649,11 +674,13 @@ async def arena_send(ws, msg: dict):
 
 
 async def arena_auto_start_scheduler():
-    """Poll every 30s, auto-start Arena tournaments whose starts_at has passed."""
+    """Poll every 30s, auto-start Arena tournaments whose starts_at has passed,
+    and auto-end Arena tournaments whose duration has expired."""
     await asyncio.sleep(10)
     while True:
         try:
             async with httpx.AsyncClient() as client:
+                # Auto-START upcoming Arena tournaments
                 r = await client.get(
                     f"{SUPABASE_URL}/rest/v1/tournaments",
                     params={"status": "eq.upcoming", "format": "eq.arena",
@@ -667,6 +694,49 @@ async def arena_auto_start_scheduler():
                         lock_key = f"start_{t['id']}"
                         if lock_key not in _tournament_locks:
                             asyncio.create_task(arena_auto_start(t["id"]))
+
+                # Auto-END active Arena tournaments whose time is up
+                r2 = await client.get(
+                    f"{SUPABASE_URL}/rest/v1/tournaments",
+                    params={"status": "eq.active", "format": "eq.arena",
+                            "select": "id,starts_at,duration_minutes"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY,
+                             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                )
+                now_utc = datetime.utcnow()
+                for t in r2.json():
+                    if not t.get("duration_minutes"):
+                        continue
+                    starts = datetime.fromisoformat(t["starts_at"].replace("Z", ""))
+                    ends   = starts + timedelta(minutes=t["duration_minutes"])
+                    if now_utc >= ends:
+                        tid = str(t["id"])
+                        lock_key = f"end_{tid}"
+                        if lock_key in _tournament_locks:
+                            continue
+                        _tournament_locks.add(lock_key)
+                        try:
+                            await client.patch(
+                                f"{SUPABASE_URL}/rest/v1/tournaments",
+                                params={"id": f"eq.{tid}"},
+                                headers={"apikey": SUPABASE_SERVICE_KEY,
+                                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                         "Content-Type": "application/json"},
+                                json={"status": "completed"}
+                            )
+                            print(f"[arena] auto-ended {tid}", flush=True)
+                            # Broadcast tournament_ended to all connected players
+                            conns = tournament_connections.get(tid, {})
+                            ended_msg = {"type": "tournament_ended"}
+                            for uid, info in list(conns.items()):
+                                await arena_send(info["ws"], ended_msg)
+                            # Clean up in-memory state
+                            tournament_connections.pop(tid, None)
+                            tournament_player_game.pop(tid, None)
+                        except Exception as e:
+                            print(f"[arena] auto-end error {tid}: {e}", flush=True)
+                        finally:
+                            _tournament_locks.discard(lock_key)
         except Exception as e:
             print(f"[scheduler] {e}", flush=True)
         await asyncio.sleep(30)
@@ -750,6 +820,23 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
     pg[white_id] = "pending"; pg[black_id] = "pending"
     white_info["available"] = False; black_info["available"] = False
     game_id = uuid.uuid4().hex[:12]
+
+    # Fetch tournament time_control for this game
+    time_control = "5+0"
+    try:
+        async with httpx.AsyncClient() as _tc_client:
+            _tc_r = await _tc_client.get(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{tournament_id}", "select": "time_control"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            _tc_rows = _tc_r.json()
+            if _tc_rows:
+                time_control = _tc_rows[0].get("time_control", "5+0")
+    except Exception:
+        pass
+
     try:
         async with httpx.AsyncClient() as client:
             ins = await client.post(
@@ -774,8 +861,9 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
 
     pg[white_id] = game_id; pg[black_id] = game_id
     game = new_game(game_id, None, None, white_id, black_id)
-    game["tournament_id"] = tournament_id
+    game["tournament_id"]    = tournament_id
     game["tournament_db_id"] = db_game_id
+    game["time_control"]     = time_control
     game["white_profile"] = {"username": white_info["username"],
                              "elo": white_info.get("elo", 1500), "user_id": white_id}
     game["black_profile"] = {"username": black_info["username"],
@@ -783,12 +871,20 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
     active_games[game_id] = game
     asyncio.create_task(clock_loop(game_id))
     print(f"[arena] {game_id}: {white_info['username']} vs {black_info['username']}", flush=True)
-    await arena_send(white_info["ws"], {"type": "game_ready", "game_id": game_id,
+    await arena_send(white_info["ws"], {
+        "type": "game_ready", "game_id": game_id,
         "color": "white", "opponent": black_info["username"],
-        "opponent_elo": black_info.get("elo", 1500), "tournament_db_id": db_game_id})
-    await arena_send(black_info["ws"], {"type": "game_ready", "game_id": game_id,
+        "opponent_elo": black_info.get("elo", 1500),
+        "tournament_db_id": db_game_id,
+        "time_control": time_control,
+    })
+    await arena_send(black_info["ws"], {
+        "type": "game_ready", "game_id": game_id,
         "color": "black", "opponent": white_info["username"],
-        "opponent_elo": white_info.get("elo", 1500), "tournament_db_id": db_game_id})
+        "opponent_elo": white_info.get("elo", 1500),
+        "tournament_db_id": db_game_id,
+        "time_control": time_control,
+    })
 
 
 async def arena_pair_delayed(tournament_id: str, delay: float = 2.5):
@@ -1009,6 +1105,9 @@ async def game_ws(ws: WebSocket, game_id: str):
                     "elo":      data.get("elo"),
                     "user_id":  data.get("user_id"),
                 }
+                # Store time_control on game so update_elos can use correct K-factor
+                if data.get("time_control") and not game.get("time_control"):
+                    game["time_control"] = data["time_control"]
                 if color == "w":
                     game["white_profile"] = profile
                     await send(game["black_ws"], {
@@ -1604,6 +1703,7 @@ class TournamentResultRequest(BaseModel):
     game_id: str       # tournament_games.id
     result: str        # 'white' | 'black' | 'draw'
     user_id: str
+    time_control: Optional[str] = None  # unused server-side (fetched from DB), kept for compat
 
 
 def swiss_pair(players: list, existing_games: list) -> list:
@@ -1818,7 +1918,13 @@ async def next_round(req: TournamentStartRequest, authorization: str = Header(No
 
 @app.post("/api/tournament/result")
 async def submit_result(req: TournamentResultRequest, authorization: str = Header(None)):
-    """Submit a game result and update player scores."""
+    """
+    Submit a tournament game result.
+    - Marks the game result in tournament_games
+    - Updates tournament_players.score (win=1, draw=0.5, loss=0)
+    - Syncs tournament_players.elo snapshot from profiles (ELO already updated by update_elos via WS)
+    - Does NOT recalculate ELO — that is handled by update_elos() when the game ends over WebSocket
+    """
     if not SUPABASE_SERVICE_KEY:
         raise HTTPException(503, "Service unavailable")
     user_id = await verify_jwt(authorization)
@@ -1843,7 +1949,17 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
         if user_id not in (g['white_id'], g['black_id']):
             raise HTTPException(403, "Not a player in this game")
 
-        # Update game result
+        tid = g['tournament_id']
+
+        # Get tournament format/status for re-pairing
+        tc_r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournaments",
+            params={"id": f"eq.{tid}", "select": "format,status,time_control"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        tc_rows = tc_r.json()
+
+        # Mark game result
         await client.patch(
             f"{SUPABASE_URL}/rest/v1/tournament_games",
             params={"id": f"eq.{req.game_id}"},
@@ -1852,65 +1968,68 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
             json={"result": req.result, "played_at": datetime.utcnow().isoformat()}
         )
 
-        # Award points: win=1, draw=0.5, loss=0
-        tid = g['tournament_id']
+        # Fetch updated ELOs from profiles (already written by update_elos over WS)
+        elo_r = await asyncio.gather(
+            client.get(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{g['white_id']}", "select": "elo"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            ),
+            client.get(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{g['black_id']}", "select": "elo"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            ),
+        )
+        w_elo = elo_r[0].json()[0]["elo"] if elo_r[0].json() else 1500
+        b_elo = elo_r[1].json()[0]["elo"] if elo_r[1].json() else 1500
 
-        async def add_score(uid, pts):
-            r = await client.get(
+        # Update tournament standings: score + ELO snapshot
+        async def add_score(uid, pts, elo_snapshot):
+            r2 = await client.get(
                 f"{SUPABASE_URL}/rest/v1/tournament_players",
                 params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}", "select": "score"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             )
-            current = r.json()[0].get('score', 0) if r.json() else 0
+            current = r2.json()[0].get('score', 0) if r2.json() else 0
             await client.patch(
                 f"{SUPABASE_URL}/rest/v1/tournament_players",
                 params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                          "Content-Type": "application/json"},
-                json={"score": current + pts}
+                json={"score": current + pts, "elo": elo_snapshot}
             )
 
         if req.result == 'white':
-            await add_score(g['white_id'], 1)
-            await add_score(g['black_id'], 0)
+            await add_score(g['white_id'], 1,   w_elo)
+            await add_score(g['black_id'], 0,   b_elo)
         elif req.result == 'black':
-            await add_score(g['white_id'], 0)
-            await add_score(g['black_id'], 1)
+            await add_score(g['white_id'], 0,   w_elo)
+            await add_score(g['black_id'], 1,   b_elo)
         else:
-            await add_score(g['white_id'], 0.5)
-            await add_score(g['black_id'], 0.5)
+            await add_score(g['white_id'], 0.5, w_elo)
+            await add_score(g['black_id'], 0.5, b_elo)
 
-    # Arena: re-pair after result
+    # Arena: release players and re-pair
     try:
-        async with httpx.AsyncClient() as client2:
-            tg_r = await client2.get(
-                f"{SUPABASE_URL}/rest/v1/tournament_games",
-                params={"id": f"eq.{req.game_id}", "select": "tournament_id,white_id,black_id"},
-                headers={"apikey": SUPABASE_SERVICE_KEY,
-                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-            )
-            tg = tg_r.json()
-        if tg:
-            tid = tg[0]["tournament_id"]
-            wid = tg[0]["white_id"]
-            bid = tg[0]["black_id"]
-            async with httpx.AsyncClient() as client2:
-                tr = await client2.get(
-                    f"{SUPABASE_URL}/rest/v1/tournaments",
-                    params={"id": f"eq.{tid}", "select": "format,status"},
-                    headers={"apikey": SUPABASE_SERVICE_KEY,
-                             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-                )
-                t_rows = tr.json()
-            if t_rows and t_rows[0].get("format") == "arena" and t_rows[0].get("status") == "active":
-                pg    = tournament_player_game.get(tid, {})
-                conns = tournament_connections.get(tid, {})
-                for uid in (wid, bid):
-                    if uid in pg: pg[uid] = None
-                    if uid in conns:
-                        conns[uid]["available"] = True
-                        await arena_send(conns[uid]["ws"], {"type": "game_over", "result": req.result})
-                asyncio.create_task(arena_pair_delayed(tid))
+        if tc_rows and tc_rows[0].get("format") == "arena" and tc_rows[0].get("status") == "active":
+            pg    = tournament_player_game.get(tid, {})
+            conns = tournament_connections.get(tid, {})
+            for uid in (g['white_id'], g['black_id']):
+                if uid in pg:
+                    pg[uid] = None
+                if uid in conns:
+                    conns[uid]["available"] = True
+                    conns[uid]["score"] = (
+                        conns[uid].get("score", 0) + 1   if (
+                            (req.result == "white" and uid == g['white_id']) or
+                            (req.result == "black" and uid == g['black_id'])
+                        ) else
+                        conns[uid].get("score", 0) + 0.5 if req.result == "draw"
+                        else conns[uid].get("score", 0)
+                    )
+                    await arena_send(conns[uid]["ws"], {"type": "game_over", "result": req.result})
+            asyncio.create_task(arena_pair_delayed(tid))
     except Exception as e:
         print(f"[arena] re-pair error: {e}", flush=True)
 

@@ -694,6 +694,34 @@ global.Chessground = Nr;
     .promo-piece:hover { border-color: #00ff9d; background: #0d1f17; }
     .promo-piece img { width: 48px; height: 48px; }
 
+    /* ── Game-over overlay ── */
+    .gameover-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.80); z-index: 500;
+      align-items: center; justify-content: center;
+    }
+    .gameover-overlay.active { display: flex; }
+    .gameover-box {
+      background: #111; border: 1px solid #2a2a2a; border-radius: 6px;
+      padding: 36px 40px; text-align: center; max-width: 320px; width: 90%;
+    }
+    .gameover-emoji { font-size: 48px; margin-bottom: 12px; }
+    .gameover-title {
+      font-size: 20px; font-weight: 700; color: #fff;
+      margin-bottom: 8px; letter-spacing: 0.02em;
+    }
+    .gameover-sub { font-size: 13px; color: #666; margin-bottom: 28px; min-height: 18px; }
+    .gameover-btn {
+      background: #00ff9d; color: #000; border: none; border-radius: 3px;
+      padding: 12px 24px; font-size: 13px; font-weight: 700; cursor: pointer;
+      letter-spacing: 0.05em; margin: 4px;
+    }
+    .gameover-btn:hover { background: #00e08a; }
+    .gameover-btn.secondary {
+      background: transparent; color: #555; border: 1px solid #333;
+    }
+    .gameover-btn.secondary:hover { color: #aaa; border-color: #555; }
+
     /* ── Auth modal ── */
     .auth-overlay {
       position: fixed;
@@ -1384,31 +1412,52 @@ function getEngineMove() {
 }
 
 function showResult() {
-  var resultText, resultKey;
+  var resultText, resultKey, emoji, sub;
 
   if (game.in_checkmate()) {
     if (game.turn() === playerColor) {
       resultText = 'Engine wins by checkmate.';
       resultKey  = playerColor === 'w' ? 'black' : 'white';
+      emoji = '🤖'; sub = 'Better luck next time!';
     } else {
       resultText = 'You win by checkmate!';
       resultKey  = playerColor === 'w' ? 'white' : 'black';
+      emoji = '👑'; sub = 'Excellent play!';
     }
+  } else if (game.in_stalemate()) {
+    resultText = 'Draw by stalemate.';
+    resultKey  = 'draw'; emoji = '🤝'; sub = 'No legal moves — stalemate.';
+  } else if (game.in_threefold_repetition()) {
+    resultText = 'Draw by repetition.';
+    resultKey  = 'draw'; emoji = '🔁'; sub = 'Position repeated three times.';
+  } else if (game.insufficient_material()) {
+    resultText = 'Draw — insufficient material.';
+    resultKey  = 'draw'; emoji = '🤝'; sub = 'Neither side can checkmate.';
   } else if (game.in_draw()) {
     resultText = 'Game drawn.';
-    resultKey  = 'draw';
+    resultKey  = 'draw'; emoji = '🤝'; sub = '';
   } else {
     resultText = 'Game over.';
-    resultKey  = 'draw';
+    resultKey  = 'draw'; emoji = '🏁'; sub = '';
   }
 
   setStatus(resultText);
   document.getElementById('btn-resign').style.display = 'none';
   document.getElementById('btn-replay').style.display = '';
 
+  // Show overlay
+  document.getElementById('gameover-emoji').textContent = emoji;
+  document.getElementById('gameover-title').textContent = resultText;
+  document.getElementById('gameover-sub').textContent   = sub;
+  document.getElementById('gameover-overlay').classList.add('active');
+
   var pgn = buildPGN(game, resultKey);
   var colorName = playerColor === 'w' ? 'white' : 'black';
   saveGame(pgn, resultKey, colorName);
+}
+
+function closeGameOver() {
+  document.getElementById('gameover-overlay').classList.remove('active');
 }
 
 function resignGame() {
@@ -2101,6 +2150,17 @@ function closeMenuThenAuth() {
   <div class="promo-box">
     <div class="promo-title">Promote pawn to</div>
     <div class="promo-pieces" id="promo-pieces"></div>
+  </div>
+</div>
+
+<!-- Game-over overlay -->
+<div class="gameover-overlay" id="gameover-overlay" onclick="closeGameOver()">
+  <div class="gameover-box" onclick="event.stopPropagation()">
+    <div class="gameover-emoji" id="gameover-emoji">♟</div>
+    <div class="gameover-title" id="gameover-title">Game Over</div>
+    <div class="gameover-sub" id="gameover-sub"></div>
+    <button class="gameover-btn" onclick="closeGameOver(); resetGame()">New Game</button>
+    <button class="gameover-btn secondary" onclick="closeGameOver()">Review</button>
   </div>
 </div>
 

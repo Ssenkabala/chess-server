@@ -295,6 +295,17 @@
   <!-- Detail view -->
   <div class="detail" id="detail-view">
     <button class="detail-back" onclick="showList()">← Back to tournaments</button>
+
+    <!-- Timer: survives detail-content re-renders -->
+    <div id="arena-timer-bar" style="display:none;margin-bottom:12px;padding:10px 16px;
+      background:#111;border:1px solid #222;border-radius:4px;
+      font-size:12px;letter-spacing:0.08em;color:#aaa;text-align:center;"></div>
+
+    <!-- Arena status (game_ready / waiting): survives detail-content re-renders -->
+    <div id="arena-status" style="display:none;background:#0d1f0d;border:1px solid #00ff9d44;
+      border-radius:4px;padding:14px 18px;margin-bottom:16px;font-size:13px;color:#00ff9d;
+      line-height:1.6;"></div>
+
     <div id="detail-content"></div>
   </div>
 
@@ -405,9 +416,62 @@ const SUPABASE_URL  = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ic2tnenN2eWdkbWx2d2JldHhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQxMTM3NDIsImV4cCI6MjA1OTY4OTc0Mn0.BKA2G4fGlhMjJQlHgT8KaHSBjIREbdBQiQsKjy2CkP8';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
-let currentUser  = null;
-let currentTab   = 'upcoming';
+// ── Timer countdown (survives detail-content polls) ──────────────
+let _timerInterval = null;
+
+function startTournamentTimer(t) {
+  if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+  const bar = document.getElementById('arena-timer-bar');
+  if (!bar) return;
+
+  function fmt(ms) {
+    if (ms <= 0) return '0:00';
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    return `${m}:${String(s).padStart(2,'0')}`;
+  }
+
+  function tick() {
+    const now = Date.now();
+    if (t.status === 'upcoming') {
+      const starts = new Date(t.starts_at).getTime();
+      const ms = starts - now;
+      if (ms <= 0) {
+        bar.textContent = '⏳ Starting now…';
+        bar.style.display = '';
+        clearInterval(_timerInterval); _timerInterval = null;
+        // Reload after a moment so status flips to active
+        setTimeout(() => { if (currentDetailId) viewTournament(currentDetailId); }, 3000);
+      } else {
+        bar.style.display = '';
+        bar.textContent = `⏳ Starts in ${fmt(ms)}`;
+      }
+    } else if (t.status === 'active' && t.duration_minutes) {
+      const ends = new Date(t.starts_at).getTime() + t.duration_minutes * 60000;
+      const ms = ends - now;
+      if (ms <= 0) {
+        bar.textContent = '🏁 Tournament ended';
+        bar.style.display = '';
+        clearInterval(_timerInterval); _timerInterval = null;
+      } else {
+        bar.style.display = '';
+        bar.innerHTML = `<span style="color:var(--green)">🟢 LIVE</span> &nbsp;·&nbsp; Ends in <strong>${fmt(ms)}</strong>`;
+      }
+    } else {
+      bar.style.display = 'none';
+    }
+  }
+  tick();
+  _timerInterval = setInterval(tick, 1000);
+}
+
+let currentUser    = null;
+let currentTab     = 'upcoming';
 let currentProfile = null;
+let currentDetailId = null;  // tracks which tournament detail is open
 
 const COUNTRY_NAMES = {
   DZ:'Algeria',AO:'Angola',BJ:'Benin',BW:'Botswana',BF:'Burkina Faso',BI:'Burundi',
@@ -499,21 +563,30 @@ async function loadTournaments() {
 }
 
 async function viewTournament(id) {
+  // Stop any existing poll + timer if switching to a different tournament
+  if (currentDetailId && currentDetailId !== id) {
+    stopDetailPoll();
+    disconnectTournamentWs();
+    if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+  }
+  currentDetailId = id;
+
   document.getElementById('list-view').classList.add('hidden');
   const detail = document.getElementById('detail-view');
   const content = document.getElementById('detail-content');
   detail.classList.add('active');
-  content.innerHTML = '<div class="loading"><span class="spinner"></span>Loading...</div>';
 
-  // Load tournament + players + games via server
+  // Only show full spinner on first load, not on poll refreshes
+  if (!content.dataset.loaded) {
+    content.innerHTML = '<div class="loading"><span class="spinner"></span>Loading...</div>';
+  }
+
   let t, players, games;
   try {
     const r = await fetch(`/api/tournaments/${id}`);
     if (!r.ok) throw new Error('Not found');
     const data = await r.json();
-    t = data.tournament;
-    players = data.players;
-    games = data.games;
+    t = data.tournament; players = data.players; games = data.games;
   } catch(e) {
     content.innerHTML = '<div class="empty">Error loading tournament.</div>'; return;
   }
@@ -521,7 +594,7 @@ async function viewTournament(id) {
   if (!t) { content.innerHTML = '<div class="empty">Tournament not found.</div>'; return; }
 
   const isRegistered = players && currentUser && players.some(p => p.user_id === currentUser.id);
-  const isFull = players && players.length >= t.max_players;
+  const isFull = players && t.max_players && players.length >= t.max_players;
   const starts = new Date(t.starts_at);
   const timeStr = starts.toLocaleDateString('en-GB', {weekday:'short',day:'numeric',month:'short'}) +
                   ' at ' + starts.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
@@ -533,7 +606,6 @@ async function viewTournament(id) {
     rounds[g.round].push(g);
   });
 
-  // Build pairings HTML
   let pairingsHTML = '';
   Object.keys(rounds).sort((a,b) => a-b).forEach(r => {
     pairingsHTML += `<div class="section">
@@ -553,16 +625,14 @@ async function viewTournament(id) {
       }).join('') + '</div></div>';
   });
 
-  // Register/join button
   let actionBtn = '';
   if (currentUser) {
     const isCreator = t.created_by === currentUser.id;
-
     if (t.status === 'upcoming') {
       if (isCreator && (players||[]).length >= 2) {
         actionBtn = `<div style="display:flex;gap:8px;flex-wrap:wrap;">
           ${isRegistered ? `<button class="btn btn-outline btn-sm" onclick="leaveTournament('${id}')">Leave</button>` : ''}
-          <button class="btn btn-sm" onclick="startTournament('${id}')">▶ Start</button>
+          <button class="btn btn-sm" onclick="startTournament('${id}')">▶ Start Now</button>
         </div>`;
       } else if (isRegistered) {
         actionBtn = `<button class="btn btn-outline btn-sm" onclick="leaveTournament('${id}')">Leave</button>`;
@@ -577,7 +647,7 @@ async function viewTournament(id) {
       } else {
         actionBtn = `<span style="font-size:11px;color:var(--muted)">Tournament full</span>`;
       }
-    } else if (t.status === 'active' && isCreator) {
+    } else if (t.status === 'active' && isCreator && t.format !== 'arena') {
       const currentRound = games && games.length ? Math.max(...games.map(g => g.round)) : 0;
       const pending = (games||[]).filter(g => g.round === currentRound && !g.result).length;
       const nextLabel = currentRound >= t.rounds ? 'Complete Tournament' : `Next Round (${currentRound + 1})`;
@@ -587,17 +657,7 @@ async function viewTournament(id) {
     }
   }
 
-  // Connect arena WS if applicable
-  connectTournamentWs(id, t);
-
-  // Poll standings every 10s
-  if (window._tournamentPoll) clearInterval(window._tournamentPoll);
-  window._tournamentPoll = setInterval(() => {
-    if (document.getElementById('detail-view').classList.contains('active')) {
-      viewTournament(id);
-    }
-  }, 10000);
-
+  // Render main content
   content.innerHTML = `
     <div class="detail-header">
       <div style="flex:1">
@@ -607,7 +667,7 @@ async function viewTournament(id) {
           <span class="tag ${t.status === 'active' ? 'green' : ''}">${t.status.toUpperCase()}</span>
           <span class="tag">⏱ ${t.time_control}</span>
           <span class="tag">${t.format === 'arena' ? 'Arena' : t.format === 'swiss' ? 'Swiss' : 'Round Robin'}</span>
-          <span class="tag">${t.rounds} rounds</span>
+          ${t.duration_minutes ? `<span class="tag">${t.duration_minutes} min</span>` : t.rounds ? `<span class="tag">${t.rounds} rounds</span>` : ''}
           ${t.country ? `<span class="tag">${FLAG(t.country)} ${COUNTRY_NAMES[t.country]}</span>` : ''}
         </div>
         <div style="font-size:12px;color:var(--muted);margin-top:8px;">📅 ${timeStr}</div>
@@ -615,16 +675,11 @@ async function viewTournament(id) {
       <div>${actionBtn}</div>
     </div>
 
-    <!-- Arena status (game_ready / waiting) -->
-    <div id="arena-status" style="display:none;background:#0d1f0d;border:1px solid #00ff9d44;
-      border-radius:4px;padding:14px 18px;margin-bottom:16px;font-size:13px;color:#00ff9d;
-      line-height:1.6;"></div>
-
     <!-- Standings -->
     <div class="section">
       <div class="section-hdr">
         <span>Standings</span>
-        <span>${(players||[]).length} / ${t.max_players} players</span>
+        <span>${(players||[]).length} players</span>
       </div>
       <div>
         ${(players||[]).length === 0
@@ -649,14 +704,80 @@ async function viewTournament(id) {
 
     ${pairingsHTML || ''}
   `;
+  content.dataset.loaded = '1';
+
+  // Start/restart timer (only if not already ticking for this tournament)
+  if (!_timerInterval) startTournamentTimer(t);
+
+  // Connect WS only once per tournament session — don't reconnect on polls
+  if (!tournamentWs || currentTournamentId !== id) {
+    connectTournamentWs(id, t);
+  }
+
+  // Start polling for standings refresh (not WS reconnect)
+  startDetailPoll(id);
 }
 
-function showList() {
+function stopDetailPoll() {
   if (window._tournamentPoll) {
     clearInterval(window._tournamentPoll);
     window._tournamentPoll = null;
   }
+}
+
+function startDetailPoll(id) {
+  // Only start if not already polling for this id
+  if (window._tournamentPoll) return;
+  window._tournamentPoll = setInterval(async () => {
+    if (!document.getElementById('detail-view').classList.contains('active')) return;
+    // Lightweight refresh: only update standings/pairings, don't touch WS or timer
+    try {
+      const r = await fetch(`/api/tournaments/${id}`);
+      if (!r.ok) return;
+      const data = await r.json();
+      const t = data.tournament; const players = data.players; const games = data.games;
+      if (!t) return;
+
+      // If status changed to active and timer isn't running, restart it
+      if (!_timerInterval) startTournamentTimer(t);
+
+      // If tournament ended via time, show ended state
+      if (t.status === 'completed') {
+        stopDetailPoll();
+        viewTournament(id); // full reload to show final state
+        return;
+      }
+
+      // Update standings in-place
+      const sorted = [...(players||[])].sort((a, b) =>
+        t.status === 'upcoming'
+          ? (b.elo || 1500) - (a.elo || 1500)
+          : ((b.score||0) - (a.score||0)) || ((b.elo||1500) - (a.elo||1500))
+      );
+      const standingsEl = document.querySelector('#detail-content .section .player-row')?.closest('div');
+      if (standingsEl && players.length > 0) {
+        standingsEl.innerHTML = sorted.map((p, i) => `
+          <div class="player-row">
+            <div class="player-rank">${i+1}</div>
+            <div class="player-country">${FLAG(p.country)}</div>
+            <div class="player-name">${p.username}</div>
+            <div class="player-elo">${p.elo || '?'} ELO</div>
+            <div class="player-score">${p.score || 0}</div>
+          </div>`).join('');
+      }
+    } catch(e) {}
+  }, 10000);
+}
+
+function showList() {
+  stopDetailPoll();
   disconnectTournamentWs();
+  if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+  currentDetailId = null;
+  const content = document.getElementById('detail-content');
+  if (content) { content.dataset.loaded = ''; }
+  document.getElementById('arena-timer-bar').style.display = 'none';
+  document.getElementById('arena-status').style.display = 'none';
   document.getElementById('list-view').classList.remove('hidden');
   document.getElementById('detail-view').classList.remove('active');
 }
@@ -750,57 +871,98 @@ async function createTournament() {
 }
 
 // ── Arena WebSocket ──────────────────────────────────────────────
+// WS connects ONCE per tournament visit — polls never touch it
 let tournamentWs = null, currentTournamentId = null, _arenaCountdown = null;
 
 function connectTournamentWs(tid, tournament) {
+  // Already connected to this tournament — don't reconnect
+  if (tournamentWs && currentTournamentId === tid &&
+      (tournamentWs.readyState === WebSocket.OPEN || tournamentWs.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
   if (tournamentWs) { tournamentWs.close(); tournamentWs = null; }
   currentTournamentId = tid;
   if (!currentUser || tournament.format !== 'arena') return;
+
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   tournamentWs = new WebSocket(`${proto}://${location.host}/ws/tournament/${tid}`);
+
   tournamentWs.onopen = () => {
     tournamentWs.send(JSON.stringify({
-      user_id: currentUser.id,
+      user_id:  currentUser.id,
       username: currentProfile ? currentProfile.username : (currentUser.email || 'player'),
-      elo: currentProfile ? (currentProfile.elo || 1500) : 1500,
-      score: 0,
+      elo:      currentProfile ? (currentProfile.elo || 1500) : 1500,
+      score:    0,
     }));
     tournamentWs._ping = setInterval(() => {
       if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN)
         tournamentWs.send(JSON.stringify({ type: 'ping' }));
     }, 20000);
   };
+
   tournamentWs.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
-      if (msg.type === 'game_ready') showArenaGameReady(msg);
-      if (msg.type === 'game_over') {
+      if (msg.type === 'game_ready') {
+        showArenaGameReady(msg);
+      } else if (msg.type === 'game_over') {
         hideArenaCountdown();
         if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN)
           tournamentWs.send(JSON.stringify({ type: 'available', score: 0 }));
-        showArenaStatus('Game over. Waiting for next pairing...');
+        showArenaStatus('Game over. Waiting for next pairing…');
+      } else if (msg.type === 'tournament_ended') {
+        hideArenaCountdown();
+        showArenaStatus('🏁 Tournament has ended. Final standings are shown below.');
+        stopDetailPoll();
+        if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+        const bar = document.getElementById('arena-timer-bar');
+        if (bar) { bar.textContent = '🏁 Tournament ended'; bar.style.display = ''; }
+        // Reload to show completed state
+        setTimeout(() => { if (currentDetailId) viewTournament(currentDetailId); }, 2000);
+      } else if (msg.type === 'tournament_started') {
+        // Another player triggered start — reload our view
+        if (currentDetailId) viewTournament(currentDetailId);
       }
-    } catch(e) {}
+    } catch(err) {}
   };
+
   tournamentWs.onclose = () => {
     if (tournamentWs && tournamentWs._ping) clearInterval(tournamentWs._ping);
+    // Attempt reconnect after 3s if we're still on this detail view
+    setTimeout(() => {
+      if (currentDetailId === tid && document.getElementById('detail-view').classList.contains('active')) {
+        if (!tournamentWs || tournamentWs.readyState === WebSocket.CLOSED) {
+          // Fetch fresh tournament data for reconnect
+          fetch(`/api/tournaments/${tid}`).then(r => r.json()).then(data => {
+            if (data && data.tournament && data.tournament.status === 'active') {
+              connectTournamentWs(tid, data.tournament);
+            }
+          }).catch(() => {});
+        }
+      }
+    }, 3000);
   };
+
+  tournamentWs.onerror = () => {};
 }
 
 function showArenaGameReady(msg) {
   const el = document.getElementById('arena-status');
   if (!el) return;
+  // Clear any previous countdown
+  hideArenaCountdown();
   el.innerHTML = `<strong>♟ Game ready!</strong> You play <strong>${msg.color}</strong> vs <strong>${msg.opponent}</strong> (${msg.opponent_elo} ELO)<br>
-    <span id="arena-countdown" style="font-size:12px;color:#aaa;">Redirecting in 5...</span>`;
+    <span id="arena-countdown" style="font-size:12px;color:#aaa;">Redirecting in 5…</span>`;
   el.style.display = '';
   let secs = 5;
   _arenaCountdown = setInterval(() => {
     secs--;
     const cd = document.getElementById('arena-countdown');
-    if (cd) cd.textContent = `Redirecting in ${secs}...`;
+    if (cd) cd.textContent = `Redirecting in ${secs}…`;
     if (secs <= 0) {
-      clearInterval(_arenaCountdown);
-      window.location.href = `/multiplayer?game_id=${msg.game_id}&color=${msg.color}&tournament_id=${currentTournamentId}&tournament_db_id=${msg.tournament_db_id || ''}`;
+      clearInterval(_arenaCountdown); _arenaCountdown = null;
+      const tc = encodeURIComponent(msg.time_control || '');
+      window.location.href = `/multiplayer?game_id=${msg.game_id}&color=${msg.color}&tournament_id=${currentTournamentId}&tournament_db_id=${msg.tournament_db_id || ''}&time_control=${tc}`;
     }
   }, 1000);
 }

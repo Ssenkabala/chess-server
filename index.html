@@ -1117,7 +1117,7 @@ global.Chessground = Nr;
       <button onclick="analysePosition()">Analyse</button>
       <button onclick="getCoaching()" id="btn-coach">Coach Me</button>
       <button onclick="resetAnalysis()">Reset</button>
-      <button onclick="if(analysisBoard) analysisBoard.flip()">Flip</button>
+      <button onclick="if(analysisCg) analysisCg.toggleOrientation()">Flip</button>
     </div>
 
     <!-- Coach card -->
@@ -1270,7 +1270,7 @@ function toDests() {
 
 function refreshDests() {
   if (!cg) return;
-  cg.set({
+  if (cg) cg.set({
     movable: {
       color: playerColor === 'w' ? 'white' : 'black',
       dests: toDests(),
@@ -1315,7 +1315,7 @@ function executePlayerMove(source, target, promotion) {
   var move = game.move({ from: source, to: target, promotion: promotion });
   if (move === null) { cg.set({ fen: game.fen() }); return; }
   moveHistory.push(move.san);
-  cg.set({ fen: game.fen(), lastMove: [source, target] });
+  if (cg) cg.set({ fen: game.fen(), lastMove: [source, target] });
   refreshDests();
   updateCapturedPieces();
   if (game.game_over()) { showResult(); return; }
@@ -1327,7 +1327,7 @@ function executePlayerMove(source, target, promotion) {
 // afterMove: called by chessground after drag or click-move
 function afterMove(source, target) {
   if (!gameStarted || engineThinking || game.game_over()) {
-    cg.set({ fen: game.fen() }); return;
+    if (cg) cg.set({ fen: game.fen() }); return;
   }
   if (isPromotion(source, target)) {
     showPromotion(source, target, function(promo) { executePlayerMove(source, target, promo); });
@@ -1360,15 +1360,15 @@ function getEngineMove() {
       }
       game.load(data.fen);
       if (data.move) {
-        cg.set({ fen: data.fen, lastMove: [data.move.slice(0,2), data.move.slice(2,4)] });
+        if (cg) cg.set({ fen: data.fen, lastMove: [data.move.slice(0,2), data.move.slice(2,4)] });
       } else {
-        cg.set({ fen: data.fen });
+        if (cg) cg.set({ fen: data.fen });
       }
+      engineThinking = false;   // must be false BEFORE refreshDests
       refreshDests();
       updateCapturedPieces();
     }
     renderCandidates(data.candidates);
-    engineThinking = false;
     
     // Then check game over
     if (data.is_game_over) { 
@@ -1427,13 +1427,13 @@ function replayGame() {
   if (!moveHistory || moveHistory.length === 0) return;
   var replayMoves = moveHistory.slice();
   var replayChess = new Chess();
-  cg.set({ fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' });
+  if (cg) cg.set({ fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' });
   var i = 0;
   document.getElementById('btn-replay').style.display = 'none';
   function playNext() {
     if (i >= replayMoves.length) { document.getElementById('btn-replay').style.display = ''; return; }
     replayChess.move(replayMoves[i]);
-    cg.set({ fen: replayChess.fen(), movable: { color: 'none', dests: new Map() } });
+    if (cg) cg.set({ fen: replayChess.fen(), movable: { color: 'none', dests: new Map() } });
     i++;
     setTimeout(playNext, 600);
   }
@@ -1447,8 +1447,7 @@ function startGame(color) {
   playerColor = (color === 'white') ? 'w' : 'b';
   gameStarted = true;
   engineThinking = false;
-  selectedSquare = null;
-  game = new Chess();
+    game = new Chess();
   document.getElementById('btn-white').classList.toggle('active', color === 'white');
   document.getElementById('btn-black').classList.toggle('active', color === 'black');
   document.getElementById('btn-resign').style.display = '';
@@ -1605,7 +1604,7 @@ function initAnalysisBoard() {
 }
 
 function loadFen() {
-  if (!analysisBoard) initAnalysisBoard();
+  if (!analysisCg) initAnalysisBoard();
 
   var fen = document.getElementById('fen-input').value.trim();
   if (!fen) {
@@ -1638,7 +1637,7 @@ function scheduleAutoAnalyse() {
 }
 
 function analysePosition() {
-  if (!analysisBoard) initAnalysisBoard();
+  if (!analysisCg) initAnalysisBoard();
 
   var fen = analysisGame.fen();
   setAnalysisStatus('⏳ Engine analysing...');
@@ -1681,7 +1680,7 @@ function analysePosition() {
 }
 
 function getCoaching() {
-  if (!analysisBoard) initAnalysisBoard();
+  if (!analysisCg) initAnalysisBoard();
 
   if (!currentUser) {
     setAnalysisStatus('Sign in to use coaching.');
@@ -2039,16 +2038,17 @@ function closeMenuThenAuth() {
 
   // Load the FEN
   setTimeout(function() {
-    if (!analysisBoard) initAnalysisBoard();
+    if (!analysisCg) initAnalysisBoard();
     var test = new Chess();
     if (test.load(decodeURIComponent(fen))) {
       analysisGame = test;
-      analysisCg && analysisCg.set({ fen: decodeURIComponent(fen) });
+      if (!analysisCg) initAnalysisBoard();
+      analysisCg.set({ fen: decodeURIComponent(fen) });
       document.getElementById('fen-input').value = decodeURIComponent(fen);
       document.getElementById('analysis-status').textContent =
         'Position loaded from saved game. Press Analyse or Coach Me.';
     }
-  }, 300);
+  }, 400);
 })();
 </script>
 

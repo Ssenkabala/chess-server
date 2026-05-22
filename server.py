@@ -24,7 +24,6 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app):
-    # Background task: auto-start Arena tournaments at starts_at time
     asyncio.create_task(arena_auto_start_scheduler())
     yield
 
@@ -449,10 +448,10 @@ active_games: dict = {}         # game_id ΓåÆ game state dict
 
 CLOCK_SECONDS = 300             # 5 minutes each side
 
-# ── Arena tournament state ───────────────────────────────────────────
+# ── Arena tournament state ──────────────────────────────────────
 # tournament_connections[tid][user_id] = {ws, username, elo, score, available}
 tournament_connections: dict = {}
-# tournament_player_game[tid][user_id] = game_id | None (None = available)
+# tournament_player_game[tid][user_id] = game_id | None
 tournament_player_game: dict = {}
 
 
@@ -650,39 +649,36 @@ async def arena_send(ws, msg: dict):
 
 
 async def arena_auto_start_scheduler():
-    """Polls every 30s and auto-starts any Arena tournament whose starts_at has passed."""
-    await asyncio.sleep(10)  # let server warm up first
+    """Poll every 30s, auto-start Arena tournaments whose starts_at has passed."""
+    await asyncio.sleep(10)
     while True:
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.get(
                     f"{SUPABASE_URL}/rest/v1/tournaments",
                     params={"status": "eq.upcoming", "format": "eq.arena",
-                            "select": "id,starts_at,format"},
+                            "select": "id,starts_at"},
                     headers={"apikey": SUPABASE_SERVICE_KEY,
                              "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
                 )
                 for t in r.json():
                     starts = datetime.fromisoformat(t["starts_at"].replace("Z", "+00:00"))
-                    now = datetime.now(starts.tzinfo)
-                    if now >= starts:
+                    if datetime.now(starts.tzinfo) >= starts:
                         lock_key = f"start_{t['id']}"
                         if lock_key not in _tournament_locks:
                             asyncio.create_task(arena_auto_start(t["id"]))
         except Exception as e:
-            print(f"[scheduler] error: {e}", flush=True)
+            print(f"[scheduler] {e}", flush=True)
         await asyncio.sleep(30)
 
 
 async def arena_auto_start(tournament_id: str):
-    """Mark tournament active and trigger initial pairing."""
     lock_key = f"start_{tournament_id}"
     if lock_key in _tournament_locks:
         return
     _tournament_locks.add(lock_key)
     try:
         async with httpx.AsyncClient() as client:
-            # Verify still upcoming
             r = await client.get(
                 f"{SUPABASE_URL}/rest/v1/tournaments",
                 params={"id": f"eq.{tournament_id}", "select": "status,format"},
@@ -692,7 +688,6 @@ async def arena_auto_start(tournament_id: str):
             rows = r.json()
             if not rows or rows[0]["status"] != "upcoming":
                 return
-            # Mark active
             await client.patch(
                 f"{SUPABASE_URL}/rest/v1/tournaments",
                 params={"id": f"eq.{tournament_id}"},
@@ -702,27 +697,20 @@ async def arena_auto_start(tournament_id: str):
                 json={"status": "active"}
             )
         print(f"[arena] auto-started {tournament_id}", flush=True)
-        # Pair any players already connected via WS
         await arena_pair(tournament_id)
     except Exception as e:
-        print(f"[arena] auto-start error {tournament_id}: {e}", flush=True)
+        print(f"[arena] auto-start error: {e}", flush=True)
     finally:
         _tournament_locks.discard(lock_key)
 
 
 async def arena_pair(tournament_id: str):
-    """Pair all available players in the tournament. Score-sorted, rematch-avoiding."""
     conns = tournament_connections.get(tournament_id, {})
     pg    = tournament_player_game.setdefault(tournament_id, {})
-
-    # Players who are connected and not in a game
     available = [uid for uid, info in conns.items()
                  if info.get("available") and pg.get(uid) is None]
-
     if len(available) < 2:
         return
-
-    # Fetch existing pairs to avoid rematches
     try:
         async with httpx.AsyncClient() as client:
             r = await client.get(
@@ -739,48 +727,29 @@ async def arena_pair(tournament_id: str):
     except Exception:
         played = set()
 
-    # Sort by score desc, then elo desc
-    available.sort(key=lambda uid: (
-        -conns[uid].get("score", 0),
-        -conns[uid].get("elo", 1500)
-    ))
-
+    available.sort(key=lambda uid: (-conns[uid].get("score", 0), -conns[uid].get("elo", 1500)))
     paired, used = [], set()
     for i, p1 in enumerate(available):
-        if p1 in used:
-            continue
+        if p1 in used: continue
         for p2 in available[i+1:]:
-            if p2 in used:
-                continue
+            if p2 in used: continue
             if (p1, p2) not in played:
-                paired.append((p1, p2))
-                used.add(p1)
-                used.add(p2)
-                break
+                paired.append((p1, p2)); used.add(p1); used.add(p2); break
 
     for white_id, black_id in paired:
         asyncio.create_task(arena_launch_game(tournament_id, white_id, black_id))
 
 
 async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
-    """Create a live game, store in active_games, push game_ready to both players."""
     conns = tournament_connections.get(tournament_id, {})
     pg    = tournament_player_game.setdefault(tournament_id, {})
-
     if white_id not in conns or black_id not in conns:
         return
-
     white_info = conns[white_id]
     black_info = conns[black_id]
-
-    # Mark as in-game immediately
-    pg[white_id] = "pending"
-    pg[black_id] = "pending"
-    white_info["available"] = False
-    black_info["available"] = False
-
+    pg[white_id] = "pending"; pg[black_id] = "pending"
+    white_info["available"] = False; black_info["available"] = False
     game_id = uuid.uuid4().hex[:12]
-
     try:
         async with httpx.AsyncClient() as client:
             ins = await client.post(
@@ -789,57 +758,46 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
                          "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                          "Content-Type": "application/json",
                          "Prefer": "return=representation"},
-                json={
-                    "tournament_id":  tournament_id,
-                    "round":          1,
-                    "white_id":       white_id,
-                    "black_id":       black_id,
-                    "white_username": white_info["username"],
-                    "black_username": black_info["username"],
-                    "game_id":        game_id,
-                }
+                json={"tournament_id": tournament_id, "round": 1,
+                      "white_id": white_id, "black_id": black_id,
+                      "white_username": white_info["username"],
+                      "black_username": black_info["username"],
+                      "game_id": game_id}
             )
             db_rows = ins.json()
             db_game_id = db_rows[0]["id"] if db_rows else None
     except Exception as e:
-        print(f"[arena] launch DB error: {e}", flush=True)
-        pg[white_id] = None
-        pg[black_id] = None
-        white_info["available"] = True
-        black_info["available"] = True
+        print(f"[arena] launch error: {e}", flush=True)
+        pg[white_id] = None; pg[black_id] = None
+        white_info["available"] = True; black_info["available"] = True
         return
 
-    pg[white_id] = game_id
-    pg[black_id] = game_id
-
-    # Register in active_games so /ws/game works normally
+    pg[white_id] = game_id; pg[black_id] = game_id
     game = new_game(game_id, None, None, white_id, black_id)
-    game["tournament_id"]    = tournament_id
+    game["tournament_id"] = tournament_id
     game["tournament_db_id"] = db_game_id
-    game["white_profile"]    = {"username": white_info["username"],
-                                "elo": white_info.get("elo", 1500), "user_id": white_id}
-    game["black_profile"]    = {"username": black_info["username"],
-                                "elo": black_info.get("elo", 1500), "user_id": black_id}
+    game["white_profile"] = {"username": white_info["username"],
+                             "elo": white_info.get("elo", 1500), "user_id": white_id}
+    game["black_profile"] = {"username": black_info["username"],
+                             "elo": black_info.get("elo", 1500), "user_id": black_id}
     active_games[game_id] = game
     asyncio.create_task(clock_loop(game_id))
+    print(f"[arena] {game_id}: {white_info['username']} vs {black_info['username']}", flush=True)
+    await arena_send(white_info["ws"], {"type": "game_ready", "game_id": game_id,
+        "color": "white", "opponent": black_info["username"],
+        "opponent_elo": black_info.get("elo", 1500), "tournament_db_id": db_game_id})
+    await arena_send(black_info["ws"], {"type": "game_ready", "game_id": game_id,
+        "color": "black", "opponent": white_info["username"],
+        "opponent_elo": white_info.get("elo", 1500), "tournament_db_id": db_game_id})
 
-    print(f"[arena] launched {game_id} {white_info['username']} vs {black_info['username']}", flush=True)
 
-    await arena_send(white_info["ws"], {
-        "type": "game_ready", "game_id": game_id, "color": "white",
-        "opponent": black_info["username"], "opponent_elo": black_info.get("elo", 1500),
-        "tournament_db_id": db_game_id,
-    })
-    await arena_send(black_info["ws"], {
-        "type": "game_ready", "game_id": game_id, "color": "black",
-        "opponent": white_info["username"], "opponent_elo": white_info.get("elo", 1500),
-        "tournament_db_id": db_game_id,
-    })
+async def arena_pair_delayed(tournament_id: str, delay: float = 2.5):
+    await asyncio.sleep(delay)
+    await arena_pair(tournament_id)
 
 
 @app.websocket("/ws/tournament/{tournament_id}")
 async def tournament_ws(ws: WebSocket, tournament_id: str):
-    """Arena lobby WebSocket. Players connect here; server pushes game_ready."""
     await ws.accept()
     user_id = None
     try:
@@ -849,27 +807,21 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
         elo      = int(ident.get("elo", 1500))
         score    = float(ident.get("score", 0))
     except Exception:
-        await ws.close()
-        return
-
+        await ws.close(); return
     if not user_id:
-        await ws.close()
-        return
+        await ws.close(); return
 
     tournament_connections.setdefault(tournament_id, {})
     tournament_player_game.setdefault(tournament_id, {})
-
     tournament_connections[tournament_id][user_id] = {
-        "ws": ws, "username": username, "elo": elo, "score": score, "available": True,
-    }
-    # Restore in-game state if reconnecting mid-game
+        "ws": ws, "username": username, "elo": elo, "score": score, "available": True}
     if tournament_player_game[tournament_id].get(user_id):
         tournament_connections[tournament_id][user_id]["available"] = False
 
     await arena_send(ws, {"type": "connected", "user_id": user_id})
     print(f"[arena] {username} connected to {tournament_id}", flush=True)
 
-    # Check if tournament is already active and try to pair
+    # If tournament already active, try pairing immediately
     try:
         async with httpx.AsyncClient() as client:
             r = await client.get(
@@ -887,22 +839,17 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
     try:
         while True:
             data = await ws.receive_json()
-            msg_type = data.get("type")
-
-            if msg_type == "ping":
+            if data.get("type") == "ping":
                 await arena_send(ws, {"type": "pong"})
-
-            elif msg_type == "available":
-                # Player finished a game, back in pool
-                uid_conns = tournament_connections.get(tournament_id, {})
-                pg        = tournament_player_game.get(tournament_id, {})
-                if user_id in uid_conns:
-                    uid_conns[user_id]["available"] = True
-                    uid_conns[user_id]["score"] = float(data.get("score", score))
+            elif data.get("type") == "available":
+                conns = tournament_connections.get(tournament_id, {})
+                pg    = tournament_player_game.get(tournament_id, {})
+                if user_id in conns:
+                    conns[user_id]["available"] = True
+                    conns[user_id]["score"] = float(data.get("score", score))
                 if user_id in pg:
                     pg[user_id] = None
                 asyncio.create_task(arena_pair(tournament_id))
-
     except WebSocketDisconnect:
         pass
     finally:
@@ -910,7 +857,7 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
         if user_id and user_id in conns:
             conns[user_id]["available"] = False
             del conns[user_id]
-        print(f"[arena] {username} disconnected from {tournament_id}", flush=True)
+        print(f"[arena] {username} left {tournament_id}", flush=True)
 
 
 @app.websocket("/ws/lobby")
@@ -1743,7 +1690,7 @@ async def start_tournament(req: TournamentStartRequest, authorization: str = Hea
                 json={"status": "active"}
             )
 
-            # Arena: pairing handled by WebSocket engine
+            # Arena: pairing via WebSocket engine
             if t.get("format") == "arena":
                 asyncio.create_task(arena_pair(req.tournament_id))
                 return {"ok": True, "format": "arena", "players": len(players)}
@@ -1933,10 +1880,20 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
             await add_score(g['white_id'], 0.5)
             await add_score(g['black_id'], 0.5)
 
-    # Arena: re-pair both players after result
-    tid = g.get("tournament_id")
-    if tid:
-        try:
+    # Arena: re-pair after result
+    try:
+        async with httpx.AsyncClient() as client2:
+            tg_r = await client2.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_games",
+                params={"id": f"eq.{req.game_id}", "select": "tournament_id,white_id,black_id"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            tg = tg_r.json()
+        if tg:
+            tid = tg[0]["tournament_id"]
+            wid = tg[0]["white_id"]
+            bid = tg[0]["black_id"]
             async with httpx.AsyncClient() as client2:
                 tr = await client2.get(
                     f"{SUPABASE_URL}/rest/v1/tournaments",
@@ -1948,22 +1905,16 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
             if t_rows and t_rows[0].get("format") == "arena" and t_rows[0].get("status") == "active":
                 pg    = tournament_player_game.get(tid, {})
                 conns = tournament_connections.get(tid, {})
-                for uid in (g["white_id"], g["black_id"]):
-                    if uid in pg:
-                        pg[uid] = None
+                for uid in (wid, bid):
+                    if uid in pg: pg[uid] = None
                     if uid in conns:
                         conns[uid]["available"] = True
                         await arena_send(conns[uid]["ws"], {"type": "game_over", "result": req.result})
                 asyncio.create_task(arena_pair_delayed(tid))
-        except Exception as e:
-            print(f"[arena] re-pair error: {e}", flush=True)
+    except Exception as e:
+        print(f"[arena] re-pair error: {e}", flush=True)
 
     return {"ok": True, "result": req.result}
-
-
-async def arena_pair_delayed(tournament_id: str, delay: float = 2.5):
-    await asyncio.sleep(delay)
-    await arena_pair(tournament_id)
 
 
 @app.post("/api/update-country")

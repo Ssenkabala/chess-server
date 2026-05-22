@@ -809,7 +809,20 @@ async function bootAuth() {
       return;
     }
   }
-  // Guest or logged-in with profile — both can enter lobby
+  // Check for Arena tournament game_id in URL
+  const params = new URLSearchParams(window.location.search);
+  const urlGameId = params.get('game_id');
+  const urlColor  = params.get('color');
+  window._tournamentId    = params.get('tournament_id') || null;
+  window._tournamentDbId  = params.get('tournament_db_id') || null;
+
+  if (urlGameId && urlColor && currentUser) {
+    gameId  = urlGameId;
+    myColor = urlColor;
+    startGame();
+    return;
+  }
+
   connectLobby();
 }
 // ═══════════════════════════════════════════════════════════════
@@ -841,7 +854,7 @@ function toDests() {
 
 function refreshDests() {
   if (!cg) return;
-  cg.set({
+  if (cg) cg.set({
     movable: { color: myColor, dests: toDests() },
     turnColor: game.turn() === 'w' ? 'white' : 'black',
     check: game.in_check(),
@@ -849,7 +862,6 @@ function refreshDests() {
 }
 let game      = new Chess();
 let board     = null;
-let selectedSq = null;
 let myTurn    = false;
 let gameOver  = false;
 
@@ -955,8 +967,7 @@ function startGame() {
   showScreen('game');
   game     = new Chess();
   gameOver = false;
-  selectedSq = null;
-  myTurn   = myColor === 'white';
+    myTurn   = myColor === 'white';
 
   // Player labels
   const opponentColor = myColor === 'white' ? 'black' : 'white';
@@ -1143,8 +1154,7 @@ function onGameMessage(e) {
     document.getElementById('overlay').classList.remove('active');
 
     game = new Chess();
-    selectedSq = null;
-    myTurn = myColor === 'white';
+        myTurn = myColor === 'white';
     document.getElementById('move-list').innerHTML = '';
     resetClockDisplay();
 
@@ -1223,7 +1233,7 @@ function executeMove(source, target, promo) {
   if (!move) { cg.set({ fen: game.fen() }); return; }
   myTurn = false;
   updateTurnIndicator();
-  cg.set({ fen: game.fen(), lastMove: [source, target] });
+  if (cg) cg.set({ fen: game.fen(), lastMove: [source, target] });
   refreshDests();
   sendGame({ type: 'move', move: move.from + move.to + (move.promotion || '') });
   if (game.game_over()) return;
@@ -1249,7 +1259,7 @@ function highlightMoves(square) { /* chessground shows dests */ }
 function clearHighlights() { /* chessground clears automatically */ }
 function highlightLastMove(uci) {
   if (!uci || uci.length < 4 || !cg) return;
-  cg.set({ lastMove: [uci.slice(0,2), uci.slice(2,4)] });
+  if (cg) cg.set({ lastMove: [uci.slice(0,2), uci.slice(2,4)] });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1375,13 +1385,35 @@ function showOverlay(result, reason) {
   }
   reasonEl.textContent = reasonText;
   updateSessionScore(result);
-  document.getElementById('btn-rematch').textContent = 'Rematch';
-  document.getElementById('btn-rematch').disabled = false;
-  document.getElementById('btn-rematch').onclick = offerRematch;
-  document.getElementById('rematch-status').textContent = '';
-  // Remove any stale decline button
-  const old = document.getElementById('btn-decline');
-  if (old) old.remove();
+  const oldDecline = document.getElementById('btn-decline');
+  if (oldDecline) oldDecline.remove();
+
+  if (window._tournamentId) {
+    // Auto-submit tournament result
+    if (window._tournamentDbId) {
+      sb && sb.auth.getSession().then(({ data }) => {
+        if (!data.session) return;
+        fetch('/api/tournament/result', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json',
+                     'Authorization': 'Bearer ' + data.session.access_token },
+          body: JSON.stringify({ game_id: window._tournamentDbId, result,
+                                 user_id: currentUser && currentUser.id })
+        }).catch(e => console.warn('Tournament result submit failed:', e));
+      });
+    }
+    document.getElementById('btn-rematch').textContent = 'Back to Tournament';
+    document.getElementById('btn-rematch').disabled = false;
+    document.getElementById('btn-rematch').onclick = () => {
+      window.location.href = '/tournaments#' + window._tournamentId;
+    };
+    document.getElementById('rematch-status').textContent = 'Next game will be assigned automatically.';
+  } else {
+    document.getElementById('btn-rematch').textContent = 'Rematch';
+    document.getElementById('btn-rematch').disabled = false;
+    document.getElementById('btn-rematch').onclick = offerRematch;
+    document.getElementById('rematch-status').textContent = '';
+  }
 
   // Save multiplayer game — delay 2s so opponent_profile has time to arrive
   if (sb && currentUser && multiMoveHistory.length > 0) {

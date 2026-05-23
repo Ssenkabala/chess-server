@@ -1180,6 +1180,20 @@ function onGameMessage(e) {
   if (msg.type === 'both_connected') {
     showGameStatus('Game started!', true);
     setTimeout(() => updateTurnIndicator(), 500);
+    // If white, show first-move deadline warning
+    if (myColor === 'white' && msg.first_move_timeout) {
+      const secs = msg.first_move_timeout;
+      let remaining = secs;
+      const warn = setInterval(() => {
+        remaining--;
+        if (remaining <= 10 && remaining > 0) {
+          showGameStatus(`Make your first move! ${remaining}s remaining…`, true);
+        }
+        if (remaining <= 0) clearInterval(warn);
+      }, 1000);
+      // Clear warning once a move is made
+      window._firstMoveWarn = warn;
+    }
     return;
   }
 
@@ -1307,6 +1321,8 @@ function showPromotion(source, target, callback) {
 function executeMove(source, target, promo) {
   const move = game.move({ from: source, to: target, promotion: promo });
   if (!move) { cg.set({ fen: game.fen() }); return; }
+  // Clear first-move deadline warning
+  if (window._firstMoveWarn) { clearInterval(window._firstMoveWarn); window._firstMoveWarn = null; }
   myTurn = false;
   updateTurnIndicator();
   if (cg) cg.set({ fen: game.fen(), lastMove: [source, target] });

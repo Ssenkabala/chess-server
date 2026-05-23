@@ -596,23 +596,57 @@ def parse_clock_seconds(time_control: str | None) -> int:
 def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
              white_id: str, black_id: str, time_control: str | None = None) -> dict:
     clock_secs = parse_clock_seconds(time_control)
+    # First-move timeout: give white 60s on blitz/rapid, 30s on bullet
+    base_mins = clock_secs / 60
+    first_move_timeout = 30 if base_mins <= 3 else 60
     return {
-        "id":            game_id,
-        "board":         chess.Board(),
-        "white_ws":      white_ws,
-        "black_ws":      black_ws,
-        "white_game_ws": None,
-        "black_game_ws": None,
-        "white_id":      white_id,
-        "black_id":      black_id,
-        "clock":         {"w": clock_secs, "b": clock_secs},
-        "last_move_ts":  time.time(),
-        "over":          False,
-        "time_control":  time_control,
-        # Profile data filled in when players send 'profile' message
-        "white_profile": None,
-        "black_profile": None,
+        "id":                   game_id,
+        "board":                chess.Board(),
+        "white_ws":             white_ws,
+        "black_ws":             black_ws,
+        "white_game_ws":        None,
+        "black_game_ws":        None,
+        "white_id":             white_id,
+        "black_id":             black_id,
+        "clock":                {"w": clock_secs, "b": clock_secs},
+        "last_move_ts":         None,        # set when both_connected fires
+        "first_move_timeout":   first_move_timeout,
+        "first_move_deadline":  None,        # set when both_connected fires
+        "moves_made":           0,
+        "over":                 False,
+        "time_control":         time_control,
+        "white_profile":        None,
+        "black_profile":        None,
     }
+
+
+async def first_move_timeout_loop(game_id: str):
+    """Give white N seconds to play the first move, else they forfeit."""
+    await asyncio.sleep(1)
+    while True:
+        await asyncio.sleep(1)
+        game = active_games.get(game_id)
+        if not game or game["over"]:
+            return
+        deadline = game.get("first_move_deadline")
+        if deadline is None:
+            continue  # both_connected not fired yet
+        if game.get("moves_made", 0) > 0:
+            return   # first move made — hand off to clock_loop
+        if time.time() >= deadline:
+            game["over"] = True
+            # White forfeits for not moving
+            await broadcast(game, {
+                "type":   "gameover",
+                "result": "black",
+                "reason": "timeout",
+                "detail": "White did not make a move in time.",
+                "clock":  game["clock"],
+            })
+            await update_elos(game, "black")
+            active_games.pop(game_id, None)
+            print(f"[game] {game_id} — white forfeited (no first move)", flush=True)
+            return
 
 
 async def send(ws: WebSocket, msg: dict):
@@ -634,9 +668,19 @@ async def broadcast(game: dict, msg: dict):
 
 
 def deduct_clock(game: dict) -> float:
-    """Deduct elapsed time from the side that just moved, return remaining."""
+    """Deduct elapsed time from the side that just moved, return remaining.
+    On the very first move, just starts the clock without deducting (no time before move 1).
+    """
     now = time.time()
-    elapsed = now - game["last_move_ts"]
+    game["moves_made"] = game.get("moves_made", 0) + 1
+
+    if game["moves_made"] == 1:
+        # First move — start the clock, don't deduct anything
+        game["last_move_ts"] = now
+        return game["clock"]["w"]
+
+    last_ts = game.get("last_move_ts") or now
+    elapsed = now - last_ts
     # The side that just moved is the OPPOSITE of board.turn (move already pushed)
     just_moved = "b" if game["board"].turn == chess.WHITE else "w"
     game["clock"][just_moved] = max(0, game["clock"][just_moved] - elapsed)
@@ -645,25 +689,35 @@ def deduct_clock(game: dict) -> float:
 
 
 async def clock_loop(game_id: str):
-    """Background task ΓÇö checks for flag fall every second."""
+    """Background task — checks for flag fall every second.
+    Does not tick until both players have connected AND the first move has been made.
+    """
     while True:
         await asyncio.sleep(1)
         game = active_games.get(game_id)
         if not game or game["over"]:
             return
 
-        # Wait until both players have connected their game WebSockets before ticking
+        # Wait until both game WebSockets are connected
         if not game.get("white_game_ws") or not game.get("black_game_ws"):
             continue
 
-        now = time.time()
-        elapsed = now - game["last_move_ts"]
-        turn = "w" if game["board"].turn == chess.WHITE else "b"
+        # Wait until first move has been made (first_move_timeout_loop handles pre-game)
+        if game.get("moves_made", 0) == 0:
+            continue
+
+        last_ts = game.get("last_move_ts")
+        if last_ts is None:
+            continue
+
+        now     = time.time()
+        elapsed = now - last_ts
+        turn    = "w" if game["board"].turn == chess.WHITE else "b"
         remaining = game["clock"][turn] - elapsed
 
         if remaining <= 0:
             game["over"] = True
-            loser = "white" if turn == "w" else "black"
+            loser  = "white" if turn == "w" else "black"
             winner = "black" if loser == "white" else "white"
             await broadcast(game, {
                 "type":   "gameover",
@@ -861,7 +915,8 @@ async def arena_pair(tournament_id: str):
     conns = tournament_connections.get(tournament_id, {})
     pg    = tournament_player_game.setdefault(tournament_id, {})
     available = [uid for uid, info in conns.items()
-                 if info.get("available") and pg.get(uid) is None]
+                 if info.get("available") and not info.get("paused")
+                 and pg.get(uid) is None]
     if len(available) < 1:
         return
 
@@ -988,6 +1043,7 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
                              "elo": black_info.get("elo", 1500), "user_id": black_id}
     active_games[game_id] = game
     asyncio.create_task(clock_loop(game_id))
+    asyncio.create_task(first_move_timeout_loop(game_id))
     print(f"[arena] {game_id}: {white_info['username']} vs {black_info['username']}", flush=True)
     await arena_send(white_info["ws"], {
         "type": "game_ready", "game_id": game_id,
@@ -1085,21 +1141,46 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
             data = await ws.receive_json()
             if data.get("type") == "ping":
                 await arena_send(ws, {"type": "pong"})
+
             elif data.get("type") == "available":
                 conns = tournament_connections.get(tournament_id, {})
                 pg    = tournament_player_game.get(tournament_id, {})
                 if user_id in conns:
                     conns[user_id]["available"] = True
-                    conns[user_id]["score"] = float(data.get("score", score))
+                    conns[user_id]["paused"]    = False
+                    conns[user_id]["score"]     = float(data.get("score", score))
                 if user_id in pg:
                     pg[user_id] = None
                 asyncio.create_task(arena_pair(tournament_id))
+
+            elif data.get("type") == "pause":
+                conns = tournament_connections.get(tournament_id, {})
+                if user_id in conns:
+                    conns[user_id]["available"] = False
+                    conns[user_id]["paused"]    = True
+                await arena_send(ws, {"type": "paused",
+                    "message": "You are paused. You won't be paired until you resume."})
+                print(f"[arena] {username} paused in {tournament_id}", flush=True)
+
+            elif data.get("type") == "resume":
+                conns = tournament_connections.get(tournament_id, {})
+                pg    = tournament_player_game.get(tournament_id, {})
+                if user_id in conns:
+                    conns[user_id]["available"] = True
+                    conns[user_id]["paused"]    = False
+                if user_id in pg:
+                    pg[user_id] = None
+                await arena_send(ws, {"type": "resumed",
+                    "message": "You're back! Looking for an opponent…"})
+                print(f"[arena] {username} resumed in {tournament_id}", flush=True)
+                asyncio.create_task(arena_pair_delayed(tournament_id, delay=1.0))
     except WebSocketDisconnect:
         pass
     finally:
         conns = tournament_connections.get(tournament_id, {})
         if user_id and user_id in conns:
             conns[user_id]["available"] = False
+            # Keep paused flag — if they reconnect they're still paused until they resume
             del conns[user_id]
         print(f"[arena] {username} left {tournament_id}", flush=True)
 
@@ -1218,8 +1299,12 @@ async def game_ws(ws: WebSocket, game_id: str):
 
     # Notify both players once both are connected
     if game.get("white_game_ws") and game.get("black_game_ws"):
-        game["last_move_ts"] = time.time()  # reset clock reference so timer starts fresh
-        await broadcast(game, {"type": "both_connected"})
+        # Set first-move deadline now that both players are present
+        game["last_move_ts"]        = time.time()
+        game["first_move_deadline"] = time.time() + game.get("first_move_timeout", 60)
+        asyncio.create_task(first_move_timeout_loop(game["id"]))
+        await broadcast(game, {"type": "both_connected",
+                               "first_move_timeout": game.get("first_move_timeout", 60)})
 
         # Push already-received profile to the late-connecting player
         if color == "w" and game.get("black_profile"):

@@ -299,7 +299,15 @@
     <!-- Timer: survives detail-content re-renders -->
     <div id="arena-timer-bar" style="display:none;margin-bottom:12px;padding:10px 16px;
       background:#111;border:1px solid #222;border-radius:4px;
-      font-size:12px;letter-spacing:0.08em;color:#aaa;text-align:center;"></div>
+      font-size:12px;letter-spacing:0.08em;color:#aaa;text-align:center;
+      display:flex;align-items:center;justify-content:space-between;gap:12px;">
+      <span id="arena-timer-text" style="flex:1;text-align:left;"></span>
+      <button id="btn-pause-arena" onclick="toggleArenaPause()"
+        style="display:none;background:transparent;border:1px solid #333;color:#777;
+        border-radius:3px;padding:5px 14px;font-size:11px;letter-spacing:0.08em;cursor:pointer;">
+        ⏸ Pause
+      </button>
+    </div>
 
     <!-- Arena status (game_ready / waiting): survives detail-content re-renders -->
     <div id="arena-status" style="display:none;background:#0d1f0d;border:1px solid #00ff9d44;
@@ -421,8 +429,16 @@ let _timerInterval = null;
 
 function startTournamentTimer(t) {
   if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
-  const bar = document.getElementById('arena-timer-bar');
-  if (!bar) return;
+  const bar     = document.getElementById('arena-timer-bar');
+  const timerEl = document.getElementById('arena-timer-text');
+  const pauseBtn = document.getElementById('btn-pause-arena');
+  if (!bar || !timerEl) return;
+
+  // Show pause button only for active arena tournaments where user is registered
+  if (pauseBtn) {
+    const showPause = t.status === 'active' && t.format === 'arena' && currentUser;
+    pauseBtn.style.display = showPause ? '' : 'none';
+  }
 
   function fmt(ms) {
     if (ms <= 0) return '0:00';
@@ -440,25 +456,25 @@ function startTournamentTimer(t) {
       const starts = new Date(t.starts_at).getTime();
       const ms = starts - now;
       if (ms <= 0) {
-        bar.textContent = '⏳ Starting now…';
+        timerEl.textContent = '⏳ Starting now…';
         bar.style.display = '';
         clearInterval(_timerInterval); _timerInterval = null;
-        // Reload after a moment so status flips to active
         setTimeout(() => { if (currentDetailId) viewTournament(currentDetailId); }, 3000);
       } else {
         bar.style.display = '';
-        bar.textContent = `⏳ Starts in ${fmt(ms)}`;
+        timerEl.textContent = `⏳ Starts in ${fmt(ms)}`;
       }
     } else if (t.status === 'active' && t.duration_minutes) {
       const ends = new Date(t.starts_at).getTime() + t.duration_minutes * 60000;
       const ms = ends - now;
       if (ms <= 0) {
-        bar.textContent = '🏁 Tournament ended';
+        timerEl.textContent = '🏁 Tournament ended';
         bar.style.display = '';
+        if (pauseBtn) pauseBtn.style.display = 'none';
         clearInterval(_timerInterval); _timerInterval = null;
       } else {
         bar.style.display = '';
-        bar.innerHTML = `<span style="color:var(--green)">🟢 LIVE</span> &nbsp;·&nbsp; Ends in <strong>${fmt(ms)}</strong>`;
+        timerEl.innerHTML = `<span style="color:var(--green)">🟢 LIVE</span> &nbsp;·&nbsp; Ends in <strong>${fmt(ms)}</strong>`;
       }
     } else {
       bar.style.display = 'none';
@@ -949,6 +965,19 @@ async function createTournament() {
 // ── Arena WebSocket ──────────────────────────────────────────────
 // WS connects ONCE per tournament visit — polls never touch it
 let tournamentWs = null, currentTournamentId = null, _arenaCountdown = null;
+let _arenaPaused = false;
+
+function toggleArenaPause() {
+  const btn = document.getElementById('btn-pause-arena');
+  if (!tournamentWs || tournamentWs.readyState !== WebSocket.OPEN) return;
+  btn.disabled = true;
+  btn.textContent = '…';
+  if (_arenaPaused) {
+    tournamentWs.send(JSON.stringify({ type: 'resume' }));
+  } else {
+    tournamentWs.send(JSON.stringify({ type: 'pause' }));
+  }
+}
 
 function connectTournamentWs(tid, tournament) {
   // Already connected to this tournament — don't reconnect
@@ -998,6 +1027,16 @@ function connectTournamentWs(tid, tournament) {
       } else if (msg.type === 'bye') {
         hideArenaCountdown();
         showArenaStatus('⏸ ' + (msg.message || 'You have a bye this round — waiting for next pairing…'));
+      } else if (msg.type === 'paused') {
+        _arenaPaused = true;
+        const btn = document.getElementById('btn-pause-arena');
+        if (btn) { btn.textContent = '▶ Resume'; btn.style.color = '#00ff9d'; btn.style.borderColor = '#00ff9d44'; btn.disabled = false; }
+        showArenaStatus('⏸ ' + (msg.message || 'Paused — you won't be paired until you resume.'));
+      } else if (msg.type === 'resumed') {
+        _arenaPaused = false;
+        const btn = document.getElementById('btn-pause-arena');
+        if (btn) { btn.textContent = '⏸ Pause'; btn.style.color = ''; btn.style.borderColor = ''; btn.disabled = false; }
+        showArenaStatus('🔍 ' + (msg.message || 'Resumed — looking for an opponent…'));
       } else if (msg.type === 'tournament_started') {
         // Another player triggered start — reload our view
         if (currentDetailId) viewTournament(currentDetailId);
@@ -1057,6 +1096,7 @@ function showArenaStatus(text) {
 
 function disconnectTournamentWs() {
   hideArenaCountdown();
+  _arenaPaused = false;
   if (tournamentWs) {
     if (tournamentWs._ping) clearInterval(tournamentWs._ping);
     tournamentWs.close(); tournamentWs = null;

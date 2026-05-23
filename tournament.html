@@ -1054,7 +1054,7 @@ function connectTournamentWs(tid, tournament) {
         _arenaPaused = true;
         const btn = document.getElementById('btn-pause-arena');
         if (btn) { btn.textContent = '▶ Resume'; btn.style.color = '#00ff9d'; btn.style.borderColor = '#00ff9d44'; btn.disabled = false; }
-        showArenaStatus('⏸ ' + (msg.message || 'Paused — you won't be paired until you resume.'));
+        showArenaStatus('⏸ ' + (msg.message || "Paused — you won't be paired until you resume."));
       } else if (msg.type === 'resumed') {
         _arenaPaused = false;
         const btn = document.getElementById('btn-pause-arena');

@@ -663,7 +663,6 @@ async def first_move_timeout_loop(game_id: str):
             return   # first move made — hand off to clock_loop
         if time.time() >= deadline:
             game["over"] = True
-            # White forfeits for not moving
             await broadcast(game, {
                 "type":   "gameover",
                 "result": "black",
@@ -671,7 +670,9 @@ async def first_move_timeout_loop(game_id: str):
                 "detail": "White did not make a move in time.",
                 "clock":  game["clock"],
             })
-            await update_elos(game, "black")
+            if not game.get("_elo_updated"):
+                game["_elo_updated"] = True
+                await update_elos(game, "black")
             active_games.pop(game_id, None)
             print(f"[game] {game_id} — white forfeited (no first move)", flush=True)
             return
@@ -753,7 +754,9 @@ async def clock_loop(game_id: str):
                 "reason": "timeout",
                 "clock":  game["clock"],
             })
-            await update_elos(game, winner)
+            if not game.get("_elo_updated"):
+                game["_elo_updated"] = True
+                await update_elos(game, winner)
             active_games.pop(game_id, None)
             return
 
@@ -1412,12 +1415,35 @@ async def game_ws(ws: WebSocket, game_id: str):
                     })
                 continue
 
-            # ΓöÇΓöÇ Move ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            # ─── Move ────────────────────────────────────────────────────────
             if msg_type == "move":
                 # Only the player whose turn it is can move
                 expected = "w" if game["board"].turn == chess.WHITE else "b"
                 if color != expected:
                     await send(ws, {"type": "error", "detail": "Not your turn."})
+                    continue
+
+                # Reject move if this player's clock is already at 0
+                # (clock_loop may not have fired yet — this closes the race window)
+                now_check = time.time()
+                last_ts   = game.get("last_move_ts") or now_check
+                elapsed   = now_check - last_ts
+                if game["clock"][color] - elapsed <= 0:
+                    # Flag this player immediately
+                    if not game["over"]:
+                        game["over"] = True
+                        loser  = "white" if color == "w" else "black"
+                        winner = "black" if loser == "white" else "white"
+                        await broadcast(game, {
+                            "type":   "gameover",
+                            "result": winner,
+                            "reason": "timeout",
+                            "clock":  game["clock"],
+                        })
+                        if not game.get("_elo_updated"):
+                            game["_elo_updated"] = True
+                            await update_elos(game, winner)
+                        active_games.pop(game_id, None)
                     continue
 
                 uci = data.get("move", "")
@@ -1447,7 +1473,9 @@ async def game_ws(ws: WebSocket, game_id: str):
                         "fen":    fen,
                         "clock":  game["clock"],
                     })
-                    await update_elos(game, result)
+                    if not game.get("_elo_updated"):
+                        game["_elo_updated"] = True
+                        await update_elos(game, result)
                     active_games.pop(game_id, None)
                 else:
                     await broadcast(game, {
@@ -1468,8 +1496,9 @@ async def game_ws(ws: WebSocket, game_id: str):
                     "reason": "resignation",
                     "clock":  game["clock"],
                 })
-                await update_elos(game, winner)
-                # Keep game alive briefly for rematch negotiation
+                if not game.get("_elo_updated"):
+                    game["_elo_updated"] = True
+                    await update_elos(game, winner)
                 asyncio.create_task(cleanup_game(game_id, delay=10))
 
             # ΓöÇΓöÇ Draw offer (future) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -1485,8 +1514,9 @@ async def game_ws(ws: WebSocket, game_id: str):
                     "reason": "agreement",
                     "clock":  game["clock"],
                 })
-                await update_elos(game, "draw")
-                # Keep game alive briefly for rematch negotiation
+                if not game.get("_elo_updated"):
+                    game["_elo_updated"] = True
+                    await update_elos(game, "draw")
                 asyncio.create_task(cleanup_game(game_id, delay=10))
 
             elif msg_type == "draw_claim":
@@ -1505,7 +1535,9 @@ async def game_ws(ws: WebSocket, game_id: str):
                         "reason": reason,
                         "clock":  game["clock"],
                     })
-                    await update_elos(game, "draw")
+                    if not game.get("_elo_updated"):
+                        game["_elo_updated"] = True
+                        await update_elos(game, "draw")
                     asyncio.create_task(cleanup_game(game_id, delay=10))
 
             elif msg_type == "rematch_offer":

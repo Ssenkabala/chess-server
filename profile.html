@@ -278,6 +278,7 @@ async function loadProfile() {
 }
 
 function renderProfile(d) {
+  _profileData = d;
   const initials = (d.username || '?').slice(0, 2).toUpperCase();
   const since = d.created_at ? new Date(d.created_at).toLocaleDateString('en-GB', {month:'short', year:'numeric'}) : '';
   const usagePct = Math.round((d.coach_uses_today / d.coach_limit) * 100);
@@ -390,16 +391,24 @@ function renderProfile(d) {
       </div>
     </div>
 
-    <!-- ELO Graph -->
-    ${d.elo_history.length > 1 ? `
+    <!-- ELO Ratings -->
     <div class="section">
-      <div class="section-header">ELO History</div>
+      <div class="section-header">Ratings</div>
       <div class="section-body">
+        <div style="display:flex;gap:8px;margin-bottom:16px;" id="elo-tabs">
+          <button onclick="switchEloTab('blitz',this)" style="padding:6px 14px;background:#00ff9d;color:#000;border:none;border-radius:3px;font-size:11px;letter-spacing:0.1em;cursor:pointer;font-family:Georgia,serif;">BLITZ</button>
+          <button onclick="switchEloTab('bullet',this)" style="padding:6px 14px;background:#1a1a1a;color:#555;border:1px solid #222;border-radius:3px;font-size:11px;letter-spacing:0.1em;cursor:pointer;font-family:Georgia,serif;">BULLET</button>
+          <button onclick="switchEloTab('rapid',this)" style="padding:6px 14px;background:#1a1a1a;color:#555;border:1px solid #222;border-radius:3px;font-size:11px;letter-spacing:0.1em;cursor:pointer;font-family:Georgia,serif;">RAPID</button>
+        </div>
+        <div id="elo-rating-display" style="font-size:36px;color:var(--green);font-weight:bold;margin-bottom:4px;">${d.elo_blitz || 1500}</div>
+        <div id="elo-rating-label" style="font-size:11px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:16px;">Blitz ELO</div>
+        ${d.elo_history.length > 1 ? `
+        <div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">Rating History (Blitz)</div>
         <div class="chart-wrap">
           <canvas id="elo-chart"></canvas>
-        </div>
+        </div>` : '<div style="font-size:12px;color:var(--muted);">Play more rated games to see your rating history.</div>'}
       </div>
-    </div>` : ''}
+    </div>
 
     <!-- Coach -->
     <div class="section">
@@ -514,7 +523,26 @@ function formatOpponent(opponent) {
   return opponent;
 }
 
-let _currentCountry = '';
+let _profileData = null;
+
+function switchEloTab(cat, btn) {
+  // Update button styles
+  document.querySelectorAll('#elo-tabs button').forEach(b => {
+    b.style.background = '#1a1a1a';
+    b.style.color = '#555';
+    b.style.border = '1px solid #222';
+  });
+  btn.style.background = '#00ff9d';
+  btn.style.color = '#000';
+  btn.style.border = 'none';
+
+  if (!_profileData) return;
+  const d = _profileData;
+  const map = { bullet: d.elo_bullet||1500, blitz: d.elo_blitz||1500, rapid: d.elo_rapid||1500 };
+  const labels = { bullet: 'Bullet', blitz: 'Blitz', rapid: 'Rapid' };
+  document.getElementById('elo-rating-display').textContent = map[cat];
+  document.getElementById('elo-rating-label').textContent = labels[cat] + ' ELO';
+}
 
 function countryChanged() {
   const sel = document.getElementById('country-select');

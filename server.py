@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from typing import Optional
 import sqlite3
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 import uuid
 import time
@@ -690,7 +690,7 @@ async def arena_auto_start_scheduler():
                 )
                 for t in r.json():
                     starts = datetime.fromisoformat(t["starts_at"].replace("Z", "+00:00"))
-                    if datetime.now(starts.tzinfo) >= starts:
+                    if datetime.now(timezone.utc) >= starts:
                         lock_key = f"start_{t['id']}"
                         if lock_key not in _tournament_locks:
                             asyncio.create_task(arena_auto_start(t["id"]))
@@ -703,11 +703,11 @@ async def arena_auto_start_scheduler():
                     headers={"apikey": SUPABASE_SERVICE_KEY,
                              "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
                 )
-                now_utc = datetime.utcnow()
+                now_utc = datetime.now(timezone.utc)
                 for t in r2.json():
                     if not t.get("duration_minutes"):
                         continue
-                    starts = datetime.fromisoformat(t["starts_at"].replace("Z", ""))
+                    starts = datetime.fromisoformat(t["starts_at"].replace("Z", "+00:00"))
                     ends   = starts + timedelta(minutes=t["duration_minutes"])
                     if now_utc >= ends:
                         tid = str(t["id"])

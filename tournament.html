@@ -500,7 +500,6 @@ async function init() {
     currentUser = session.user;
     document.getElementById('nav-signout').style.display = 'block';
     document.getElementById('btn-create').style.display = '';
-    // Load profile via server
     try {
       const pr = await fetch(`/api/profile/${currentUser.id}`,
         { headers: { 'x-user-id': currentUser.id } });
@@ -510,7 +509,16 @@ async function init() {
       }
     } catch(e) { console.warn('Profile load failed', e); }
   }
-  loadTournaments();
+
+  // If returning from a tournament game, jump straight into that tournament
+  const hash = window.location.hash.replace('#', '');
+  if (hash) {
+    window.history.replaceState(null, '', '/tournaments'); // clean URL
+    loadTournaments();
+    viewTournament(hash);
+  } else {
+    loadTournaments();
+  }
 }
 
 function switchTab(tab) {
@@ -518,7 +526,9 @@ function switchTab(tab) {
   document.querySelectorAll('.tab').forEach((t, i) => {
     t.classList.toggle('active', ['upcoming','active','completed'][i] === tab);
   });
+  stopListPoll();
   loadTournaments();
+  if (tab === 'active') startListPoll();
 }
 
 async function loadTournaments() {
@@ -533,33 +543,53 @@ async function loadTournaments() {
       grid.innerHTML = `<div class="empty">No ${currentTab} tournaments.</div>`; return;
     }
 
-    grid.innerHTML = data.map(t => {
-    const starts = new Date(t.starts_at);
-    const timeStr = starts.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) +
-                    ' · ' + starts.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
-    const countryStr = t.country ? `${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country} only` : '🌍 Open';
-    return `
-      <div class="t-card ${t.status}" onclick="viewTournament('${t.id}')">
-        <div class="t-status-dot ${t.status}"></div>
-        <div class="t-info">
-          <div class="t-name">${t.name}</div>
-          <div class="t-meta">
-            <span>⏱ ${t.time_control}</span>
-            <span>📋 ${t.format === 'arena' ? 'Arena' : t.format === 'swiss' ? 'Swiss' : 'Round Robin'}</span>
-            <span>🔄 ${t.rounds} rounds</span>
-            <span>${countryStr}</span>
+    // Sort: upcoming → soonest first; active → most recently started first; completed → most recent first
+    const sorted = [...data].sort((a, b) => {
+      const da = new Date(a.starts_at), db = new Date(b.starts_at);
+      return currentTab === 'upcoming' ? da - db : db - da;
+    });
+
+    grid.innerHTML = sorted.map(t => {
+      const starts = new Date(t.starts_at);
+      const timeStr = starts.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) +
+                      ' · ' + starts.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
+      const countryStr = t.country ? `${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country} only` : '🌍 Open';
+      const formatMeta = t.format === 'arena'
+        ? `${t.duration_minutes || 60} min Arena`
+        : t.format === 'swiss' ? `Swiss · ${t.rounds || '?'} rounds` : 'Round Robin';
+      return `
+        <div class="t-card ${t.status}" onclick="viewTournament('${t.id}')">
+          <div class="t-status-dot ${t.status}"></div>
+          <div class="t-info">
+            <div class="t-name">${t.name}</div>
+            <div class="t-meta">
+              <span>⏱ ${t.time_control}</span>
+              <span>📋 ${formatMeta}</span>
+              <span>${countryStr}</span>
+            </div>
           </div>
-        </div>
-        <div class="t-right">
-          <div class="t-players">${t.max_players}</div>
-          <div class="t-players-lbl">max players</div>
-          <div class="t-starts">${timeStr}</div>
-        </div>
-      </div>`;
+          <div class="t-right">
+            <div class="t-starts">${timeStr}</div>
+          </div>
+        </div>`;
     }).join('');
   } catch(e) {
     grid.innerHTML = '<div class="empty">Error loading tournaments.</div>';
   }
+}
+
+// Auto-refresh the list every 30s when on Live tab (catches auto-ended tournaments)
+let _listPoll = null;
+function startListPoll() {
+  if (_listPoll) return;
+  _listPoll = setInterval(() => {
+    if (!document.getElementById('detail-view').classList.contains('active')) {
+      loadTournaments();
+    }
+  }, 30000);
+}
+function stopListPoll() {
+  if (_listPoll) { clearInterval(_listPoll); _listPoll = null; }
 }
 
 async function viewTournament(id) {
@@ -771,6 +801,7 @@ function startDetailPoll(id) {
 
 function showList() {
   stopDetailPoll();
+  stopListPoll();
   disconnectTournamentWs();
   if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
   currentDetailId = null;
@@ -780,6 +811,9 @@ function showList() {
   document.getElementById('arena-status').style.display = 'none';
   document.getElementById('list-view').classList.remove('hidden');
   document.getElementById('detail-view').classList.remove('active');
+  // Refresh list so completed tournaments move to right tab
+  loadTournaments();
+  if (currentTab === 'active') startListPoll();
 }
 
 async function joinTournament(id) {
@@ -912,13 +946,16 @@ function connectTournamentWs(tid, tournament) {
         showArenaStatus('Game over. Waiting for next pairing…');
       } else if (msg.type === 'tournament_ended') {
         hideArenaCountdown();
-        showArenaStatus('🏁 Tournament has ended. Final standings are shown below.');
+        const reason = msg.reason || 'Tournament has ended.';
+        showArenaStatus('🏁 ' + reason + ' Final standings are shown below.');
         stopDetailPoll();
         if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
         const bar = document.getElementById('arena-timer-bar');
         if (bar) { bar.textContent = '🏁 Tournament ended'; bar.style.display = ''; }
-        // Reload to show completed state
         setTimeout(() => { if (currentDetailId) viewTournament(currentDetailId); }, 2000);
+      } else if (msg.type === 'bye') {
+        hideArenaCountdown();
+        showArenaStatus('⏸ ' + (msg.message || 'You have a bye this round — waiting for next pairing…'));
       } else if (msg.type === 'tournament_started') {
         // Another player triggered start — reload our view
         if (currentDetailId) viewTournament(currentDetailId);

@@ -779,8 +779,10 @@ async def arena_pair(tournament_id: str):
     pg    = tournament_player_game.setdefault(tournament_id, {})
     available = [uid for uid, info in conns.items()
                  if info.get("available") and pg.get(uid) is None]
-    if len(available) < 2:
+    if len(available) < 1:
         return
+
+    # Fetch all games played so far to build a played-count map
     try:
         async with httpx.AsyncClient() as client:
             r = await client.get(
@@ -790,21 +792,55 @@ async def arena_pair(tournament_id: str):
                 headers={"apikey": SUPABASE_SERVICE_KEY,
                          "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             )
-        played = set()
+        # Count how many times each pair has played (for rematch avoidance preference)
+        pair_count: dict = {}
         for g in r.json():
-            played.add((g["white_id"], g["black_id"]))
-            played.add((g["black_id"], g["white_id"]))
+            key = tuple(sorted([g["white_id"], g["black_id"]]))
+            pair_count[key] = pair_count.get(key, 0) + 1
     except Exception:
-        played = set()
+        pair_count = {}
 
+    # Sort available players by score desc, then ELO desc
     available.sort(key=lambda uid: (-conns[uid].get("score", 0), -conns[uid].get("elo", 1500)))
+
+    def times_played(p1, p2):
+        return pair_count.get(tuple(sorted([p1, p2])), 0)
+
+    # Pair greedily: prefer opponents not yet played, then fewest rematches, then score proximity
     paired, used = [], set()
     for i, p1 in enumerate(available):
-        if p1 in used: continue
+        if p1 in used:
+            continue
+        best_p2   = None
+        best_score = None  # (times_played, score_diff) — lower is better
         for p2 in available[i+1:]:
-            if p2 in used: continue
-            if (p1, p2) not in played:
-                paired.append((p1, p2)); used.add(p1); used.add(p2); break
+            if p2 in used:
+                continue
+            tp = times_played(p1, p2)
+            score_diff = abs(conns[p1].get("score", 0) - conns[p2].get("score", 0))
+            candidate = (tp, score_diff)
+            if best_score is None or candidate < best_score:
+                best_p2   = p2
+                best_score = candidate
+        if best_p2:
+            paired.append((p1, best_p2))
+            used.add(p1)
+            used.add(best_p2)
+
+    # Handle odd player out — give a bye
+    bye_player = None
+    if len(available) % 2 == 1:
+        for uid in available:
+            if uid not in used:
+                bye_player = uid
+                break
+        if bye_player:
+            conns[bye_player]["score"] = conns[bye_player].get("score", 0) + 0.5
+            await arena_send(conns[bye_player]["ws"], {
+                "type":    "bye",
+                "message": "No opponent available right now — you receive a bye (½ pt). Waiting for next round…"
+            })
+            print(f"[arena] bye for {bye_player} in {tournament_id}", flush=True)
 
     for white_id, black_id in paired:
         asyncio.create_task(arena_launch_game(tournament_id, white_id, black_id))
@@ -890,6 +926,36 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
 async def arena_pair_delayed(tournament_id: str, delay: float = 2.5):
     await asyncio.sleep(delay)
     await arena_pair(tournament_id)
+
+
+async def _arena_end_exhausted(tournament_id: str):
+    """End an Arena tournament because all players have played each other."""
+    lock_key = f"end_{tournament_id}"
+    if lock_key in _tournament_locks:
+        return
+    _tournament_locks.add(lock_key)
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.patch(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{tournament_id}"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json"},
+                json={"status": "completed"}
+            )
+        print(f"[arena] exhausted — ended {tournament_id}", flush=True)
+        conns = tournament_connections.get(tournament_id, {})
+        msg = {"type": "tournament_ended",
+               "reason": "All players have faced each other. Final standings are shown below."}
+        for uid, info in list(conns.items()):
+            await arena_send(info["ws"], msg)
+        tournament_connections.pop(tournament_id, None)
+        tournament_player_game.pop(tournament_id, None)
+    except Exception as e:
+        print(f"[arena] exhausted-end error: {e}", flush=True)
+    finally:
+        _tournament_locks.discard(lock_key)
 
 
 @app.websocket("/ws/tournament/{tournament_id}")
@@ -2208,11 +2274,12 @@ async def leave_tournament(request: Request, authorization: str = Header(None)):
 @app.get("/api/tournaments")
 async def get_tournaments(status: str = "upcoming"):
     """Get tournaments list — server-side to avoid RLS issues."""
+    # upcoming: soonest start first; active: most recently started first; completed: most recent first
+    order = "starts_at.asc" if status == "upcoming" else "starts_at.desc"
     async with httpx.AsyncClient() as client:
         r = await client.get(
             f"{SUPABASE_URL}/rest/v1/tournaments",
-            params={"status": f"eq.{status}", "select": "*",
-                    "order": "starts_at.asc" if status != "completed" else "starts_at.desc"},
+            params={"status": f"eq.{status}", "select": "*", "order": order},
             headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
     return r.json()

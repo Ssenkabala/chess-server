@@ -1422,8 +1422,23 @@ function showOverlay(result, reason) {
           if (data.error) {
             document.getElementById('rematch-status').textContent = 'Result submit failed.';
           } else {
-            document.getElementById('rematch-status').textContent =
-              'Result recorded. Next game will be assigned automatically.';
+            // Auto-navigate back to tournament after 5s
+            let secs = 5;
+            const statusEl = document.getElementById('rematch-status');
+            const countdown = setInterval(() => {
+              if (statusEl) statusEl.textContent = `Returning to tournament in ${secs}s…`;
+              secs--;
+              if (secs < 0) {
+                clearInterval(countdown);
+                window.location.href = '/tournaments#' + window._tournamentId;
+              }
+            }, 1000);
+            // "Back to Tournament" button skips countdown
+            const btn = document.getElementById('btn-rematch');
+            if (btn) btn.onclick = () => {
+              clearInterval(countdown);
+              window.location.href = '/tournaments#' + window._tournamentId;
+            };
           }
         })
         .catch(() => {

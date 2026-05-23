@@ -82,7 +82,8 @@ async def supabase_get_profile(user_id: str) -> dict | None:
         r = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles",
             params={"user_id": f"eq.{user_id}",
-                    "select": "username,elo,banned,ban_reason,created_at,games_played"},
+                    "select": "username,elo,elo_bullet,elo_blitz,elo_rapid,"
+                              "banned,ban_reason,created_at,games_played"},
             headers={
                 "apikey": SUPABASE_SERVICE_KEY,
                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
@@ -143,12 +144,12 @@ async def check_prize_eligibility(user_id: str, client: httpx.AsyncClient):
             f"You need at least 10 rated games to enter prize tournaments "
             f"(you have {games_played}). Play some ranked games first!")
 
-async def supabase_update_elo(user_id: str, new_elo: int):
-    """Update ELO and increment games_played for a user using service role key."""
+async def supabase_update_elo(user_id: str, new_elo: int, time_control: str | None = None):
+    """Update the correct ELO column and increment games_played."""
     if not SUPABASE_SERVICE_KEY:
         return
+    col = elo_col_for_tc(time_control)
     async with httpx.AsyncClient() as client:
-        # Fetch current games_played first
         r = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles",
             params={"user_id": f"eq.{user_id}", "select": "games_played"},
@@ -166,7 +167,7 @@ async def supabase_update_elo(user_id: str, new_elo: int):
                 "Content-Type": "application/json",
                 "Prefer": "return=minimal",
             },
-            json={"elo": new_elo, "games_played": current_gp + 1}
+            json={col: new_elo, "games_played": current_gp + 1}
         )
 
 # ΓöÇΓöÇΓöÇ Database setup ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -576,6 +577,33 @@ def k_factor(time_control: str | None, elo: int) -> int:
     return k
 
 
+def elo_col_for_tc(time_control: str | None) -> str:
+    """
+    Map a time control string to the correct ELO column in profiles.
+      Bullet  (equiv < 3 min)   → elo_bullet
+      Blitz   (3–9:59)          → elo_blitz
+      Rapid   (10–15)           → elo_rapid
+      Classical / unknown       → elo   (the original catch-all column)
+    """
+    if not time_control:
+        return "elo_blitz"   # default: unspecified lobby games treated as blitz
+    try:
+        parts = time_control.split('+')
+        base  = float(parts[0])
+        inc   = float(parts[1]) if len(parts) > 1 else 0.0
+        equiv = base + (40 * inc / 60)
+    except (ValueError, IndexError):
+        return "elo_blitz"
+
+    if equiv < 3:
+        return "elo_bullet"
+    if equiv < 10:
+        return "elo_blitz"
+    if equiv <= 15:
+        return "elo_rapid"
+    return "elo"   # classical — uses the legacy column
+
+
 async def cleanup_game(game_id: str, delay: int = 10):
     await asyncio.sleep(delay)
     active_games.pop(game_id, None)
@@ -753,48 +781,55 @@ def validate_and_push(game: dict, uci_move: str) -> chess.Move | None:
 
 async def update_elos(game: dict, result: str):
     """
-    Calculate and persist ELO changes for both players.
-    Only runs if both players have profiles with user_ids.
+    Calculate and persist ELO changes for both players using the correct
+    per-time-control column (elo_bullet, elo_blitz, elo_rapid, or elo).
     Sends elo_update message to each player.
     """
     wp = game.get("white_profile")
     bp = game.get("black_profile")
-
-    # Both must be logged-in users with ELO
     if not wp or not bp:
         return
     if not wp.get("user_id") or not bp.get("user_id"):
         return
-    if wp.get("elo") is None or bp.get("elo") is None:
-        return
 
-    w_elo_old = wp["elo"]
-    b_elo_old = bp["elo"]
-    tc = game.get("time_control")  # set from profile message or tournament
+    tc  = game.get("time_control")
+    col = elo_col_for_tc(tc)
+
+    # Fetch current ELO from the correct column for both players
+    async with httpx.AsyncClient() as client:
+        wr = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{wp['user_id']}", "select": col},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        br = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{bp['user_id']}", "select": col},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+    w_rows = wr.json(); b_rows = br.json()
+    w_elo_old = (w_rows[0].get(col) or 1500) if w_rows else 1500
+    b_elo_old = (b_rows[0].get(col) or 1500) if b_rows else 1500
 
     w_elo_new = calc_elo(w_elo_old, b_elo_old, "white", result, tc)
     b_elo_new = calc_elo(b_elo_old, w_elo_old, "black", result, tc)
 
-    # Persist to Supabase
-    await supabase_update_elo(wp["user_id"], w_elo_new)
-    await supabase_update_elo(bp["user_id"], b_elo_new)
+    await supabase_update_elo(wp["user_id"], w_elo_new, tc)
+    await supabase_update_elo(bp["user_id"], b_elo_new, tc)
 
-    # Notify players — prefer game WS (reliable), fall back to lobby WS
+    # Notify players — prefer game WS
     w_ws = game.get("white_game_ws") or game.get("white_ws")
     b_ws = game.get("black_game_ws") or game.get("black_ws")
+    cat  = col.replace("elo_", "").capitalize() if col != "elo" else "Classical"
 
     if w_ws:
-        await send(w_ws, {
-            "type":    "elo_update",
-            "old_elo": w_elo_old,
-            "new_elo": w_elo_new,
-        })
+        await send(w_ws, {"type": "elo_update", "old_elo": w_elo_old,
+                          "new_elo": w_elo_new, "category": cat, "column": col})
     if b_ws:
-        await send(b_ws, {
-            "type":    "elo_update",
-            "old_elo": b_elo_old,
-            "new_elo": b_elo_new,
-        })
+        await send(b_ws, {"type": "elo_update", "old_elo": b_elo_old,
+                          "new_elo": b_elo_new, "category": cat, "column": col})
 
 
 # ΓöÇΓöÇ WebSocket: Lobby (matchmaking) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -1045,17 +1080,23 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
     asyncio.create_task(clock_loop(game_id))
     asyncio.create_task(first_move_timeout_loop(game_id))
     print(f"[arena] {game_id}: {white_info['username']} vs {black_info['username']}", flush=True)
+
+    # Use the TC-specific ELO for display in game_ready
+    elo_col = elo_col_for_tc(time_control)
+    w_display_elo = white_info.get(elo_col) or white_info.get("elo", 1500)
+    b_display_elo = black_info.get(elo_col) or black_info.get("elo", 1500)
+
     await arena_send(white_info["ws"], {
         "type": "game_ready", "game_id": game_id,
         "color": "white", "opponent": black_info["username"],
-        "opponent_elo": black_info.get("elo", 1500),
+        "opponent_elo": b_display_elo,
         "tournament_db_id": db_game_id,
         "time_control": time_control,
     })
     await arena_send(black_info["ws"], {
         "type": "game_ready", "game_id": game_id,
         "color": "black", "opponent": white_info["username"],
-        "opponent_elo": white_info.get("elo", 1500),
+        "opponent_elo": w_display_elo,
         "tournament_db_id": db_game_id,
         "time_control": time_control,
     })
@@ -1114,7 +1155,16 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
     tournament_connections.setdefault(tournament_id, {})
     tournament_player_game.setdefault(tournament_id, {})
     tournament_connections[tournament_id][user_id] = {
-        "ws": ws, "username": username, "elo": elo, "score": score, "available": True}
+        "ws":         ws,
+        "username":   username,
+        "elo":        elo,
+        "elo_bullet": int(ident.get("elo_bullet", elo)),
+        "elo_blitz":  int(ident.get("elo_blitz",  elo)),
+        "elo_rapid":  int(ident.get("elo_rapid",  elo)),
+        "score":      score,
+        "available":  True,
+        "paused":     False,
+    }
     if tournament_player_game[tournament_id].get(user_id):
         tournament_connections[tournament_id][user_id]["available"] = False
 
@@ -1780,20 +1830,24 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         uses_today = 0
 
     return {
-        "username": profile.get("username"),
-        "elo": profile.get("elo", 1500),
+        "username":   profile.get("username"),
+        "elo":        profile.get("elo", 1500),
+        "elo_bullet": profile.get("elo_bullet", 1500),
+        "elo_blitz":  profile.get("elo_blitz",  1500),
+        "elo_rapid":  profile.get("elo_rapid",  1500),
         "created_at": profile.get("created_at"),
-        "country": profile.get("country"),
-        "wins": wins,
-        "losses": losses,
-        "draws": draws,
-        "total": total,
-        "win_rate": round(wins / total * 100) if total else 0,
-        "recent_games": games[:10],
-        "elo_history": elo_history[-20:],
-        "coach_uses_today": uses_today,
-        "coach_uses_remaining": max(0, FREE_COACH_LIMIT - uses_today),
-        "coach_limit": FREE_COACH_LIMIT,
+        "country":    profile.get("country"),
+        "games_played": profile.get("games_played", 0),
+        "wins":       wins,
+        "losses":     losses,
+        "draws":      draws,
+        "total":      total,
+        "win_rate":   round(wins / total * 100) if total else 0,
+        "recent_games":  games[:10],
+        "elo_history":   elo_history[-20:],
+        "coach_uses_today":      uses_today,
+        "coach_uses_remaining":  max(0, FREE_COACH_LIMIT - uses_today),
+        "coach_limit":           FREE_COACH_LIMIT,
     }
 
 
@@ -2189,13 +2243,15 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
 
         tid = g['tournament_id']
 
-        # Get tournament format/status for re-pairing
+        # Fetch tournament time_control to determine ELO column
         tc_r = await client.get(
             f"{SUPABASE_URL}/rest/v1/tournaments",
             params={"id": f"eq.{tid}", "select": "format,status,time_control"},
             headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
         tc_rows = tc_r.json()
+        time_control = tc_rows[0].get("time_control") if tc_rows else None
+        elo_col = elo_col_for_tc(time_control)
 
         # Mark game result
         await client.patch(
@@ -2206,21 +2262,21 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
             json={"result": req.result, "played_at": datetime.utcnow().isoformat()}
         )
 
-        # Fetch updated ELOs from profiles (already written by update_elos over WS)
+        # Fetch updated ELOs from the correct column (already written by update_elos over WS)
         elo_r = await asyncio.gather(
             client.get(
                 f"{SUPABASE_URL}/rest/v1/profiles",
-                params={"user_id": f"eq.{g['white_id']}", "select": "elo"},
+                params={"user_id": f"eq.{g['white_id']}", "select": elo_col},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             ),
             client.get(
                 f"{SUPABASE_URL}/rest/v1/profiles",
-                params={"user_id": f"eq.{g['black_id']}", "select": "elo"},
+                params={"user_id": f"eq.{g['black_id']}", "select": elo_col},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             ),
         )
-        w_elo = elo_r[0].json()[0]["elo"] if elo_r[0].json() else 1500
-        b_elo = elo_r[1].json()[0]["elo"] if elo_r[1].json() else 1500
+        w_elo = (elo_r[0].json()[0].get(elo_col) or 1500) if elo_r[0].json() else 1500
+        b_elo = (elo_r[1].json()[0].get(elo_col) or 1500) if elo_r[1].json() else 1500
 
         # Update tournament standings: score + ELO snapshot
         async def add_score(uid, pts, elo_snapshot):

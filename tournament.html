@@ -529,6 +529,21 @@ function tcCategory(tc) {
   } catch { return ''; }
 }
 
+// Map time control → profile ELO column (mirrors server elo_col_for_tc)
+function tcEloCol(tc) {
+  if (!tc) return 'elo_blitz';
+  try {
+    const parts = tc.split('+');
+    const base  = parseFloat(parts[0]);
+    const inc   = parts[1] ? parseFloat(parts[1]) : 0;
+    const equiv = base + (40 * inc / 60);
+    if (equiv < 3)   return 'elo_bullet';
+    if (equiv < 10)  return 'elo_blitz';
+    if (equiv <= 15) return 'elo_rapid';
+    return 'elo';
+  } catch { return 'elo_blitz'; }
+}
+
 async function init() {
   const { data: { session } } = await sb.auth.getSession();
   if (session) {
@@ -743,6 +758,10 @@ async function viewTournament(id) {
     }
   }
 
+  // Determine which ELO column this tournament uses
+  const eloCol = t.time_control ? tcEloCol(t.time_control) : 'elo';
+  const eloLabel = eloCol === 'elo_bullet' ? 'Bullet' : eloCol === 'elo_blitz' ? 'Blitz' : eloCol === 'elo_rapid' ? 'Rapid' : 'ELO';
+
   // Render main content
   content.innerHTML = `
     <div class="detail-header">
@@ -773,17 +792,18 @@ async function viewTournament(id) {
         ${(players||[]).length === 0
           ? '<div class="empty" style="padding:20px;">No players yet. Be the first to join!</div>'
           : (() => {
+              const eloOf = p => p[eloCol] || p.elo || 1500;
               const sorted = [...(players||[])].sort((a, b) =>
                 t.status === 'upcoming'
-                  ? (b.elo || 1500) - (a.elo || 1500)
-                  : ((b.score||0) - (a.score||0)) || ((b.elo||1500) - (a.elo||1500))
+                  ? eloOf(b) - eloOf(a)
+                  : ((b.score||0) - (a.score||0)) || (eloOf(b) - eloOf(a))
               );
               return sorted.map((p, i) => `
                 <div class="player-row">
                   <div class="player-rank">${i+1}</div>
                   <div class="player-country">${FLAG(p.country)}</div>
                   <div class="player-name">${p.username}</div>
-                  <div class="player-elo">${p.elo || '?'} ELO</div>
+                  <div class="player-elo">${eloOf(p)} ${eloLabel}</div>
                   <div class="player-score">${p.score || 0}</div>
                 </div>`).join('');
             })()}
@@ -994,10 +1014,13 @@ function connectTournamentWs(tid, tournament) {
 
   tournamentWs.onopen = () => {
     tournamentWs.send(JSON.stringify({
-      user_id:  currentUser.id,
-      username: currentProfile ? currentProfile.username : (currentUser.email || 'player'),
-      elo:      currentProfile ? (currentProfile.elo || 1500) : 1500,
-      score:    0,
+      user_id:    currentUser.id,
+      username:   currentProfile ? currentProfile.username : (currentUser.email || 'player'),
+      elo:        currentProfile ? (currentProfile.elo_blitz  || currentProfile.elo || 1500) : 1500,
+      elo_bullet: currentProfile ? (currentProfile.elo_bullet || currentProfile.elo || 1500) : 1500,
+      elo_blitz:  currentProfile ? (currentProfile.elo_blitz  || currentProfile.elo || 1500) : 1500,
+      elo_rapid:  currentProfile ? (currentProfile.elo_rapid  || currentProfile.elo || 1500) : 1500,
+      score: 0,
     }));
     tournamentWs._ping = setInterval(() => {
       if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN)

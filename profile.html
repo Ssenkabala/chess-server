@@ -289,7 +289,22 @@ function renderProfile(d) {
       <div class="avatar">${initials}</div>
       <div class="profile-info">
         <div class="profile-username">${d.username || 'Unknown'}</div>
-        <div class="profile-elo">${d.elo}<span>ELO</span></div>
+        <div style="display:flex;gap:20px;margin:8px 0;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:11px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Bullet</div>
+            <div class="profile-elo" style="font-size:22px;">${d.elo_bullet || 1500}</div>
+          </div>
+          <div style="border-left:1px solid var(--border);margin:0 4px;"></div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Blitz</div>
+            <div class="profile-elo" style="font-size:22px;">${d.elo_blitz || 1500}</div>
+          </div>
+          <div style="border-left:1px solid var(--border);margin:0 4px;"></div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Rapid</div>
+            <div class="profile-elo" style="font-size:22px;">${d.elo_rapid || 1500}</div>
+          </div>
+        </div>
         ${since ? `<div class="profile-since">Member since ${since}</div>` : ''}
         <div class="country-row">
           <select class="country-select" id="country-select" onchange="countryChanged()">

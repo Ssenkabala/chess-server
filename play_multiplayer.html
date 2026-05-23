@@ -1137,10 +1137,10 @@ function onGameMessage(e) {
     const change = msg.new_elo - msg.old_elo;
     const sign   = change >= 0 ? '+' : '';
     const color  = change >= 0 ? '#00ff9d' : '#ff4d4d';
+    const cat    = msg.category || 'Blitz';
     const el     = document.getElementById('result-reason');
-    if (el) el.innerHTML += ' <span style="color:' + color + ';font-size:12px;">' +
-      '(' + sign + change + ' ELO · now ' + msg.new_elo + ')</span>';
-    myEloChange = msg.new_elo - msg.old_elo;
+    if (el) el.innerHTML += ` <span style="color:${color};font-size:12px;">(${sign}${change} ${cat} ELO · now ${msg.new_elo})</span>`;
+    myEloChange = change;
     if (myProfile) {
       myProfile.eloBefore = msg.old_elo;
       myProfile.elo = msg.new_elo;

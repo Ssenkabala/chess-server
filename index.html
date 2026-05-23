@@ -704,6 +704,7 @@ global.Chessground = Nr;
     .gameover-box {
       background: #111; border: 1px solid #2a2a2a; border-radius: 6px;
       padding: 36px 40px; text-align: center; max-width: 320px; width: 90%;
+      position: relative;
     }
     .gameover-emoji { font-size: 48px; margin-bottom: 12px; }
     .gameover-title {
@@ -2163,6 +2164,7 @@ function closeMenuThenAuth() {
 <!-- Game-over overlay -->
 <div class="gameover-overlay" id="gameover-overlay" onclick="closeGameOver()">
   <div class="gameover-box" onclick="event.stopPropagation()">
+    <button onclick="closeGameOver()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:#555;font-size:18px;cursor:pointer;line-height:1;" title="Close">✕</button>
     <div class="gameover-emoji" id="gameover-emoji">♟</div>
     <div class="gameover-title" id="gameover-title">Game Over</div>
     <div class="gameover-sub" id="gameover-sub"></div>

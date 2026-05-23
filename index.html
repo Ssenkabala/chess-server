@@ -1463,10 +1463,17 @@ function closeGameOver() {
 function resignGame() {
   if (!gameStarted || game.game_over()) return;
   var resultKey = playerColor === 'w' ? 'black' : 'white';
-  setStatus('You resigned. Engine wins.');
   gameStarted = false;
   document.getElementById('btn-resign').style.display = 'none';
   document.getElementById('btn-replay').style.display = '';
+
+  // Show overlay (same as checkmate)
+  document.getElementById('gameover-emoji').textContent = '🏳';
+  document.getElementById('gameover-title').textContent = 'You resigned.';
+  document.getElementById('gameover-sub').textContent   = 'Engine wins.';
+  document.getElementById('gameover-overlay').classList.add('active');
+  setStatus('You resigned. Engine wins.');
+
   var pgn = buildPGN(game, resultKey);
   var colorName = playerColor === 'w' ? 'white' : 'black';
   saveGame(pgn, resultKey, colorName);

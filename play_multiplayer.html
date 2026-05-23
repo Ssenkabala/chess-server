@@ -660,6 +660,17 @@ global.Chessground = Nr;
     .highlight-capture {
       background: radial-gradient(circle, transparent 55%, rgba(0,255,157,0.55) 57%) !important;
     }
+
+    /* Time control picker */
+    .tc-btn {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 3px;
+      color: var(--muted); font-size: 13px; font-family: Georgia, serif;
+      padding: 10px 14px; cursor: pointer; line-height: 1.4; min-width: 60px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .tc-btn span { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; display: block; }
+    .tc-btn:hover { border-color: #444; color: var(--text); }
+    .tc-btn.active { border-color: var(--green); color: var(--green); background: #0a1f14; }
   </style>
 </head>
 <body>
@@ -670,24 +681,43 @@ global.Chessground = Nr;
       <a href="/profile" style="padding:5px 14px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">Profile</a>
       <a href="/tournaments" style="padding:5px 14px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">Tournaments</a>
       <a href="/history" style="padding:5px 14px;background:transparent;color:#00ff9d;border:1px solid #00ff9d33;font-size:11px;font-family:Georgia,serif;letter-spacing:0.1em;text-decoration:none;border-radius:2px;">History</a>
-      <span class="header-right">5+0 · Blitz</span>
+      <span class="header-right" id="tc-label">5+0 · Blitz</span>
     </div>
   </div>
 
   <!-- ══ LOBBY SCREEN ══ -->
   <div id="screen-lobby" class="screen active">
-    <div class="lobby-box">
-      <div class="lobby-title">Finding opponent</div>
-      <div class="dots">
-        <div class="dot"></div>
-        <div class="dot"></div>
-        <div class="dot"></div>
+    <!-- Time control picker — shown before searching -->
+    <div id="tc-picker" style="text-align:center;margin-bottom:20px;">
+      <div style="font-size:11px;letter-spacing:0.15em;text-transform:uppercase;color:#555;margin-bottom:12px;">Time Control</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;" id="tc-buttons">
+        <button class="tc-btn active" data-tc="1+0"  onclick="selectTc(this)">1+0<br><span>Bullet</span></button>
+        <button class="tc-btn"        data-tc="2+1"  onclick="selectTc(this)">2+1<br><span>Bullet</span></button>
+        <button class="tc-btn"        data-tc="3+0"  onclick="selectTc(this)">3+0<br><span>Blitz</span></button>
+        <button class="tc-btn"        data-tc="3+2"  onclick="selectTc(this)">3+2<br><span>Blitz</span></button>
+        <button class="tc-btn"        data-tc="5+0"  onclick="selectTc(this)">5+0<br><span>Blitz</span></button>
+        <button class="tc-btn"        data-tc="5+3"  onclick="selectTc(this)">5+3<br><span>Blitz</span></button>
+        <button class="tc-btn"        data-tc="10+0" onclick="selectTc(this)">10+0<br><span>Rapid</span></button>
+        <button class="tc-btn"        data-tc="10+5" onclick="selectTc(this)">10+5<br><span>Rapid</span></button>
+        <button class="tc-btn"        data-tc="15+10" onclick="selectTc(this)">15+10<br><span>Rapid</span></button>
       </div>
-      <div class="lobby-status" id="lobby-status">Connecting...</div>
-      <div class="guest-id" id="guest-label"></div>
+      <button onclick="startSearch()" style="margin-top:16px;padding:12px 32px;background:#00ff9d;color:#000;border:none;border-radius:3px;font-size:13px;font-weight:700;letter-spacing:0.08em;cursor:pointer;">Find Game</button>
     </div>
-    <div class="controls">
-      <button onclick="cancelLobby()">Cancel</button>
+    <!-- Searching state — shown after clicking Find Game -->
+    <div id="tc-searching" style="display:none;">
+      <div class="lobby-box">
+        <div class="lobby-title">Finding opponent</div>
+        <div class="dots">
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+        </div>
+        <div class="lobby-status" id="lobby-status">Connecting...</div>
+        <div class="guest-id" id="guest-label"></div>
+      </div>
+      <div class="controls">
+        <button onclick="cancelLobby()">Cancel</button>
+      </div>
     </div>
   </div>
 
@@ -767,6 +797,40 @@ let currentUser = null;
 let myProfile   = null;  // { username, elo }
 let multiMoveHistory = [];
 
+// ═══════════════════════════════════════════════════════════════
+//  TIME CONTROL PICKER
+// ═══════════════════════════════════════════════════════════════
+function tcCategory(tc) {
+  if (!tc) return 'Blitz';
+  try {
+    const parts = tc.split('+');
+    const base = parseFloat(parts[0]);
+    const inc  = parts[1] ? parseFloat(parts[1]) : 0;
+    const equiv = base + (40 * inc / 60);
+    if (equiv < 3)   return 'Bullet';
+    if (equiv < 10)  return 'Blitz';
+    if (equiv <= 15) return 'Rapid';
+    return 'Classical';
+  } catch { return ''; }
+}
+
+function selectTc(btn) {
+  document.querySelectorAll('.tc-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const tc = btn.getAttribute('data-tc');
+  window._timeControl = tc;
+  const label = document.getElementById('tc-label');
+  if (label) label.textContent = tc + ' · ' + tcCategory(tc);
+}
+
+function startSearch() {
+  const active = document.querySelector('.tc-btn.active');
+  if (active) window._timeControl = active.getAttribute('data-tc');
+  document.getElementById('tc-picker').style.display = 'none';
+  document.getElementById('tc-searching').style.display = '';
+  connectLobby();
+}
+
 function offerRematch() {
   sendGame({ type: 'rematch_offer' });
   document.getElementById('rematch-status').textContent = 'Rematch offered — waiting...';
@@ -788,12 +852,11 @@ function updateSessionScore(result) {
 //  AUTH + PROFILE
 // ═══════════════════════════════════════════════════════════════
 async function bootAuth() {
-  if (!sb) { connectLobby(); return; }
+  if (!sb) { startSearch(); return; }
 
   const { data } = await sb.auth.getSession();
   if (data.session) {
     currentUser = data.session.user;
-    // Load profile
     const { data: profile } = await sb
       .from('profiles')
       .select('username, elo')
@@ -808,22 +871,31 @@ async function bootAuth() {
       return;
     }
   }
+
   // Check for Arena tournament game_id in URL
   const params = new URLSearchParams(window.location.search);
   const urlGameId = params.get('game_id');
   const urlColor  = params.get('color');
-  window._tournamentId      = params.get('tournament_id') || null;
-  window._tournamentDbId    = params.get('tournament_db_id') || null;
-  window._timeControl       = params.get('time_control') || null;  // e.g. "3+0", "5+0", "10+0"
+  window._tournamentId   = params.get('tournament_id') || null;
+  window._tournamentDbId = params.get('tournament_db_id') || null;
+  window._timeControl    = params.get('time_control') || '5+0';
+
+  // Update header label
+  const label = document.getElementById('tc-label');
+  if (label) label.textContent = window._timeControl + ' · ' + tcCategory(window._timeControl);
 
   if (urlGameId && urlColor && currentUser) {
+    // Tournament game — skip picker, go straight to board
     gameId  = urlGameId;
     myColor = urlColor;
+    document.getElementById('tc-picker').style.display = 'none';
+    document.getElementById('tc-searching').style.display = '';
     startGame();
     return;
   }
 
-  connectLobby();
+  // Regular lobby — show the picker (don't auto-connect)
+  // connectLobby() is called when player clicks "Find Game"
 }
 // ═══════════════════════════════════════════════════════════════
 //  CONFIG
@@ -886,8 +958,9 @@ function connectLobby() {
   lobbyWs = new WebSocket(WS_BASE + '/ws/lobby');
 
   lobbyWs.onopen = () => {
-    setLobbyStatus('Searching for opponent...');
-    // Keepalive — Railway kills idle connections after ~30s
+    setLobbyStatus('Searching for ' + (window._timeControl || '5+0') + ' game...');
+    // Send preferred time control so server can match by TC in future
+    lobbyWs.send(JSON.stringify({ type: 'time_control', tc: window._timeControl || '5+0' }));
     lobbyWs._ping = setInterval(() => {
       if (lobbyWs && lobbyWs.readyState === WebSocket.OPEN) {
         lobbyWs.send(JSON.stringify({ type: 'ping' }));
@@ -901,12 +974,14 @@ function connectLobby() {
     if (msg.type === 'waiting') {
       myId = msg.guest_id;
       document.getElementById('guest-label').textContent = myId;
-      setLobbyStatus('Searching for opponent...');
+      setLobbyStatus('Searching for ' + (window._timeControl || '5+0') + ' game...');
     }
 
     if (msg.type === 'matched') {
       gameId   = msg.game_id;
       myColor  = msg.color;
+      // Server may confirm the time control used
+      if (msg.time_control) window._timeControl = msg.time_control;
       setLobbyStatus('Opponent found! Starting game...');
       setTimeout(() => startGame(), 400);
     }
@@ -921,13 +996,16 @@ function connectLobby() {
 }
 
 function setLobbyStatus(msg) {
-  document.getElementById('lobby-status').textContent = msg;
+  const el = document.getElementById('lobby-status');
+  if (el) el.textContent = msg;
 }
 
 function cancelLobby() {
   if (lobbyWs) lobbyWs.close();
   gameId = null;
-  location.href = '/';
+  // Go back to picker, not home
+  document.getElementById('tc-picker').style.display = '';
+  document.getElementById('tc-searching').style.display = 'none';
 }
 // Prevent page scroll when dragging pieces on mobile
 document.addEventListener('DOMContentLoaded', function() {
@@ -949,14 +1027,8 @@ document.addEventListener('DOMContentLoaded', function() {
   boardEl.addEventListener('touchend', function(e) {
     var dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
     var dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
-    if (dx > 10 || dy > 10) return; // swipe, not tap
-    var touch = e.changedTouches[0];
-    var el = document.elementFromPoint(touch.clientX, touch.clientY);
-    while (el && el !== boardEl) {
-      var sq = el.getAttribute('data-square');
-      if (sq) { e.preventDefault(); onSquareClick(sq); return; }
-      el = el.parentElement;
-    }
+    if (dx > 10 || dy > 10) return; // swipe, not tap — chessground handles drag natively
+    // Tap-to-move is handled natively by chessground — no manual square click needed
   }, { passive: false });
 });
 
@@ -1076,16 +1148,19 @@ function onGameMessage(e) {
     return;
   }
 
-  if (msg.type === 'draw_offer_received') {
-    // Show draw offer to opponent
-    document.getElementById('rematch-status').textContent = 'Opponent offers a draw!';
+  if (msg.type === 'draw_offer') {
+    // Show draw offer inline — don't use confirm() which blocks the thread
+    showGameStatus('Opponent offers a draw!', true);
     const area = document.getElementById('rematch-area');
     if (area && !document.getElementById('btn-accept-draw')) {
       const btn = document.createElement('button');
       btn.id = 'btn-accept-draw';
       btn.textContent = 'Accept Draw';
-      btn.onclick = () => sendGame({ type: 'draw_accept' });
-      area.querySelector('.controls').appendChild(btn);
+      btn.onclick = () => {
+        sendGame({ type: 'draw_accept' });
+        btn.remove();
+      };
+      area.querySelector('.controls').prepend(btn);
     }
     return;
   }
@@ -1102,10 +1177,10 @@ function onGameMessage(e) {
     showOverlay(msg.result, msg.reason);
   }
 
-  if (msg.type === 'draw_offer') {
-    if (confirm('Opponent offers a draw. Accept?')) {
-      sendGame({ type: 'draw_accept' });
-    }
+  if (msg.type === 'both_connected') {
+    showGameStatus('Game started!', true);
+    setTimeout(() => updateTurnIndicator(), 500);
+    return;
   }
 
   if (msg.type === 'error') {

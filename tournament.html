@@ -494,6 +494,25 @@ const FLAG = code => code ? ({
   ZA:'🇿🇦',SS:'🇸🇸',SD:'🇸🇩',TZ:'🇹🇿',TG:'🇹🇬',TN:'🇹🇳',UG:'🇺🇬',ZM:'🇿🇲',ZW:'🇿🇼'
 }[code] || '🌍') : '🌍';
 
+// Time control category per AfriChess standard
+// "5+3" → base=5 mins, increment=3s → total = 5*60+40*3 = 420s ≈ 7 min equivalent
+function tcCategory(tc) {
+  if (!tc) return '';
+  try {
+    const parts = tc.split('+');
+    const base = parseFloat(parts[0]);        // minutes
+    const inc  = parts[1] ? parseFloat(parts[1]) : 0;  // seconds
+    // FIDE-style equivalent: base + 40*inc/60
+    const equiv = base + (40 * inc / 60);
+    if (equiv < 0.5)  return 'Hyperbullet';
+    if (equiv < 3)    return 'Bullet';
+    if (equiv < 5)    return 'Bullet';
+    if (equiv < 10)   return 'Blitz';
+    if (equiv <= 15)  return 'Rapid';
+    return 'Classical';
+  } catch { return ''; }
+}
+
 async function init() {
   const { data: { session } } = await sb.auth.getSession();
   if (session) {
@@ -563,7 +582,7 @@ async function loadTournaments() {
           <div class="t-info">
             <div class="t-name">${t.name}</div>
             <div class="t-meta">
-              <span>⏱ ${t.time_control}</span>
+              <span>⏱ ${t.time_control} ${tcCategory(t.time_control)}</span>
               <span>📋 ${formatMeta}</span>
               <span>${countryStr}</span>
             </div>
@@ -629,31 +648,52 @@ async function viewTournament(id) {
   const timeStr = starts.toLocaleDateString('en-GB', {weekday:'short',day:'numeric',month:'short'}) +
                   ' at ' + starts.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
 
-  // Group games by round
-  const rounds = {};
-  (games || []).forEach(g => {
-    if (!rounds[g.round]) rounds[g.round] = [];
-    rounds[g.round].push(g);
-  });
-
+  // For Arena: flat list of games ordered by time, no round grouping
+  // For Swiss/RR: group by round as before
   let pairingsHTML = '';
-  Object.keys(rounds).sort((a,b) => a-b).forEach(r => {
-    pairingsHTML += `<div class="section">
-      <div class="section-hdr">Round ${r}</div>
-      <div>` +
-      rounds[r].map(g => {
-        let resultHTML = '<span class="pairing-result pending">pending</span>';
-        if (g.result === 'white') resultHTML = `<span class="pairing-result white-win">1 – 0</span>`;
-        else if (g.result === 'black') resultHTML = `<span class="pairing-result black-win">0 – 1</span>`;
-        else if (g.result === 'draw') resultHTML = `<span class="pairing-result draw">½ – ½</span>`;
-        return `<div class="pairing-row">
-          <div class="pairing-player">${g.white_username || '?'}</div>
-          <div class="pairing-vs">vs</div>
-          <div class="pairing-player" style="text-align:right">${g.black_username || '?'}</div>
-          ${resultHTML}
-        </div>`;
-      }).join('') + '</div></div>';
-  });
+  if (t.format === 'arena') {
+    const arenaGames = [...(games || [])].reverse(); // most recent first
+    if (arenaGames.length) {
+      pairingsHTML = `<div class="section">
+        <div class="section-hdr"><span>Games Played</span><span>${arenaGames.length}</span></div>
+        <div>` +
+        arenaGames.map(g => {
+          let resultHTML = '<span class="pairing-result pending">ongoing</span>';
+          if (g.result === 'white') resultHTML = `<span class="pairing-result white-win">1 – 0</span>`;
+          else if (g.result === 'black') resultHTML = `<span class="pairing-result black-win">0 – 1</span>`;
+          else if (g.result === 'draw') resultHTML = `<span class="pairing-result draw">½ – ½</span>`;
+          return `<div class="pairing-row">
+            <div class="pairing-player">${g.white_username || '?'}</div>
+            <div class="pairing-vs">vs</div>
+            <div class="pairing-player" style="text-align:right">${g.black_username || '?'}</div>
+            ${resultHTML}
+          </div>`;
+        }).join('') + '</div></div>';
+    }
+  } else {
+    const rounds = {};
+    (games || []).forEach(g => {
+      if (!rounds[g.round]) rounds[g.round] = [];
+      rounds[g.round].push(g);
+    });
+    Object.keys(rounds).sort((a,b) => a-b).forEach(r => {
+      pairingsHTML += `<div class="section">
+        <div class="section-hdr">Round ${r}</div>
+        <div>` +
+        rounds[r].map(g => {
+          let resultHTML = '<span class="pairing-result pending">pending</span>';
+          if (g.result === 'white') resultHTML = `<span class="pairing-result white-win">1 – 0</span>`;
+          else if (g.result === 'black') resultHTML = `<span class="pairing-result black-win">0 – 1</span>`;
+          else if (g.result === 'draw') resultHTML = `<span class="pairing-result draw">½ – ½</span>`;
+          return `<div class="pairing-row">
+            <div class="pairing-player">${g.white_username || '?'}</div>
+            <div class="pairing-vs">vs</div>
+            <div class="pairing-player" style="text-align:right">${g.black_username || '?'}</div>
+            ${resultHTML}
+          </div>`;
+        }).join('') + '</div></div>';
+    });
+  }
 
   let actionBtn = '';
   if (currentUser) {
@@ -695,9 +735,11 @@ async function viewTournament(id) {
         ${t.description ? `<div class="detail-desc">${t.description}</div>` : ''}
         <div>
           <span class="tag ${t.status === 'active' ? 'green' : ''}">${t.status.toUpperCase()}</span>
-          <span class="tag">⏱ ${t.time_control}</span>
+          <span class="tag">⏱ ${t.time_control} · ${tcCategory(t.time_control)}</span>
           <span class="tag">${t.format === 'arena' ? 'Arena' : t.format === 'swiss' ? 'Swiss' : 'Round Robin'}</span>
-          ${t.duration_minutes ? `<span class="tag">${t.duration_minutes} min</span>` : t.rounds ? `<span class="tag">${t.rounds} rounds</span>` : ''}
+          ${t.format === 'arena'
+            ? (t.duration_minutes ? `<span class="tag">${t.duration_minutes} min</span>` : '')
+            : (t.rounds ? `<span class="tag">${t.rounds} rounds</span>` : '')}
           ${t.country ? `<span class="tag">${FLAG(t.country)} ${COUNTRY_NAMES[t.country]}</span>` : ''}
         </div>
         <div style="font-size:12px;color:var(--muted);margin-top:8px;">📅 ${timeStr}</div>

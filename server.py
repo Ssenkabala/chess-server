@@ -480,27 +480,34 @@ def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str,
 
 def k_factor(time_control: str | None, elo: int) -> int:
     """
-    Return ELO K-factor based on time control and current rating.
-    Faster time controls = more volatile = higher K.
-    Lower-rated players also get a higher K so they converge faster.
+    K-factor based on AfriChess time control categories:
+      < 0:30          → Hyperbullet → K=40
+      0:30 – 2:59     → Bullet      → K=40
+      3:00 – 9:59     → Blitz       → K=32
+      10:00 – 15:00   → Rapid       → K=24
+      > 15:00         → Classical   → K=16
+    Uses FIDE-style equivalent time: base_mins + 40*increment_secs/60
+    Players under 1400 get +8 to converge faster.
     """
-    base_minutes = 5  # default to blitz if unknown
+    equiv = 5.0  # default to blitz if unknown
     if time_control:
         try:
-            base_minutes = int(time_control.split('+')[0])
+            parts = time_control.split('+')
+            base  = float(parts[0])
+            inc   = float(parts[1]) if len(parts) > 1 else 0.0
+            equiv = base + (40 * inc / 60)
         except (ValueError, IndexError):
             pass
 
-    if base_minutes <= 2:
-        k = 40    # Bullet  (< 3 min)
-    elif base_minutes <= 5:
-        k = 32    # Blitz   (3–5 min)
-    elif base_minutes <= 15:
-        k = 24    # Rapid   (6–15 min)
+    if equiv < 3:
+        k = 40    # Hyperbullet / Bullet (< 3 min equivalent)
+    elif equiv < 10:
+        k = 32    # Blitz (3–9:59)
+    elif equiv <= 15:
+        k = 24    # Rapid (10–15)
     else:
-        k = 16    # Classical (> 15 min)
+        k = 16    # Classical (> 15)
 
-    # New / developing players change faster
     if elo < 1400:
         k = min(k + 8, 40)
 
@@ -512,22 +519,36 @@ async def cleanup_game(game_id: str, delay: int = 10):
     active_games.pop(game_id, None)
 
 
+def parse_clock_seconds(time_control: str | None) -> int:
+    """Convert '5+0', '3+2', '10+0' etc. to total seconds per player."""
+    if not time_control:
+        return 300  # default 5 min
+    try:
+        parts = time_control.split('+')
+        base_secs = int(float(parts[0]) * 60)
+        return max(30, base_secs)
+    except (ValueError, IndexError):
+        return 300
+
+
 def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
-             white_id: str, black_id: str) -> dict:
+             white_id: str, black_id: str, time_control: str | None = None) -> dict:
+    clock_secs = parse_clock_seconds(time_control)
     return {
-        "id":           game_id,
-        "board":        chess.Board(),
-        "white_ws":     white_ws,
-        "black_ws":     black_ws,
+        "id":            game_id,
+        "board":         chess.Board(),
+        "white_ws":      white_ws,
+        "black_ws":      black_ws,
         "white_game_ws": None,
         "black_game_ws": None,
-        "white_id":     white_id,
-        "black_id":     black_id,
-        "clock":        {"w": CLOCK_SECONDS, "b": CLOCK_SECONDS},
-        "last_move_ts": time.time(),
-        "over":         False,
+        "white_id":      white_id,
+        "black_id":      black_id,
+        "clock":         {"w": clock_secs, "b": clock_secs},
+        "last_move_ts":  time.time(),
+        "over":          False,
+        "time_control":  time_control,
         # Profile data filled in when players send 'profile' message
-        "white_profile": None,   # {username, elo, user_id}
+        "white_profile": None,
         "black_profile": None,
     }
 
@@ -896,10 +917,9 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
         return
 
     pg[white_id] = game_id; pg[black_id] = game_id
-    game = new_game(game_id, None, None, white_id, black_id)
+    game = new_game(game_id, None, None, white_id, black_id, time_control)
     game["tournament_id"]    = tournament_id
     game["tournament_db_id"] = db_game_id
-    game["time_control"]     = time_control
     game["white_profile"] = {"username": white_info["username"],
                              "elo": white_info.get("elo", 1500), "user_id": white_id}
     game["black_profile"] = {"username": black_info["username"],
@@ -1026,45 +1046,64 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
 async def lobby(ws: WebSocket):
     await ws.accept()
     guest_id = "guest_" + uuid.uuid4().hex[:8]
+    preferred_tc = "5+0"  # default, updated when client sends time_control message
 
     await send(ws, {"type": "waiting", "guest_id": guest_id})
 
-    # Check if someone is already waiting
-    if lobby_queue:
-        opponent = lobby_queue.pop(0)
-        game_id  = uuid.uuid4().hex[:12]
+    # Read initial messages to get time_control preference before matching
+    # Give client 3s to send tc preference, then proceed with matching
+    try:
+        msg = await asyncio.wait_for(ws.receive_json(), timeout=3.0)
+        if msg.get("type") == "time_control":
+            preferred_tc = msg.get("tc", "5+0")
+    except (asyncio.TimeoutError, Exception):
+        pass
 
-        # Randomly assign colors (first in queue gets white)
-        white_ws, white_id = opponent["ws"], opponent["guest_id"]
+    # Match by same time control if possible, otherwise any opponent
+    matched_opponent = None
+    for i, opp in enumerate(lobby_queue):
+        if opp.get("tc", "5+0") == preferred_tc:
+            matched_opponent = lobby_queue.pop(i)
+            break
+    if matched_opponent is None and lobby_queue:
+        matched_opponent = lobby_queue.pop(0)
+
+    if matched_opponent:
+        game_id  = uuid.uuid4().hex[:12]
+        tc_used  = preferred_tc  # use the joining player's TC (or negotiate — keep simple)
+
+        white_ws, white_id = matched_opponent["ws"], matched_opponent["guest_id"]
         black_ws, black_id = ws, guest_id
 
-        game = new_game(game_id, white_ws, black_ws, white_id, black_id)
+        game = new_game(game_id, white_ws, black_ws, white_id, black_id, tc_used)
         active_games[game_id] = game
 
         await send(white_ws, {
-            "type":    "matched",
-            "game_id": game_id,
-            "color":   "white",
-            "opponent": black_id,
+            "type":         "matched",
+            "game_id":      game_id,
+            "color":        "white",
+            "opponent":     black_id,
+            "time_control": tc_used,
         })
         await send(black_ws, {
-            "type":    "matched",
-            "game_id": game_id,
-            "color":   "black",
-            "opponent": white_id,
+            "type":         "matched",
+            "game_id":      game_id,
+            "color":        "black",
+            "opponent":     white_id,
+            "time_control": tc_used,
         })
 
-        # Start clock loop
         asyncio.create_task(clock_loop(game_id))
     else:
-        lobby_queue.append({"ws": ws, "guest_id": guest_id})
+        lobby_queue.append({"ws": ws, "guest_id": guest_id, "tc": preferred_tc})
 
     # Keep lobby socket alive until matched or disconnected
     try:
         while True:
-            await ws.receive_text()   # just keep connection open
+            data = await ws.receive_json()
+            if isinstance(data, dict) and data.get("type") == "ping":
+                pass  # keepalive, ignore
     except WebSocketDisconnect:
-        # Remove from queue if still waiting
         lobby_queue[:] = [p for p in lobby_queue if p["guest_id"] != guest_id]
 
 
@@ -1120,21 +1159,7 @@ async def game_ws(ws: WebSocket, game_id: str):
         game["last_move_ts"] = time.time()  # reset clock reference so timer starts fresh
         await broadcast(game, {"type": "both_connected"})
 
-        # If one player already sent their profile, push it to the other immediately
-        if color == "w" and game.get("black_profile"):
-            await send(ws, {
-                "type":     "opponent_profile",
-                "username": game["black_profile"]["username"],
-                "elo":      game["black_profile"]["elo"],
-            })
-        elif color == "b" and game.get("white_profile"):
-            await send(ws, {
-                "type":     "opponent_profile",
-                "username": game["white_profile"]["username"],
-                "elo":      game["white_profile"]["elo"],
-            })
-
-        # If one player already sent their profile, push it to the other immediately
+        # Push already-received profile to the late-connecting player
         if color == "w" and game.get("black_profile"):
             await send(ws, {
                 "type":     "opponent_profile",

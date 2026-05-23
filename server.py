@@ -81,7 +81,8 @@ async def supabase_get_profile(user_id: str) -> dict | None:
     async with httpx.AsyncClient() as client:
         r = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles",
-            params={"user_id": f"eq.{user_id}", "select": "username,elo"},
+            params={"user_id": f"eq.{user_id}",
+                    "select": "username,elo,banned,ban_reason,created_at,games_played"},
             headers={
                 "apikey": SUPABASE_SERVICE_KEY,
                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
@@ -90,11 +91,72 @@ async def supabase_get_profile(user_id: str) -> dict | None:
         rows = r.json()
         return rows[0] if rows else None
 
+
+async def check_banned(user_id: str):
+    """Raise 403 immediately if the user is banned."""
+    profile = await supabase_get_profile(user_id)
+    if profile and profile.get("banned"):
+        reason = profile.get("ban_reason") or "Violation of fair play rules."
+        raise HTTPException(403, f"Account banned: {reason}")
+
+
+async def check_prize_eligibility(user_id: str, client: httpx.AsyncClient):
+    """
+    For prize tournaments: enforce account age ≥ 7 days and ≥ 10 rated games.
+    Raises 403 with a clear message if not eligible.
+    Also checks banned status.
+    """
+    r = await client.get(
+        f"{SUPABASE_URL}/rest/v1/profiles",
+        params={"user_id": f"eq.{user_id}",
+                "select": "banned,ban_reason,created_at,games_played"},
+        headers={"apikey": SUPABASE_SERVICE_KEY,
+                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+    )
+    rows = r.json()
+    if not rows:
+        raise HTTPException(404, "Profile not found")
+    p = rows[0]
+
+    if p.get("banned"):
+        reason = p.get("ban_reason") or "Violation of fair play rules."
+        raise HTTPException(403, f"Account banned: {reason}")
+
+    # Account age — created_at is an ISO string from Supabase
+    if p.get("created_at"):
+        try:
+            created = datetime.fromisoformat(p["created_at"].replace("Z", "+00:00"))
+            age_days = (datetime.now(timezone.utc) - created).days
+            if age_days < 7:
+                raise HTTPException(403,
+                    f"Account must be at least 7 days old to enter prize tournaments "
+                    f"(yours is {age_days} day{'s' if age_days != 1 else ''} old).")
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # can't parse date — don't block
+
+    # Minimum rated games
+    games_played = p.get("games_played") or 0
+    if games_played < 10:
+        raise HTTPException(403,
+            f"You need at least 10 rated games to enter prize tournaments "
+            f"(you have {games_played}). Play some ranked games first!")
+
 async def supabase_update_elo(user_id: str, new_elo: int):
-    """Update ELO for a user using service role key."""
+    """Update ELO and increment games_played for a user using service role key."""
     if not SUPABASE_SERVICE_KEY:
         return
     async with httpx.AsyncClient() as client:
+        # Fetch current games_played first
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{user_id}", "select": "games_played"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        rows = r.json()
+        current_gp = rows[0].get("games_played", 0) if rows else 0
         await client.patch(
             f"{SUPABASE_URL}/rest/v1/profiles",
             params={"user_id": f"eq.{user_id}"},
@@ -104,7 +166,7 @@ async def supabase_update_elo(user_id: str, new_elo: int):
                 "Content-Type": "application/json",
                 "Prefer": "return=minimal",
             },
-            json={"elo": new_elo}
+            json={"elo": new_elo, "games_played": current_gp + 1}
         )
 
 # ΓöÇΓöÇΓöÇ Database setup ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -2205,12 +2267,13 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
     if not tournament_id:
         raise HTTPException(400, "Missing tournament_id")
 
-    # Get tournament to check country restriction
     async with httpx.AsyncClient() as client:
         r = await client.get(
             f"{SUPABASE_URL}/rest/v1/tournaments",
-            params={"id": f"eq.{tournament_id}", "select": "country,max_players,status"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            params={"id": f"eq.{tournament_id}",
+                    "select": "country,max_players,status,prize_pool"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
         ts = r.json()
         if not ts:
@@ -2220,43 +2283,61 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
         if t["status"] != "upcoming":
             raise HTTPException(400, "Tournament is not open for registration")
 
-        # Check country restriction
-        if t.get("country"):
-            profile_r = await client.get(
-                f"{SUPABASE_URL}/rest/v1/profiles",
-                params={"user_id": f"eq.{user_id}", "select": "country,username,elo"},
-                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-            )
-            profile = profile_r.json()
-            if not profile or profile[0].get("country") != t["country"]:
-                raise HTTPException(403, "You must be from the required country to join this tournament")
-            prof = profile[0]
+        # Always check banned status
+        # For prize tournaments, also enforce account age + minimum games
+        has_prizes = bool(t.get("prize_pool") and float(t.get("prize_pool") or 0) > 0)
+        if has_prizes:
+            await check_prize_eligibility(user_id, client)
         else:
-            profile_r = await client.get(
+            # Just check banned for free tournaments
+            ban_r = await client.get(
                 f"{SUPABASE_URL}/rest/v1/profiles",
-                params={"user_id": f"eq.{user_id}", "select": "country,username,elo"},
-                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                params={"user_id": f"eq.{user_id}", "select": "banned,ban_reason"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             )
-            profile = profile_r.json()
-            prof = profile[0] if profile else {}
+            ban_rows = ban_r.json()
+            if ban_rows and ban_rows[0].get("banned"):
+                reason = ban_rows[0].get("ban_reason") or "Violation of fair play rules."
+                raise HTTPException(403, f"Account banned: {reason}")
+
+        # Fetch profile for country check and player row insert
+        profile_r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{user_id}",
+                    "select": "country,username,elo"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        profile = profile_r.json()
+        prof = profile[0] if profile else {}
+
+        # Check country restriction
+        if t.get("country") and prof.get("country") != t["country"]:
+            raise HTTPException(403,
+                "You must be from the required country to join this tournament")
 
         # Check not already joined
         existing = await client.get(
             f"{SUPABASE_URL}/rest/v1/tournament_players",
-            params={"tournament_id": f"eq.{tournament_id}", "user_id": f"eq.{user_id}", "select": "id"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            params={"tournament_id": f"eq.{tournament_id}",
+                    "user_id": f"eq.{user_id}", "select": "id"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
         if existing.json():
             raise HTTPException(400, "Already registered")
 
         # Check not full
-        count_r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournament_players",
-            params={"tournament_id": f"eq.{tournament_id}", "select": "id"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        if len(count_r.json()) >= t["max_players"]:
-            raise HTTPException(400, "Tournament is full")
+        if t.get("max_players"):
+            count_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"tournament_id": f"eq.{tournament_id}", "select": "id"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            if len(count_r.json()) >= t["max_players"]:
+                raise HTTPException(400, "Tournament is full")
 
         # Insert player
         r2 = await client.post(
@@ -2278,6 +2359,52 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
     if r2.status_code not in (200, 201):
         raise HTTPException(500, f"Join failed: {r2.text}")
     return {"ok": True}
+
+
+ADMIN_USER_IDS = set(os.getenv("ADMIN_USER_IDS", "9c51d331-8eba-4da5-b644-64cd4fc168d1").split(","))
+
+@app.post("/api/admin/ban")
+async def ban_user(request: Request, authorization: str = Header(None)):
+    """
+    Ban or unban a player. Admin only.
+    Body: { "target_user_id": "...", "reason": "...", "unban": false }
+    """
+    caller_id = await verify_jwt(authorization)
+    if caller_id not in ADMIN_USER_IDS:
+        raise HTTPException(403, "Admin access required")
+
+    body = await request.json()
+    target_id = body.get("target_user_id")
+    reason    = body.get("reason", "Fair play violation")
+    unban     = body.get("unban", False)
+
+    if not target_id:
+        raise HTTPException(400, "Missing target_user_id")
+    if target_id in ADMIN_USER_IDS:
+        raise HTTPException(400, "Cannot ban an admin account")
+
+    async with httpx.AsyncClient() as client:
+        patch = {"banned": not unban}
+        if not unban:
+            patch["ban_reason"] = reason
+        else:
+            patch["ban_reason"] = None
+
+        r = await client.patch(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{target_id}"},
+            headers={
+                "apikey":        SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type":  "application/json",
+                "Prefer":        "return=minimal",
+            },
+            json=patch
+        )
+
+    action = "unbanned" if unban else "banned"
+    print(f"[admin] {action} {target_id} — {reason}", flush=True)
+    return {"ok": True, "action": action, "target": target_id}
 
 
 @app.delete("/api/leave-tournament")

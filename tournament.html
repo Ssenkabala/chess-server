@@ -78,41 +78,51 @@
     .tab.active { color: var(--green); border-bottom-color: var(--green); }
     .tab:hover { color: var(--text); }
 
-    /* ── Tournament cards ── */
-    .t-grid { display: flex; flex-direction: column; gap: 12px; }
-    .t-card {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 4px; padding: 18px 20px;
-      display: flex; align-items: center; gap: 16px;
-      transition: border-color 0.2s; cursor: pointer;
+    /* ── Tournament list ── */
+    .t-grid { display: flex; flex-direction: column; }
+    .t-row {
+      display: flex; align-items: center; gap: 14px;
+      padding: 12px 4px; border-bottom: 1px solid #161616;
+      cursor: pointer; transition: background 0.12s;
     }
-    .t-card:hover { border-color: #333; }
-    .t-card.upcoming { border-left: 3px solid var(--gold); }
-    .t-card.active   { border-left: 3px solid var(--green); }
-    .t-card.completed{ border-left: 3px solid #333; }
+    .t-row:last-child { border-bottom: none; }
+    .t-row:hover { background: #0d0d0d; }
 
-    .t-status-dot {
-      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    /* Speed icon — colored by category */
+    .t-icon {
+      width: 32px; height: 32px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; flex-shrink: 0;
     }
-    .t-status-dot.upcoming  { background: var(--gold); }
-    .t-status-dot.active    { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    .t-status-dot.completed { background: #333; }
+    .t-icon.bullet   { background: #1a1520; }
+    .t-icon.blitz    { background: #1a1500; }
+    .t-icon.rapid    { background: #0f1a10; }
+    .t-icon.classical{ background: #111; }
 
     .t-info { flex: 1; min-width: 0; }
     .t-name {
-      font-size: 15px; color: var(--text); margin-bottom: 4px;
+      font-size: 14px; color: var(--text);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-bottom: 2px;
     }
     .t-meta {
-      font-size: 10px; color: var(--muted); letter-spacing: 0.1em;
-      text-transform: uppercase; display: flex; gap: 14px; flex-wrap: wrap;
+      font-size: 11px; color: var(--muted);
+      display: flex; gap: 8px; align-items: center;
     }
-    .t-meta span { display: flex; align-items: center; gap: 4px; }
-    .t-right { text-align: right; flex-shrink: 0; }
-    .t-players { font-size: 18px; color: var(--text); }
-    .t-players-lbl { font-size: 10px; color: var(--muted); letter-spacing: 0.08em; }
-    .t-starts {
-      font-size: 11px; color: var(--gold); letter-spacing: 0.06em; margin-top: 2px;
+    .t-meta-dot { color: #333; }
+
+    .t-right {
+      text-align: right; flex-shrink: 0;
+      display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+    }
+    .t-timerange {
+      font-size: 12px; color: var(--text); letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .t-timerange.active-now { color: var(--green); }
+    .t-players {
+      font-size: 11px; color: var(--muted);
+      display: flex; align-items: center; gap: 3px;
     }
 
     .btn { 
@@ -212,15 +222,63 @@
       align-items: center;
     }
     .player-row {
-      display: flex; align-items: center; gap: 12px;
+      display: flex; align-items: center; gap: 10px;
       padding: 10px 18px; border-bottom: 1px solid #1a1a1a; font-size: 13px;
     }
     .player-row:last-child { border-bottom: none; }
-    .player-rank { width: 24px; color: var(--muted); font-size: 11px; text-align: center; }
-    .player-name { flex: 1; }
-    .player-country { font-size: 14px; }
-    .player-elo { color: var(--muted); font-size: 12px; }
-    .player-score { color: var(--green); font-weight: bold; min-width: 30px; text-align: right; }
+    .player-row.is-me { background: #0a1a0a; }
+    .player-row.is-paused { opacity: 0.45; }
+    .player-rank { width: 22px; color: var(--muted); font-size: 11px; text-align: center; flex-shrink: 0; }
+    .player-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .player-country { font-size: 14px; flex-shrink: 0; }
+    .player-elo { color: var(--muted); font-size: 11px; flex-shrink: 0; }
+
+    /* Score sequence: each char is a game result */
+    .player-seq {
+      display: flex; gap: 2px; flex-shrink: 0;
+    }
+    .seq-chip {
+      width: 14px; height: 14px; border-radius: 2px;
+      font-size: 9px; font-weight: 700; display: flex;
+      align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .seq-chip.win  { background: var(--green); color: #000; }
+    .seq-chip.loss { background: #c00; color: #fff; }
+    .seq-chip.draw { background: #555; color: #ccc; }
+    .seq-chip.bye  { background: #333; color: #777; }
+
+    /* Streak fire */
+    .player-streak {
+      font-size: 12px; min-width: 28px; text-align: right; flex-shrink: 0;
+      font-weight: 700; color: var(--green);
+    }
+    .player-score { color: var(--green); font-weight: bold; min-width: 24px; text-align: right; flex-shrink: 0; }
+
+    /* ── Bottom notification bar ── */
+    #arena-notify-bar {
+      display: none; position: fixed; bottom: 56px; left: 0; right: 0;
+      background: #b8a000; color: #000; font-size: 13px; font-weight: 600;
+      text-align: center; padding: 12px 16px; z-index: 200;
+      letter-spacing: 0.02em; cursor: pointer;
+    }
+
+    /* ── Bottom nav (pause + back) for active arena ── */
+    #arena-bottom-nav {
+      display: none; position: fixed; bottom: 0; left: 0; right: 0;
+      background: #111; border-top: 1px solid #222; z-index: 199;
+      height: 56px; align-items: stretch;
+    }
+    #arena-bottom-nav button {
+      flex: 1; background: none; border: none; color: var(--muted);
+      font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+      cursor: pointer; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 3px;
+      border-right: 1px solid #1a1a1a;
+    }
+    #arena-bottom-nav button:last-child { border-right: none; }
+    #arena-bottom-nav button:hover { color: var(--text); }
+    #arena-bottom-nav button.active-pause { color: var(--green); }
+    #arena-bottom-nav button .nav-icon { font-size: 18px; line-height: 1; }
 
     /* ── Pairings ── */
     .pairing-row {
@@ -371,35 +429,70 @@
       </div>
     </div>
     <div class="field">
-      <label for="t-country">Country Restriction (optional)</label>
+      <label>Scope / Restriction</label>
+      <select id="t-scope" onchange="onScopeChange()">
+        <option value="open">🌍 Continental — Open to all Africa</option>
+        <option value="east_africa">🌍 Regional — East Africa</option>
+        <option value="west_africa">🌍 Regional — West Africa</option>
+        <option value="north_africa">🌍 Regional — North Africa</option>
+        <option value="south_africa">🌍 Regional — Southern Africa</option>
+        <option value="central_africa">🌍 Regional — Central Africa</option>
+        <option value="country">🚩 Country specific</option>
+      </select>
+    </div>
+    <div class="field" id="row-country" style="display:none;">
+      <label for="t-country">Country</label>
       <select id="t-country">
-        <option value="">🌍 Open to all</option>
         <option value="DZ">🇩🇿 Algeria</option>
         <option value="AO">🇦🇴 Angola</option>
+        <option value="BJ">🇧🇯 Benin</option>
         <option value="BW">🇧🇼 Botswana</option>
         <option value="BF">🇧🇫 Burkina Faso</option>
         <option value="BI">🇧🇮 Burundi</option>
         <option value="CM">🇨🇲 Cameroon</option>
+        <option value="CV">🇨🇻 Cape Verde</option>
+        <option value="CF">🇨🇫 Central African Republic</option>
+        <option value="TD">🇹🇩 Chad</option>
+        <option value="KM">🇰🇲 Comoros</option>
+        <option value="CG">🇨🇬 Congo</option>
         <option value="CD">🇨🇩 DR Congo</option>
+        <option value="DJ">🇩🇯 Djibouti</option>
         <option value="EG">🇪🇬 Egypt</option>
+        <option value="GQ">🇬🇶 Equatorial Guinea</option>
+        <option value="ER">🇪🇷 Eritrea</option>
+        <option value="SZ">🇸🇿 Eswatini</option>
         <option value="ET">🇪🇹 Ethiopia</option>
+        <option value="GA">🇬🇦 Gabon</option>
+        <option value="GM">🇬🇲 Gambia</option>
         <option value="GH">🇬🇭 Ghana</option>
+        <option value="GN">🇬🇳 Guinea</option>
+        <option value="GW">🇬🇼 Guinea-Bissau</option>
         <option value="CI">🇨🇮 Ivory Coast</option>
         <option value="KE">🇰🇪 Kenya</option>
+        <option value="LS">🇱🇸 Lesotho</option>
+        <option value="LR">🇱🇷 Liberia</option>
         <option value="LY">🇱🇾 Libya</option>
         <option value="MG">🇲🇬 Madagascar</option>
         <option value="MW">🇲🇼 Malawi</option>
         <option value="ML">🇲🇱 Mali</option>
+        <option value="MR">🇲🇷 Mauritania</option>
+        <option value="MU">🇲🇺 Mauritius</option>
         <option value="MA">🇲🇦 Morocco</option>
         <option value="MZ">🇲🇿 Mozambique</option>
         <option value="NA">🇳🇦 Namibia</option>
+        <option value="NE">🇳🇪 Niger</option>
         <option value="NG">🇳🇬 Nigeria</option>
         <option value="RW">🇷🇼 Rwanda</option>
+        <option value="ST">🇸🇹 São Tomé & Príncipe</option>
         <option value="SN">🇸🇳 Senegal</option>
+        <option value="SC">🇸🇨 Seychelles</option>
+        <option value="SL">🇸🇱 Sierra Leone</option>
+        <option value="SO">🇸🇴 Somalia</option>
         <option value="ZA">🇿🇦 South Africa</option>
         <option value="SS">🇸🇸 South Sudan</option>
         <option value="SD">🇸🇩 Sudan</option>
         <option value="TZ">🇹🇿 Tanzania</option>
+        <option value="TG">🇹🇬 Togo</option>
         <option value="TN">🇹🇳 Tunisia</option>
         <option value="UG">🇺🇬 Uganda</option>
         <option value="ZM">🇿🇲 Zambia</option>
@@ -423,6 +516,14 @@
 const SUPABASE_URL  = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ic2tnenN2eWdkbWx2d2JldHhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQxMTM3NDIsImV4cCI6MjA1OTY4OTc0Mn0.BKA2G4fGlhMjJQlHgT8KaHSBjIREbdBQiQsKjy2CkP8';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+const REGION_LABELS_JS = {
+  east_africa:    'East Africa',
+  west_africa:    'West Africa',
+  north_africa:   'North Africa',
+  south_africa:   'Southern Africa',
+  central_africa: 'Central Africa',
+};
 
 // ── Timer countdown (survives detail-content polls) ──────────────
 let _timerInterval = null;
@@ -563,9 +664,20 @@ async function init() {
   // If returning from a tournament game, jump straight into that tournament
   const hash = window.location.hash.replace('#', '');
   if (hash) {
-    window.history.replaceState(null, '', '/tournaments'); // clean URL
+    window.history.replaceState(null, '', '/tournaments');
     loadTournaments();
-    viewTournament(hash);
+    viewTournament(hash).then(() => {
+      // If player chose to pause from game overlay, send pause after WS connects
+      const pauseId = sessionStorage.getItem('arena_pause_on_return');
+      if (pauseId === hash) {
+        sessionStorage.removeItem('arena_pause_on_return');
+        setTimeout(() => {
+          if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN) {
+            tournamentWs.send(JSON.stringify({ type: 'pause' }));
+          }
+        }, 1500);
+      }
+    });
   } else {
     loadTournaments();
   }
@@ -593,35 +705,72 @@ async function loadTournaments() {
       grid.innerHTML = `<div class="empty">No ${currentTab} tournaments.</div>`; return;
     }
 
-    // Sort: upcoming → soonest first; active → most recently started first; completed → most recent first
     const sorted = [...data].sort((a, b) => {
       const da = new Date(a.starts_at), db = new Date(b.starts_at);
       return currentTab === 'upcoming' ? da - db : db - da;
     });
 
-    grid.innerHTML = sorted.map(t => {
+    // Speed icon emoji by category
+    function speedIcon(tc) {
+      const cat = tcCategory(tc);
+      if (cat === 'Hyperbullet') return { icon: '🚀', cls: 'bullet' };
+      if (cat === 'Bullet')      return { icon: '⚡', cls: 'bullet' };
+      if (cat === 'Blitz')       return { icon: '🔥', cls: 'blitz' };
+      if (cat === 'Rapid')       return { icon: '🐇', cls: 'rapid' };
+      return { icon: '♟', cls: 'classical' };
+    }
+
+    // Format time range: "19:00 – 20:00"
+    function timeRange(t) {
       const starts = new Date(t.starts_at);
-      const timeStr = starts.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) +
-                      ' · ' + starts.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
-      const countryStr = t.country ? `${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country} only` : '🌍 Open';
-      const formatMeta = t.format === 'arena'
-        ? `${t.duration_minutes || 60} min Arena`
-        : t.format === 'swiss' ? `Swiss · ${t.rounds || '?'} rounds` : 'Round Robin';
-      return `
-        <div class="t-card ${t.status}" onclick="viewTournament('${t.id}')">
-          <div class="t-status-dot ${t.status}"></div>
-          <div class="t-info">
-            <div class="t-name">${t.name}</div>
-            <div class="t-meta">
-              <span>⏱ ${t.time_control} ${tcCategory(t.time_control)}</span>
-              <span>📋 ${formatMeta}</span>
-              <span>${countryStr}</span>
-            </div>
+      const fmt = d => d.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
+      if (t.duration_minutes) {
+        const ends = new Date(starts.getTime() + t.duration_minutes * 60000);
+        return fmt(starts) + ' – ' + fmt(ends);
+      }
+      return fmt(starts);
+    }
+
+    function dateLabel(t) {
+      const d = new Date(t.starts_at);
+      const today = new Date();
+      const isToday = d.toDateString() === today.toDateString();
+      if (isToday) return '';
+      return d.toLocaleDateString('en-GB', {day:'numeric', month:'short'}) + ' · ';
+    }
+
+    const scopeOf = t => t.country
+      ? `${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country}`
+      : t.region ? `🌍 ${REGION_LABELS_JS[t.region]}` : '';
+
+    grid.innerHTML = sorted.map(t => {
+      const { icon, cls } = speedIcon(t.time_control);
+      const cat = tcCategory(t.time_control);
+      const dur = t.format === 'arena'
+        ? `${t.duration_minutes || 60} min`
+        : `${t.rounds || '?'} rounds`;
+      const scope = scopeOf(t);
+      const range = timeRange(t);
+      const date  = dateLabel(t);
+      const isNow = t.status === 'active';
+      const playerCount = t.player_count || '–';
+
+      return `<div class="t-row" onclick="viewTournament('${t.id}')">
+        <div class="t-icon ${cls}">${icon}</div>
+        <div class="t-info">
+          <div class="t-name">${t.name}</div>
+          <div class="t-meta">
+            <span>${t.time_control} · ${cat}</span>
+            <span class="t-meta-dot">·</span>
+            <span>${dur}</span>
+            ${scope ? `<span class="t-meta-dot">·</span><span>${scope}</span>` : ''}
           </div>
-          <div class="t-right">
-            <div class="t-starts">${timeStr}</div>
-          </div>
-        </div>`;
+        </div>
+        <div class="t-right">
+          <div class="t-timerange ${isNow ? 'active-now' : ''}">${date}${range}</div>
+          <div class="t-players">👥 ${playerCount}</div>
+        </div>
+      </div>`;
     }).join('');
   } catch(e) {
     grid.innerHTML = '<div class="empty">Error loading tournaments.</div>';
@@ -739,11 +888,21 @@ async function viewTournament(id) {
         actionBtn = `<button class="btn btn-outline btn-sm" onclick="leaveTournament('${id}')">Leave</button>`;
       } else if (!isFull) {
         const userCountry = currentProfile ? currentProfile.country : null;
-        const allowed = !t.country || userCountry === t.country;
-        if (allowed) {
+        const allowedCountry = !t.country || userCountry === t.country;
+        const REGION_COUNTRIES = {
+          east_africa: ['UG','KE','TZ','RW','BI','ET','SS','SO','ER','DJ','SD'],
+          west_africa: ['NG','GH','SN','CI','CM','BJ','TG','GN','GW','SL','LR','GM','MR','CV','NE','BF','ML'],
+          north_africa: ['EG','LY','TN','DZ','MA'],
+          south_africa: ['ZA','ZW','ZM','MW','MZ','NA','BW','LS','SZ','AO','MG','MU','SC','KM','ST','CV'],
+          central_africa: ['CD','CG','CF','GA','GQ','TD'],
+        };
+        const allowedRegion = !t.region || (userCountry && (REGION_COUNTRIES[t.region]||[]).includes(userCountry));
+        if (allowedCountry && allowedRegion) {
           actionBtn = `<button class="btn btn-sm" onclick="joinTournament('${id}')">Join</button>`;
-        } else {
+        } else if (!allowedCountry) {
           actionBtn = `<span style="font-size:11px;color:var(--muted)">Restricted to ${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country}</span>`;
+        } else {
+          actionBtn = `<span style="font-size:11px;color:var(--muted)">Restricted to ${REGION_LABELS_JS[t.region] || t.region} players</span>`;
         }
       } else {
         actionBtn = `<span style="font-size:11px;color:var(--muted)">Tournament full</span>`;
@@ -762,6 +921,59 @@ async function viewTournament(id) {
   const eloCol = t.time_control ? tcEloCol(t.time_control) : 'elo';
   const eloLabel = eloCol === 'elo_bullet' ? 'Bullet' : eloCol === 'elo_blitz' ? 'Blitz' : eloCol === 'elo_rapid' ? 'Rapid' : 'ELO';
 
+  // Build per-player game sequence from games list (arena only)
+  // sequence: array of 'win'|'loss'|'draw'|'bye' per player, in order
+  const playerSeq = {};
+  const playerStreak = {};
+  if (t.format === 'arena' && games) {
+    const ordered = [...games].filter(g => g.result).sort((a,b) =>
+      new Date(a.played_at||0) - new Date(b.played_at||0));
+    ordered.forEach(g => {
+      const wid = g.white_id, bid = g.black_id;
+      if (!playerSeq[wid]) playerSeq[wid] = [];
+      if (!playerSeq[bid]) playerSeq[bid] = [];
+      if (g.result === 'white') {
+        playerSeq[wid].push('win'); playerSeq[bid].push('loss');
+      } else if (g.result === 'black') {
+        playerSeq[wid].push('loss'); playerSeq[bid].push('win');
+      } else {
+        playerSeq[wid].push('draw'); playerSeq[bid].push('draw');
+      }
+    });
+    // Compute current streak for each player
+    Object.entries(playerSeq).forEach(([uid, seq]) => {
+      if (!seq.length) { playerStreak[uid] = 0; return; }
+      let streak = 0;
+      for (let i = seq.length - 1; i >= 0; i--) {
+        if (seq[i] === 'win') streak++;
+        else break;
+      }
+      playerStreak[uid] = streak;
+    });
+  }
+
+  function seqHTML(uid) {
+    const seq = (playerSeq[uid] || []).slice(-8); // show last 8 games
+    if (!seq.length) return '';
+    return `<div class="player-seq">${seq.map(r =>
+      `<div class="seq-chip ${r}">${r==='win'?'1':r==='loss'?'0':r==='bye'?'B':'½'}</div>`
+    ).join('')}</div>`;
+  }
+
+  function streakHTML(uid) {
+    const s = playerStreak[uid] || 0;
+    if (s < 2) return '';
+    return `<span class="player-streak">🔥${s}</span>`;
+  }
+
+  // Show/hide bottom nav for active arena
+  const bottomNav = document.getElementById('arena-bottom-nav');
+  const isActiveArena = t.status === 'active' && t.format === 'arena' && currentUser && isRegistered;
+  if (bottomNav) {
+    bottomNav.style.display = isActiveArena ? 'flex' : 'none';
+    document.getElementById('detail-content').style.paddingBottom = isActiveArena ? '64px' : '';
+  }
+
   // Render main content
   content.innerHTML = `
     <div class="detail-header">
@@ -775,7 +987,11 @@ async function viewTournament(id) {
           ${t.format === 'arena'
             ? (t.duration_minutes ? `<span class="tag">${t.duration_minutes} min</span>` : '')
             : (t.rounds ? `<span class="tag">${t.rounds} rounds</span>` : '')}
-          ${t.country ? `<span class="tag">${FLAG(t.country)} ${COUNTRY_NAMES[t.country]}</span>` : ''}
+          ${t.country
+            ? `<span class="tag">${FLAG(t.country)} ${COUNTRY_NAMES[t.country]}</span>`
+            : t.region
+              ? `<span class="tag">🌍 ${REGION_LABELS_JS[t.region] || t.region}</span>`
+              : ''}
         </div>
         <div style="font-size:12px;color:var(--muted);margin-top:8px;">📅 ${timeStr}</div>
       </div>
@@ -798,14 +1014,21 @@ async function viewTournament(id) {
                   ? eloOf(b) - eloOf(a)
                   : ((b.score||0) - (a.score||0)) || (eloOf(b) - eloOf(a))
               );
-              return sorted.map((p, i) => `
-                <div class="player-row">
+              return sorted.map((p, i) => {
+                const isMe = currentUser && p.user_id === currentUser.id;
+                const isPaused = p.paused;
+                const classes = ['player-row', isMe ? 'is-me' : '', isPaused ? 'is-paused' : ''].filter(Boolean).join(' ');
+                const pauseIcon = isPaused ? '<span style="font-size:11px;color:#555;margin-left:2px;">⏸</span>' : '';
+                return `<div class="${classes}">
                   <div class="player-rank">${i+1}</div>
                   <div class="player-country">${FLAG(p.country)}</div>
-                  <div class="player-name">${p.username}</div>
-                  <div class="player-elo">${eloOf(p)} ${eloLabel}</div>
-                  <div class="player-score">${p.score || 0}</div>
-                </div>`).join('');
+                  <div class="player-name">${p.username}${pauseIcon}</div>
+                  ${t.format === 'arena' && t.status !== 'upcoming' ? seqHTML(p.user_id) : ''}
+                  ${t.format === 'arena' && t.status !== 'upcoming' ? streakHTML(p.user_id) : ''}
+                  <div class="player-elo">${eloOf(p)}</div>
+                  <div class="player-score">${t.status === 'upcoming' ? '' : (p.score || 0)}</div>
+                </div>`;
+              }).join('');
             })()}
       </div>
     </div>
@@ -884,12 +1107,14 @@ function showList() {
   if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
   currentDetailId = null;
   const content = document.getElementById('detail-content');
-  if (content) { content.dataset.loaded = ''; }
+  if (content) { content.dataset.loaded = ''; content.style.paddingBottom = ''; }
   document.getElementById('arena-timer-bar').style.display = 'none';
   document.getElementById('arena-status').style.display = 'none';
+  const nav = document.getElementById('arena-bottom-nav');
+  if (nav) nav.style.display = 'none';
+  hideNotifyBar();
   document.getElementById('list-view').classList.remove('hidden');
   document.getElementById('detail-view').classList.remove('active');
-  // Refresh list so completed tournaments move to right tab
   loadTournaments();
   if (currentTab === 'active') startListPoll();
 }
@@ -946,12 +1171,17 @@ function onFormatChange() {
   document.getElementById('row-rounds').style.display   = fmt === 'arena' ? 'none' : '';
 }
 
+function onScopeChange() {
+  const scope = document.getElementById('t-scope').value;
+  document.getElementById('row-country').style.display = scope === 'country' ? '' : 'none';
+}
+
 async function createTournament() {
   const name    = document.getElementById('t-name').value.trim();
   const desc    = document.getElementById('t-desc').value.trim();
   const format  = document.getElementById('t-format').value;
   const time    = document.getElementById('t-time').value;
-  const country = document.getElementById('t-country').value;
+  const scope   = document.getElementById('t-scope').value;
   const starts  = document.getElementById('t-starts').value;
   const errEl   = document.getElementById('create-error');
 
@@ -961,8 +1191,12 @@ async function createTournament() {
   const headers = await getAuthHeader();
   if (!headers) { errEl.textContent = 'Session expired. Please sign in again.'; return; }
 
-  const body = { name, description: desc || null, format, time_control: time,
-                 country: country || null, starts_at: new Date(starts).toISOString() };
+  const body = {
+    name, description: desc || null, format, time_control: time,
+    country: scope === 'country' ? (document.getElementById('t-country').value || null) : null,
+    region:  ['east_africa','west_africa','north_africa','south_africa','central_africa'].includes(scope) ? scope : null,
+    starts_at: new Date(starts).toISOString(),
+  };
   if (format === 'arena') {
     body.duration_minutes = parseInt(document.getElementById('t-duration').value);
     body.rounds = 0;
@@ -988,10 +1222,11 @@ let tournamentWs = null, currentTournamentId = null, _arenaCountdown = null;
 let _arenaPaused = false;
 
 function toggleArenaPause() {
-  const btn = document.getElementById('btn-pause-arena');
   if (!tournamentWs || tournamentWs.readyState !== WebSocket.OPEN) return;
-  btn.disabled = true;
-  btn.textContent = '…';
+  const icon  = document.getElementById('nav-pause-icon');
+  const label = document.getElementById('nav-pause-label');
+  const btn   = document.getElementById('btn-nav-pause');
+  if (btn) { btn.disabled = true; if(icon) icon.textContent = '…'; }
   if (_arenaPaused) {
     tournamentWs.send(JSON.stringify({ type: 'resume' }));
   } else {
@@ -1052,13 +1287,22 @@ function connectTournamentWs(tid, tournament) {
         showArenaStatus('⏸ ' + (msg.message || 'You have a bye this round — waiting for next pairing…'));
       } else if (msg.type === 'paused') {
         _arenaPaused = true;
-        const btn = document.getElementById('btn-pause-arena');
-        if (btn) { btn.textContent = '▶ Resume'; btn.style.color = '#00ff9d'; btn.style.borderColor = '#00ff9d44'; btn.disabled = false; }
+        const icon = document.getElementById('nav-pause-icon');
+        const label = document.getElementById('nav-pause-label');
+        const btn = document.getElementById('btn-nav-pause');
+        if (icon) icon.textContent = '▶';
+        if (label) label.textContent = 'Resume';
+        if (btn) { btn.classList.add('active-pause'); btn.disabled = false; }
         showArenaStatus('⏸ ' + (msg.message || "Paused — you won't be paired until you resume."));
+        hideNotifyBar();
       } else if (msg.type === 'resumed') {
         _arenaPaused = false;
-        const btn = document.getElementById('btn-pause-arena');
-        if (btn) { btn.textContent = '⏸ Pause'; btn.style.color = ''; btn.style.borderColor = ''; btn.disabled = false; }
+        const icon = document.getElementById('nav-pause-icon');
+        const label = document.getElementById('nav-pause-label');
+        const btn = document.getElementById('btn-nav-pause');
+        if (icon) icon.textContent = '⏸';
+        if (label) label.textContent = 'Pause';
+        if (btn) { btn.classList.remove('active-pause'); btn.disabled = false; }
         showArenaStatus('🔍 ' + (msg.message || 'Resumed — looking for an opponent…'));
       } else if (msg.type === 'tournament_started') {
         // Another player triggered start — reload our view
@@ -1087,14 +1331,43 @@ function connectTournamentWs(tid, tournament) {
   tournamentWs.onerror = () => {};
 }
 
+let _notifyBarTarget = null;
+
+function handleNotifyBarClick() {
+  if (_notifyBarTarget) window.location.href = _notifyBarTarget;
+}
+
+function showNotifyBar(text, href) {
+  const bar = document.getElementById('arena-notify-bar');
+  if (!bar) return;
+  bar.textContent = text;
+  bar.style.display = '';
+  _notifyBarTarget = href || null;
+  bar.style.cursor = href ? 'pointer' : 'default';
+}
+
+function hideNotifyBar() {
+  const bar = document.getElementById('arena-notify-bar');
+  if (bar) bar.style.display = 'none';
+  _notifyBarTarget = null;
+}
+
 function showArenaGameReady(msg) {
-  const el = document.getElementById('arena-status');
-  if (!el) return;
-  // Clear any previous countdown
   hideArenaCountdown();
-  el.innerHTML = `<strong>♟ Game ready!</strong> You play <strong>${msg.color}</strong> vs <strong>${msg.opponent}</strong> (${msg.opponent_elo} ELO)<br>
-    <span id="arena-countdown" style="font-size:12px;color:#aaa;">Redirecting in 5…</span>`;
-  el.style.display = '';
+  const tc   = encodeURIComponent(msg.time_control || '');
+  const href = `/multiplayer?game_id=${msg.game_id}&color=${msg.color}&tournament_id=${currentTournamentId}&tournament_db_id=${msg.tournament_db_id || ''}&time_control=${tc}&my_rank=${msg.my_rank||0}&opponent_rank=${msg.opponent_rank||0}`;
+
+  // Show bottom notification bar
+  showNotifyBar(`♟ Game ready! ${msg.color} vs ${msg.opponent} (${msg.opponent_elo}) — Tap to play`, href);
+
+  // Also show in arena-status for desktop visibility
+  const el = document.getElementById('arena-status');
+  if (el) {
+    el.innerHTML = `<strong>♟ Game ready!</strong> You play <strong>${msg.color}</strong> vs <strong>${msg.opponent}</strong> (${msg.opponent_elo})<br>
+      <span id="arena-countdown" style="font-size:12px;color:#aaa;">Redirecting in 5…</span>`;
+    el.style.display = '';
+  }
+
   let secs = 5;
   _arenaCountdown = setInterval(() => {
     secs--;
@@ -1102,8 +1375,7 @@ function showArenaGameReady(msg) {
     if (cd) cd.textContent = `Redirecting in ${secs}…`;
     if (secs <= 0) {
       clearInterval(_arenaCountdown); _arenaCountdown = null;
-      const tc = encodeURIComponent(msg.time_control || '');
-      window.location.href = `/multiplayer?game_id=${msg.game_id}&color=${msg.color}&tournament_id=${currentTournamentId}&tournament_db_id=${msg.tournament_db_id || ''}&time_control=${tc}`;
+      window.location.href = href;
     }
   }, 1000);
 }
@@ -1115,6 +1387,8 @@ function hideArenaCountdown() {
 function showArenaStatus(text) {
   const el = document.getElementById('arena-status');
   if (el) { el.innerHTML = text; el.style.display = ''; }
+  // Also update notify bar for mobile
+  showNotifyBar(text.replace(/<[^>]+>/g, ''));
 }
 
 function disconnectTournamentWs() {
@@ -1168,5 +1442,20 @@ async function signOut() {
 
 init();
 </script>
+<!-- Arena bottom notification bar (game ready / pairing) -->
+<div id="arena-notify-bar" onclick="handleNotifyBarClick()"></div>
+
+<!-- Arena bottom nav (visible when in active arena detail view) -->
+<div id="arena-bottom-nav" style="display:flex;">
+  <button onclick="showList()" id="btn-nav-back">
+    <span class="nav-icon">←</span>
+    <span>Tournaments</span>
+  </button>
+  <button onclick="toggleArenaPause()" id="btn-nav-pause">
+    <span class="nav-icon" id="nav-pause-icon">⏸</span>
+    <span id="nav-pause-label">Pause</span>
+  </button>
+</div>
+
 </body>
 </html>

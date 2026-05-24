@@ -727,6 +727,7 @@ global.Chessground = Nr;
 
       <!-- Opponent bar (top) -->
       <div class="player-bar" id="bar-opponent">
+        <span class="player-rank-badge" id="rank-opponent" style="display:none;font-size:10px;color:#555;margin-right:4px;"></span>
         <span class="player-name" id="name-opponent">Opponent</span>
         <span class="clock" id="clock-opponent">5:00</span>
       </div>
@@ -738,6 +739,7 @@ global.Chessground = Nr;
 
       <!-- My bar (bottom) -->
       <div class="player-bar" id="bar-me">
+        <span class="player-rank-badge" id="rank-me" style="display:none;font-size:10px;color:#555;margin-right:4px;"></span>
         <span class="player-name" id="name-me">You</span>
         <span class="clock" id="clock-me">5:00</span>
       </div>
@@ -773,9 +775,14 @@ global.Chessground = Nr;
         <span class="sc-l" id="sc-l">0L</span>
       </div>
       <div id="rematch-area" style="margin-top:8px;">
-        <div class="controls" style="justify-content:center;">
-          <button id="btn-rematch" onclick="offerRematch()">Rematch</button>
-          <button onclick="goToLobby()">New Game</button>
+        <div class="controls" style="justify-content:center;flex-direction:column;gap:8px;">
+          <button id="btn-rematch" onclick="offerRematch()" style="width:100%;">Rematch</button>
+          <button onclick="goToLobby()" style="width:100%;">New Game</button>
+        </div>
+        <!-- Tournament-only buttons — shown via showOverlay -->
+        <div id="tournament-overlay-btns" style="display:none;flex-direction:column;gap:8px;margin-top:4px;">
+          <button id="btn-back-tournament" style="width:100%;background:#00ff9d;color:#000;border:none;border-radius:3px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">▶ Back to Tournament</button>
+          <button id="btn-overlay-pause" onclick="overlayPauseTournament()" style="width:100%;background:transparent;border:1px solid #333;color:#777;border-radius:3px;padding:10px;font-size:12px;cursor:pointer;">⏸ Pause (stay in tournament)</button>
         </div>
         <div id="rematch-status" style="font-size:11px; color:var(--muted); text-align:center; margin-top:6px; letter-spacing:0.08em;"></div>
       </div>
@@ -844,6 +851,29 @@ function forceCloseOverlay() {
   updateTurnIndicator();
 }
 
+function overlayPauseTournament() {
+  // Send pause via the tournament WS if available, then go back
+  // The pause is handled server-side when they reconnect to tournament WS
+  if (window._tournamentId) {
+    // Store pause intent — tournament.html will read it on load via hash
+    sessionStorage.setItem('arena_pause_on_return', window._tournamentId);
+    window.location.href = '/tournaments#' + window._tournamentId;
+  }
+}
+
+function setTournamentRanks(myRank, opponentRank) {
+  const rankMe  = document.getElementById('rank-me');
+  const rankOpp = document.getElementById('rank-opponent');
+  if (rankMe && myRank) {
+    rankMe.textContent = '#' + myRank;
+    rankMe.style.display = 'inline';
+  }
+  if (rankOpp && opponentRank) {
+    rankOpp.textContent = '#' + opponentRank;
+    rankOpp.style.display = 'inline';
+  }
+}
+
 function offerRematch() {
   sendGame({ type: 'rematch_offer' });
   document.getElementById('rematch-status').textContent = 'Rematch offered — waiting...';
@@ -892,6 +922,9 @@ async function bootAuth() {
   window._tournamentId   = params.get('tournament_id') || null;
   window._tournamentDbId = params.get('tournament_db_id') || null;
   window._timeControl    = params.get('time_control') || '5+0';
+  const myRank  = params.get('my_rank');
+  const oppRank = params.get('opponent_rank');
+  if (myRank || oppRank) setTournamentRanks(myRank, oppRank);
 
   // Update header label
   const label = document.getElementById('tc-label');
@@ -1494,12 +1527,17 @@ function showOverlay(result, reason) {
   if (oldDecline) oldDecline.remove();
 
   if (window._tournamentId) {
-    document.getElementById('btn-rematch').textContent = 'Back to Tournament';
-    document.getElementById('btn-rematch').disabled = false;
-    document.getElementById('btn-rematch').onclick = () => {
+    // Show tournament buttons, hide regular rematch buttons
+    const regularBtns = document.getElementById('btn-rematch').closest('.controls');
+    if (regularBtns) regularBtns.style.display = 'none';
+    const tourneyBtns = document.getElementById('tournament-overlay-btns');
+    if (tourneyBtns) tourneyBtns.style.display = 'flex';
+    document.getElementById('rematch-status').textContent = 'Submitting result…';
+
+    const backBtn = document.getElementById('btn-back-tournament');
+    if (backBtn) backBtn.onclick = () => {
       window.location.href = '/tournaments#' + window._tournamentId;
     };
-    document.getElementById('rematch-status').textContent = 'Submitting result…';
 
     // Submit tournament result
     if (window._tournamentDbId) {
@@ -1526,7 +1564,6 @@ function showOverlay(result, reason) {
           if (data.error) {
             document.getElementById('rematch-status').textContent = 'Result submit failed.';
           } else {
-            // Auto-navigate back to tournament after 5s
             let secs = 5;
             const statusEl = document.getElementById('rematch-status');
             const countdown = setInterval(() => {
@@ -1537,9 +1574,7 @@ function showOverlay(result, reason) {
                 window.location.href = '/tournaments#' + window._tournamentId;
               }
             }, 1000);
-            // "Back to Tournament" button skips countdown
-            const btn = document.getElementById('btn-rematch');
-            if (btn) btn.onclick = () => {
+            if (backBtn) backBtn.onclick = () => {
               clearInterval(countdown);
               window.location.href = '/tournaments#' + window._tournamentId;
             };
@@ -1551,6 +1586,11 @@ function showOverlay(result, reason) {
       });
     }
   } else {
+    // Restore regular rematch buttons in case we're reusing the overlay
+    const regularBtns = document.getElementById('btn-rematch').closest('.controls');
+    if (regularBtns) regularBtns.style.display = 'flex';
+    const tourneyBtns = document.getElementById('tournament-overlay-btns');
+    if (tourneyBtns) tourneyBtns.style.display = 'none';
     document.getElementById('btn-rematch').textContent = 'Rematch';
     document.getElementById('btn-rematch').disabled = false;
     document.getElementById('btn-rematch').onclick = offerRematch;

@@ -1089,10 +1089,24 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
     w_display_elo = white_info.get(elo_col) or white_info.get("elo", 1500)
     b_display_elo = black_info.get(elo_col) or black_info.get("elo", 1500)
 
+    # Compute live standings rank for display in-game
+    conns = tournament_connections.get(tournament_id, {})
+    ranked = sorted(conns.values(), key=lambda x: (-x.get("score", 0), -x.get("elo", 1500)))
+    uid_to_rank = {list(conns.keys())[i]: i+1
+                   for i, uid in enumerate(c.get("user_id", "") for c in ranked)
+                   if True}
+    # Simpler: rank by index in sorted list
+    sorted_uids = sorted(conns.keys(),
+                         key=lambda u: (-conns[u].get("score",0), -conns[u].get("elo",1500)))
+    uid_rank = {uid: i+1 for i, uid in enumerate(sorted_uids)}
+    w_rank = uid_rank.get(white_id, 0)
+    b_rank = uid_rank.get(black_id, 0)
+
     await arena_send(white_info["ws"], {
         "type": "game_ready", "game_id": game_id,
         "color": "white", "opponent": black_info["username"],
         "opponent_elo": b_display_elo,
+        "my_rank": w_rank, "opponent_rank": b_rank,
         "tournament_db_id": db_game_id,
         "time_control": time_control,
     })
@@ -1100,6 +1114,7 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
         "type": "game_ready", "game_id": game_id,
         "color": "black", "opponent": white_info["username"],
         "opponent_elo": w_display_elo,
+        "my_rank": b_rank, "opponent_rank": w_rank,
         "tournament_db_id": db_game_id,
         "time_control": time_control,
     })
@@ -2400,6 +2415,10 @@ async def create_tournament(request: Request, authorization: str = Header(None))
         if field not in body:
             raise HTTPException(400, f"Missing field: {field}")
 
+    region = body.get("region") or None
+    if region and region not in REGIONS:
+        raise HTTPException(400, f"Unknown region: {region}")
+
     row = {
         "name":             body["name"],
         "description":      body.get("description") or None,
@@ -2408,10 +2427,12 @@ async def create_tournament(request: Request, authorization: str = Header(None))
         "rounds":           int(body.get("rounds") or 0),
         "max_players":      int(body.get("max_players") or 9999),
         "country":          body.get("country") or None,
+        "region":           region,
         "starts_at":        body["starts_at"],
         "created_by":       user_id,
         "status":           "upcoming",
         "duration_minutes": int(body["duration_minutes"]) if body.get("duration_minutes") else 60,
+        "prize_pool":       float(body["prize_pool"]) if body.get("prize_pool") else 0,
     }
 
     async with httpx.AsyncClient() as client:
@@ -2444,7 +2465,7 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
         r = await client.get(
             f"{SUPABASE_URL}/rest/v1/tournaments",
             params={"id": f"eq.{tournament_id}",
-                    "select": "country,max_players,status,prize_pool"},
+                    "select": "country,region,max_players,status,prize_pool"},
             headers={"apikey": SUPABASE_SERVICE_KEY,
                      "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
@@ -2456,13 +2477,10 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
         if t["status"] != "upcoming":
             raise HTTPException(400, "Tournament is not open for registration")
 
-        # Always check banned status
-        # For prize tournaments, also enforce account age + minimum games
         has_prizes = bool(t.get("prize_pool") and float(t.get("prize_pool") or 0) > 0)
         if has_prizes:
             await check_prize_eligibility(user_id, client)
         else:
-            # Just check banned for free tournaments
             ban_r = await client.get(
                 f"{SUPABASE_URL}/rest/v1/profiles",
                 params={"user_id": f"eq.{user_id}", "select": "banned,ban_reason"},
@@ -2474,21 +2492,30 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
                 reason = ban_rows[0].get("ban_reason") or "Violation of fair play rules."
                 raise HTTPException(403, f"Account banned: {reason}")
 
-        # Fetch profile for country check and player row insert
+        # Fetch profile — needed for all restriction checks
         profile_r = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles",
             params={"user_id": f"eq.{user_id}",
-                    "select": "country,username,elo"},
+                    "select": "country,username,elo,elo_bullet,elo_blitz,elo_rapid"},
             headers={"apikey": SUPABASE_SERVICE_KEY,
                      "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
         profile = profile_r.json()
         prof = profile[0] if profile else {}
+        player_country = prof.get("country")
 
-        # Check country restriction
-        if t.get("country") and prof.get("country") != t["country"]:
+        # Country restriction (most specific)
+        if t.get("country") and player_country != t["country"]:
             raise HTTPException(403,
-                "You must be from the required country to join this tournament")
+                f"This tournament is restricted to players from {COUNTRY_NAMES_SERVER.get(t['country'], t['country'])}.")
+
+        # Region restriction
+        if t.get("region"):
+            if not player_in_region(player_country, t["region"]):
+                label = REGION_LABELS.get(t["region"], t["region"])
+                raise HTTPException(403,
+                    f"This tournament is restricted to players from {label}. "
+                    f"Make sure your country is set correctly in your profile.")
 
         # Check not already joined
         existing = await client.get(
@@ -2527,6 +2554,9 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
                 "username":      prof.get("username"),
                 "country":       prof.get("country"),
                 "elo":           prof.get("elo", 1500),
+                "elo_bullet":    prof.get("elo_bullet", 1500),
+                "elo_blitz":     prof.get("elo_blitz",  1500),
+                "elo_rapid":     prof.get("elo_rapid",  1500),
             }
         )
     if r2.status_code not in (200, 201):
@@ -2535,6 +2565,38 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
 
 
 ADMIN_USER_IDS = set(os.getenv("ADMIN_USER_IDS", "9c51d331-8eba-4da5-b644-64cd4fc168d1").split(","))
+
+# ── African regions ────────────────────────────────────────────────────────────
+REGIONS: dict[str, list[str]] = {
+    "east_africa":    ["UG","KE","TZ","RW","BI","ET","SS","SO","ER","DJ","SD"],
+    "west_africa":    ["NG","GH","SN","CI","CM","BJ","TG","GN","GW","SL","LR","GM","MR","CV","NE","BF","ML"],
+    "north_africa":   ["EG","LY","TN","DZ","MA"],
+    "south_africa":   ["ZA","ZW","ZM","MW","MZ","NA","BW","LS","SZ","AO","MG","MU","SC","KM","ST","CV"],
+    "central_africa": ["CD","CG","CF","GA","GQ","TD"],
+}
+REGION_LABELS: dict[str, str] = {
+    "east_africa":    "East Africa",
+    "west_africa":    "West Africa",
+    "north_africa":   "North Africa",
+    "south_africa":   "Southern Africa",
+    "central_africa": "Central Africa",
+}
+
+COUNTRY_NAMES_SERVER: dict[str, str] = {
+    "UG":"Uganda","KE":"Kenya","TZ":"Tanzania","RW":"Rwanda","BI":"Burundi",
+    "ET":"Ethiopia","SS":"South Sudan","SO":"Somalia","ER":"Eritrea","DJ":"Djibouti",
+    "SD":"Sudan","NG":"Nigeria","GH":"Ghana","SN":"Senegal","CI":"Ivory Coast",
+    "CM":"Cameroon","EG":"Egypt","LY":"Libya","TN":"Tunisia","DZ":"Algeria",
+    "MA":"Morocco","ZA":"South Africa","ZW":"Zimbabwe","ZM":"Zambia","MW":"Malawi",
+    "MZ":"Mozambique","NA":"Namibia","BW":"Botswana","LS":"Lesotho","SZ":"Eswatini",
+    "AO":"Angola","CD":"DR Congo","CG":"Congo","CF":"Central African Republic",
+    "GA":"Gabon","GQ":"Equatorial Guinea","TD":"Chad","MG":"Madagascar",
+}
+
+def player_in_region(player_country: str | None, region: str) -> bool:
+    if not player_country:
+        return False
+    return player_country in REGIONS.get(region, [])
 
 @app.post("/api/admin/ban")
 async def ban_user(request: Request, authorization: str = Header(None)):
@@ -2598,21 +2660,34 @@ async def leave_tournament(request: Request, authorization: str = Header(None)):
 
 @app.get("/api/tournaments")
 async def get_tournaments(status: str = "upcoming"):
-    """Get tournaments list — server-side to avoid RLS issues."""
-    # upcoming: soonest start first; active: most recently started first; completed: most recent first
     order = "starts_at.asc" if status == "upcoming" else "starts_at.desc"
     async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournaments",
-            params={"status": f"eq.{status}", "select": "*", "order": order},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        t_r, p_r = await asyncio.gather(
+            client.get(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"status": f"eq.{status}", "select": "*", "order": order},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            ),
+            client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"select": "tournament_id"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            ),
         )
-    return r.json()
-
+    tournaments = t_r.json()
+    # Count players per tournament
+    counts: dict[str, int] = {}
+    for row in p_r.json():
+        tid = str(row.get("tournament_id",""))
+        counts[tid] = counts.get(tid, 0) + 1
+    for t in tournaments:
+        t["player_count"] = counts.get(str(t.get("id","")), 0)
+    return tournaments
 
 @app.get("/api/tournaments/{tournament_id}")
 async def get_tournament(tournament_id: str):
-    """Get single tournament with players and games."""
+    """Get single tournament with players and games.
+    Merges live in-memory paused/streak state from tournament_connections."""
     async with httpx.AsyncClient() as client:
         t_r, p_r, g_r = await asyncio.gather(
             client.get(f"{SUPABASE_URL}/rest/v1/tournaments",
@@ -2622,13 +2697,24 @@ async def get_tournament(tournament_id: str):
                 params={"tournament_id": f"eq.{tournament_id}", "select": "*", "order": "score.desc"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}),
             client.get(f"{SUPABASE_URL}/rest/v1/tournament_games",
-                params={"tournament_id": f"eq.{tournament_id}", "select": "*", "order": "round.asc"},
+                params={"tournament_id": f"eq.{tournament_id}", "select": "*", "order": "played_at.asc"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}),
         )
     ts = t_r.json()
     if not ts:
         raise HTTPException(404, "Tournament not found")
-    return {"tournament": ts[0], "players": p_r.json(), "games": g_r.json()}
+
+    players = p_r.json()
+    # Merge live paused state from in-memory connections
+    conns = tournament_connections.get(tournament_id, {})
+    for p in players:
+        uid = p.get("user_id")
+        if uid and uid in conns:
+            p["paused"] = conns[uid].get("paused", False)
+        else:
+            p["paused"] = False
+
+    return {"tournament": ts[0], "players": players, "games": g_r.json()}
 
 @app.get("/favicon.ico")
 def favicon():

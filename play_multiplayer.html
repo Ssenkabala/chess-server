@@ -497,7 +497,9 @@ global.Chessground = Nr;
       display: block; position: relative; touch-action: none;
       width:  calc(200px + var(---zoom) * 3px);
       height: calc(200px + var(---zoom) * 3px);
-      max-width: 100%; margin: 0 auto;
+      max-width: min(100vw, 100%);
+      max-height: min(100vw, 100%);
+      margin: 0 auto;
     }
     #board { display: block; width: 100%; height: 100%; }
     cg-container { position: absolute; top:0; left:0; width:100%; height:100%; }
@@ -510,6 +512,12 @@ global.Chessground = Nr;
     cg-resize:hover { background: radial-gradient(circle at bottom right,#00ff9d99 0%,#00ff9d44 40%,transparent 70%); border-color: #00ff9daa; }
     @media (max-width: 600px) {
       body { padding: 8px 0 !important; overflow-x: hidden; }
+      #board-wrap {
+        width:  min(calc(100vw - 16px), calc(200px + var(---zoom) * 3px));
+        height: min(calc(100vw - 16px), calc(200px + var(---zoom) * 3px));
+      }
+      cg-resize { display: none; }
+      .player-bar { padding: 0 8px; }
     }
 
     /* Status bar */
@@ -888,7 +896,13 @@ var ZOOM_STORAGE = 'africhess.zoom';
 
 function initBoardZoom() {
   var saved = parseInt(localStorage.getItem(ZOOM_STORAGE) || '', 10);
-  document.body.style.setProperty('---zoom', ((saved >= 0 && saved <= 100) ? saved : 80).toString());
+  if (saved >= 0 && saved <= 100) {
+    document.body.style.setProperty('---zoom', saved.toString());
+  } else {
+    var vw = Math.min(window.innerWidth, window.screen.width);
+    var defaultZoom = Math.round(Math.min(100, Math.max(0, (vw - 200) / 3)));
+    document.body.style.setProperty('---zoom', defaultZoom.toString());
+  }
 }
 
 function makeBoardResizable(wrapId, cgGetter) {

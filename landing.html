@@ -545,7 +545,77 @@
     }
     .reveal.visible { opacity: 1; transform: translateY(0); }
 
+    /* ════════════════════════════════════════════
+       MOBILE — everything ≤ 768px
+       ════════════════════════════════════════════ */
+    @media (max-width: 768px) {
 
+      /* Nav */
+      nav { padding: 16px 20px; }
+
+      /* Hero — single column, board below text */
+      .hero {
+        grid-template-columns: 1fr;
+        padding: 90px 20px 48px;
+        gap: 32px;
+        min-height: auto;
+      }
+      .hero::after { display: none; } /* remove grid bg on mobile */
+
+      /* H1 much smaller on mobile */
+      h1 {
+        font-size: clamp(36px, 9vw, 52px);
+        margin-bottom: 16px;
+      }
+
+      .hero-eyebrow { margin-bottom: 16px; }
+      .hero-sub { font-size: 13px; margin-bottom: 28px; }
+      .hero-ctas { gap: 10px; }
+      .btn-primary, .btn-secondary { padding: 12px 22px; font-size: 11px; }
+
+      /* Board — full width, no rotation animation on mobile (performance) */
+      .hero-board {
+        width: 100%;
+        max-width: 340px;
+        margin: 0 auto;
+        animation: none;
+        transform: none;
+      }
+      .hero-board .sq { font-size: clamp(14px, 4vw, 22px); }
+
+      .elo-badge { margin-top: 24px; }
+
+      /* Stats — 2 columns */
+      .stats-row { grid-template-columns: 1fr 1fr; }
+      .stat { padding: 24px 16px; }
+      .stat-num { font-size: 36px; }
+
+      /* Section padding */
+      section { padding: 60px 20px !important; }
+      .section-inner { max-width: 100% !important; }
+
+      /* API section — stack */
+      .api-section { grid-template-columns: 1fr; gap: 32px; }
+      .code-block { padding: 20px; font-size: 11px; }
+
+      /* Plans — stack */
+      .plans-grid { grid-template-columns: 1fr !important; }
+
+      /* Footer */
+      footer {
+        flex-direction: column;
+        gap: 20px;
+        padding: 32px 20px;
+        text-align: center;
+      }
+      .footer-links { flex-wrap: wrap; justify-content: center; gap: 16px; }
+    }
+
+    /* Very small phones */
+    @media (max-width: 400px) {
+      h1 { font-size: 32px; }
+      .hero { padding: 80px 16px 40px; }
+    }
   </style>
 </head>
 <body>

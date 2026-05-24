@@ -1003,20 +1003,17 @@ async def arena_pair(tournament_id: str):
             used.add(p1)
             used.add(best_p2)
 
-    # Handle odd player out — give a bye
-    bye_player = None
+    # Odd player — just leave them waiting, no bye points
+    # Arena players should wait until a free opponent becomes available
     if len(available) % 2 == 1:
         for uid in available:
             if uid not in used:
-                bye_player = uid
+                await arena_send(conns[uid]["ws"], {
+                    "type":    "waiting",
+                    "message": "Waiting for an available opponent…"
+                })
+                print(f"[arena] {uid} waiting (odd player) in {tournament_id}", flush=True)
                 break
-        if bye_player:
-            conns[bye_player]["score"] = conns[bye_player].get("score", 0) + 0.5
-            await arena_send(conns[bye_player]["ws"], {
-                "type":    "bye",
-                "message": "No opponent available right now — you receive a bye (½ pt). Waiting for next round…"
-            })
-            print(f"[arena] bye for {bye_player} in {tournament_id}", flush=True)
 
     for white_id, black_id in paired:
         asyncio.create_task(arena_launch_game(tournament_id, white_id, black_id))
@@ -1352,6 +1349,15 @@ async def game_ws(ws: WebSocket, game_id: str):
         game["_lock"] = asyncio.Lock()
 
     async with game["_lock"]:
+        # For tournament games, verify this user is one of the two assigned players
+        connecting_user_id = claim_data.get("user_id")
+        if game.get("tournament_id") and connecting_user_id:
+            if (claimed_color == "white" and connecting_user_id != game.get("white_id")) or \
+               (claimed_color == "black" and connecting_user_id != game.get("black_id")):
+                await send(ws, {"type": "error", "detail": "You are not a player in this tournament game."})
+                await ws.close()
+                return
+
         if claimed_color == "white" and game.get("white_game_ws") is None:
             game["white_game_ws"] = ws
             game["white_ws"] = ws
@@ -1516,10 +1522,17 @@ async def game_ws(ws: WebSocket, game_id: str):
                     await update_elos(game, winner)
                 asyncio.create_task(cleanup_game(game_id, delay=10))
 
-            # ΓöÇΓöÇ Draw offer (future) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            # ── Draw offer ─────────────────────────────────────────────────────
             elif msg_type == "draw_offer":
-                opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
-                await send(opponent_ws, {"type": "draw_offer"})
+                # Send over the GAME websocket, not the lobby websocket
+                opponent_ws = game.get("black_game_ws") if color == "w" else game.get("white_game_ws")
+                if opponent_ws:
+                    await send(opponent_ws, {"type": "draw_offer"})
+                else:
+                    # Fallback to lobby ws if game ws not yet connected
+                    opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
+                    if opponent_ws:
+                        await send(opponent_ws, {"type": "draw_offer"})
 
             elif msg_type == "draw_accept":
                 game["over"] = True
@@ -1597,14 +1610,15 @@ async def game_ws(ws: WebSocket, game_id: str):
             game["over"] = True
             winner = "black" if color == "w" else "white"
             opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
-            # Send directly to opponent ΓÇö broadcast may fail if our socket is dead
             await send(opponent_ws, {
                 "type":   "gameover",
                 "result": winner,
                 "reason": "disconnect",
                 "clock":  game["clock"],
             })
-            await update_elos(game, winner)
+            if not game.get("_elo_updated"):
+                game["_elo_updated"] = True
+                await update_elos(game, winner)
             active_games.pop(game_id, None)
 
 

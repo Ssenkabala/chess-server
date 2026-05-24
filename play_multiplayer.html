@@ -466,53 +466,86 @@ global.Chessground = Nr;
       letter-spacing: 0.1em;
     }
 
-    /* ── Game screen ── */
+    /* ── Game screen — Lichess-style layout ── */
     .game-wrap {
       width: 100%;
-      max-width: 520px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 0;          /* NO gap — bars flush against board */
     }
 
     /* Player bar */
     .player-bar {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      padding: 10px 14px;
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: 3px;
+      padding: 8px 12px;
+      background: #0d0d0d;
+      border: none;
+      gap: 6px;
+      min-height: 44px;
     }
+    .player-rank {
+      font-size: 11px;
+      color: #444;
+      letter-spacing: 0.05em;
+      flex-shrink: 0;
+    }
+    .lag-indicator {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #2a2a2a;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .lag-indicator.good   { background: #00ff9d; }
+    .lag-indicator.medium { background: #f0c040; }
+    .lag-indicator.bad    { background: #ff4d4d; }
+
     .player-name {
-      font-size: 13px;
-      letter-spacing: 0.08em;
-      color: var(--muted);
+      font-size: 14px;
+      letter-spacing: 0.04em;
+      color: var(--text);
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .player-name.active-turn { color: var(--green); }
+    .player-elo {
+      font-size: 12px;
+      color: #555;
+      flex-shrink: 0;
+      margin-right: 4px;
+    }
+    .player-score-change {
+      font-size: 11px;
+      font-weight: bold;
+      flex-shrink: 0;
+      min-width: 28px;
+    }
+    .player-score-change.up   { color: var(--green); }
+    .player-score-change.down { color: var(--danger); }
 
     .clock {
       font-family: monospace;
       font-size: 22px;
       font-weight: bold;
-      letter-spacing: 0.05em;
-      color: var(--text);
-      min-width: 60px;
+      letter-spacing: 0.02em;
+      color: #888;
+      min-width: 58px;
       text-align: right;
+      flex-shrink: 0;
     }
     .clock.low { color: var(--danger); animation: flash 1s step-end infinite; }
     @keyframes flash { 50% { opacity: 0.4; } }
-    .clock.active-clock { color: var(--green); }
+    .clock.active-clock { color: var(--text); }
 
-    /* Board — zoom CSS variable (shared with index.html via localStorage) */
-    :root { ---zoom: 80; }
+    /* Thin separator between bar and board */
     #board-wrap {
       display: block; position: relative; touch-action: none;
-      width:  calc(200px + var(---zoom) * 3px);
-      height: calc(200px + var(---zoom) * 3px);
-      max-width: min(100vw, 100%);
-      max-height: min(100vw, 100%);
+      width:  min(calc(200px + var(---zoom) * 3px), calc(100vw));
+      height: min(calc(200px + var(---zoom) * 3px), calc(100vw));
       margin: 0 auto;
     }
     #board { display: block; width: 100%; height: 100%; }
@@ -524,123 +557,158 @@ global.Chessground = Nr;
       border-bottom: 2px solid #00ff9d44; border-right: 2px solid #00ff9d44; border-radius: 0 0 4px 0;
     }
     cg-resize:hover { background: radial-gradient(circle at bottom right,#00ff9d99 0%,#00ff9d44 40%,transparent 70%); border-color: #00ff9daa; }
-    @media (max-width: 600px) {
-      body { padding: 8px 0 !important; overflow-x: hidden; }
-      #board-wrap {
-        width:  min(calc(100vw - 16px), calc(200px + var(---zoom) * 3px));
-        height: min(calc(100vw - 16px), calc(200px + var(---zoom) * 3px));
-      }
-      cg-resize { display: none; }
-      .player-bar { padding: 0 8px; }
-    }
 
-    /* Status bar */
+    /* Status bar — compact, below player bar */
     .status-bar {
       width: 100%;
       text-align: center;
-      font-size: 14px;
+      font-size: 12px;
       color: var(--muted);
       letter-spacing: 0.06em;
-      padding: 6px 0;
-      min-height: 28px;
+      padding: 6px 12px;
+      background: #0a0a0a;
+      border-top: 1px solid #161616;
+      min-height: 30px;
     }
     .status-bar.highlight { color: var(--green); }
 
-    /* Controls */
-    .controls {
+    /* Bottom controls bar — Lichess-style compact row */
+    .controls-bar {
       display: flex;
-      gap: 10px;
-      justify-content: center;
-      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 10px;
+      background: #0d0d0d;
+      border-top: 1px solid #1a1a1a;
+      gap: 6px;
     }
-
-    button {
-      padding: 9px 22px;
+    .ctrl-btn {
+      padding: 7px 14px;
       background: transparent;
-      color: var(--green);
-      border: 1px solid var(--green);
-      font-size: 13px;
-      font-family: 'Georgia', serif;
+      color: #555;
+      border: 1px solid #1e1e1e;
+      font-size: 11px;
+      font-family: Georgia, serif;
       letter-spacing: 0.1em;
       cursor: pointer;
       border-radius: 2px;
-      transition: all 0.18s;
+      transition: all 0.15s;
       text-transform: uppercase;
+      flex: 1;
+      text-align: center;
     }
-    button:hover { background: var(--green); color: #111; }
-    button.danger { color: var(--danger); border-color: var(--danger); }
-    button.danger:hover { background: var(--danger); color: #fff; }
-    button:disabled { opacity: 0.3; cursor: not-allowed; }
+    .ctrl-btn:hover { color: var(--text); border-color: #333; }
+    .ctrl-btn.danger { color: #7a2020; border-color: #2a1010; }
+    .ctrl-btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+    .ctrl-btn:disabled { opacity: 0.25; cursor: not-allowed; }
 
     /* Move list */
     .move-list-wrap {
-      width: 100%;
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: 3px;
-      padding: 12px 14px;
-      max-height: 120px;
+      background: #080808;
+      border-top: 1px solid #161616;
+      padding: 8px 12px;
+      max-height: 100px;
       overflow-y: auto;
-    }
-    .move-list-label {
-      font-size: 10px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: #444;
-      margin-bottom: 8px;
     }
     .move-list {
       display: flex;
       flex-wrap: wrap;
-      gap: 4px 8px;
+      gap: 2px 6px;
       font-family: monospace;
-      font-size: 13px;
-      color: #aaa;
+      font-size: 12px;
+      color: #666;
     }
-    .move-list span { color: #555; margin-right: 2px; }
+    .move-list span { color: #333; margin-right: 2px; }
 
-    /* Game over overlay */
+    @media (max-width: 600px) {
+      body { padding: 0 !important; overflow-x: hidden; }
+      #board-wrap {
+        width:  100vw !important;
+        height: 100vw !important;
+      }
+      cg-resize { display: none; }
+      .clock { font-size: 20px; }
+    }
+
+    /* Game over overlay — Lichess rounded dark card on board */
     .overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.85);
-      display: none;
-      align-items: center;
-      justify-content: center;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55);
+      display: none; align-items: center; justify-content: center;
       z-index: 100;
     }
     .overlay.active { display: flex; }
     .result-card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-top: 3px solid var(--green);
-      border-radius: 4px;
-      padding: 40px 48px;
+      background: rgba(20,20,20,0.96);
+      border-radius: 16px;
+      padding: 28px 24px 20px;
       text-align: center;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      min-width: 280px;
+      display: flex; flex-direction: column; gap: 10px;
+      min-width: min(320px, 88vw);
+      max-width: 400px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+      position: relative;
     }
-    .result-title {
-      font-size: 28px;
-      letter-spacing: 0.1em;
-      color: var(--green);
-      text-transform: uppercase;
+    .result-score {
+      font-size: 32px;
+      font-weight: bold;
+      color: var(--text);
+      letter-spacing: 0.05em;
     }
-    .result-title.lose { color: var(--danger); }
-    .result-title.draw { color: #aaa; }
+    .result-reason {
+      font-size: 14px;
+      color: #888;
+      font-style: italic;
+      letter-spacing: 0.04em;
+    }
+    .result-elo-change {
+      font-size: 13px;
+      color: #555;
+      letter-spacing: 0.06em;
+    }
+    .result-elo-change .up   { color: var(--green); font-weight: bold; }
+    .result-elo-change .down { color: var(--danger); font-weight: bold; }
+
+    /* Pill buttons — Lichess style */
+    .pill-btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 50px;
+      font-size: 15px;
+      font-weight: bold;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      transition: opacity 0.15s;
+    }
+    .pill-btn:hover { opacity: 0.88; }
+    .pill-btn.primary { background: #c6a96a; color: #1a1200; }   /* Lichess gold */
+    .pill-btn.secondary { background: #2a2a2a; color: #999; }
+    .pill-btn.green { background: var(--green); color: #000; }
+
+    .session-score {
+      display: flex; gap: 0;
+      border: 1px solid #1e1e1e; border-radius: 2px; overflow: hidden;
+      font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+      justify-content: center;
+    }
+    .session-score span { padding: 4px 12px; background: var(--bg2); color: var(--muted); }
+    .session-score .sc-w { color: var(--green); }
+    .session-score .sc-d { color: #777; }
+    .session-score .sc-l { color: var(--danger); }
+    .session-score .sep  { color: #333; padding: 4px 4px; background: var(--bg); }
 
     /* ── Promotion picker ── */
     .promo-overlay {
       display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,0.75); z-index: 500;
+      background: rgba(0,0,0,0.80); z-index: 500;
       align-items: center; justify-content: center;
     }
     .promo-overlay.active { display: flex; }
     .promo-box {
       background: #111; border: 1px solid #333;
-      border-radius: 4px; padding: 20px 24px; text-align: center;
+      border-radius: 6px; padding: 20px 24px; text-align: center;
     }
     .promo-title {
       font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
@@ -655,44 +723,12 @@ global.Chessground = Nr;
     }
     .promo-piece:hover { border-color: #00ff9d; background: #0d1f17; }
     .promo-piece img { width: 48px; height: 48px; }
-    .result-reason {
-      font-size: 13px;
-      color: var(--muted);
-      letter-spacing: 0.1em;
-    }
-    .session-score {
-      display: flex;
-      gap: 0;
-      border: 1px solid var(--border);
-      border-radius: 2px;
-      overflow: hidden;
-      font-size: 11px;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-    .session-score span {
-      padding: 4px 12px;
-      background: var(--bg2);
-      color: var(--muted);
-    }
-    .session-score .sc-w { color: var(--green); }
-    .session-score .sc-d { color: #777; }
-    .session-score .sc-l { color: var(--danger); }
-    .session-score .sep  { color: #333; padding: 4px 4px; background: var(--bg); }
 
     /* Highlight */
-    .highlight-move {
-      background: rgba(0,255,157,0.22) !important;
-    }
+    .highlight-move { background: rgba(0,255,157,0.22) !important; }
     .highlight-selected { background: rgba(0,255,157,0.18) !important; }
-    .highlight-square {
-      background: radial-gradient(circle, rgba(0,255,157,0.55) 25%, transparent 27%) !important;
-    }
-    .highlight-capture {
-      background: radial-gradient(circle, transparent 55%, rgba(0,255,157,0.55) 57%) !important;
-    }
-
-    /* Time control picker */
+    .highlight-square { background: radial-gradient(circle, rgba(0,255,157,0.55) 25%, transparent 27%) !important; }
+    .highlight-capture { background: radial-gradient(circle, transparent 55%, rgba(0,255,157,0.55) 57%) !important; }
     .tc-btn {
       background: var(--bg2); border: 1px solid var(--border); border-radius: 3px;
       color: var(--muted); font-size: 13px; font-family: Georgia, serif;
@@ -702,6 +738,16 @@ global.Chessground = Nr;
     .tc-btn span { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; display: block; }
     .tc-btn:hover { border-color: #444; color: var(--text); }
     .tc-btn.active { border-color: var(--green); color: var(--green); background: #0a1f14; }
+
+    /* Lichess-style TC cell grid */
+    .tc-cell {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 2px;
+      color: var(--muted); font-size: 13px; font-family: Georgia, serif;
+      padding: 8px 4px; cursor: pointer; text-align: center;
+      transition: border-color 0.12s, color 0.12s, background 0.12s;
+    }
+    .tc-cell:hover { border-color: #444; color: var(--text); }
+    .tc-cell.active { border-color: var(--green); color: var(--green); background: #0a1f14; }
   </style>
 </head>
 <body>
@@ -719,20 +765,58 @@ global.Chessground = Nr;
   <!-- ══ LOBBY SCREEN ══ -->
   <div id="screen-lobby" class="screen active">
     <!-- Time control picker — shown before searching -->
-    <div id="tc-picker" style="text-align:center;margin-bottom:20px;">
-      <div style="font-size:11px;letter-spacing:0.15em;text-transform:uppercase;color:#555;margin-bottom:12px;">Time Control</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;" id="tc-buttons">
-        <button class="tc-btn active" data-tc="1+0"  onclick="selectTc(this)">1+0<br><span>Bullet</span></button>
-        <button class="tc-btn"        data-tc="2+1"  onclick="selectTc(this)">2+1<br><span>Bullet</span></button>
-        <button class="tc-btn"        data-tc="3+0"  onclick="selectTc(this)">3+0<br><span>Blitz</span></button>
-        <button class="tc-btn"        data-tc="3+2"  onclick="selectTc(this)">3+2<br><span>Blitz</span></button>
-        <button class="tc-btn"        data-tc="5+0"  onclick="selectTc(this)">5+0<br><span>Blitz</span></button>
-        <button class="tc-btn"        data-tc="5+3"  onclick="selectTc(this)">5+3<br><span>Blitz</span></button>
-        <button class="tc-btn"        data-tc="10+0" onclick="selectTc(this)">10+0<br><span>Rapid</span></button>
-        <button class="tc-btn"        data-tc="10+5" onclick="selectTc(this)">10+5<br><span>Rapid</span></button>
-        <button class="tc-btn"        data-tc="15+10" onclick="selectTc(this)">15+10<br><span>Rapid</span></button>
+    <div id="tc-picker" style="margin-bottom:20px;">
+      <div style="font-size:11px;letter-spacing:0.15em;text-transform:uppercase;color:#555;margin-bottom:16px;text-align:center;">Choose Time Control</div>
+
+      <!-- Lichess-style: two columns — Base time | Increment -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+
+        <!-- Left: Base time -->
+        <div>
+          <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#333;margin-bottom:8px;text-align:center;">Minutes per side</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;" id="tc-base-btns">
+            <button class="tc-cell active" data-val="1"  onclick="selectBase(this)">¼</button>
+            <button class="tc-cell"        data-val="0.5" onclick="selectBase(this)">½</button>
+            <button class="tc-cell"        data-val="1"  onclick="selectBase(this)">1</button>
+            <button class="tc-cell"        data-val="2"  onclick="selectBase(this)">2</button>
+            <button class="tc-cell"        data-val="3"  onclick="selectBase(this)">3</button>
+            <button class="tc-cell"        data-val="5"  onclick="selectBase(this)">5</button>
+            <button class="tc-cell"        data-val="10" onclick="selectBase(this)">10</button>
+            <button class="tc-cell"        data-val="15" onclick="selectBase(this)">15</button>
+            <button class="tc-cell"        data-val="20" onclick="selectBase(this)">20</button>
+            <button class="tc-cell"        data-val="25" onclick="selectBase(this)">25</button>
+            <button class="tc-cell"        data-val="30" onclick="selectBase(this)">30</button>
+            <button class="tc-cell"        data-val="45" onclick="selectBase(this)">45</button>
+            <button class="tc-cell"        data-val="60" onclick="selectBase(this)">60</button>
+          </div>
+        </div>
+
+        <!-- Right: Increment -->
+        <div>
+          <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#333;margin-bottom:8px;text-align:center;">Increment in seconds</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;" id="tc-inc-btns">
+            <button class="tc-cell active" data-val="0"  onclick="selectInc(this)">0</button>
+            <button class="tc-cell"        data-val="1"  onclick="selectInc(this)">1</button>
+            <button class="tc-cell"        data-val="2"  onclick="selectInc(this)">2</button>
+            <button class="tc-cell"        data-val="3"  onclick="selectInc(this)">3</button>
+            <button class="tc-cell"        data-val="5"  onclick="selectInc(this)">5</button>
+            <button class="tc-cell"        data-val="10" onclick="selectInc(this)">10</button>
+            <button class="tc-cell"        data-val="15" onclick="selectInc(this)">15</button>
+            <button class="tc-cell"        data-val="20" onclick="selectInc(this)">20</button>
+            <button class="tc-cell"        data-val="30" onclick="selectInc(this)">30</button>
+            <button class="tc-cell"        data-val="45" onclick="selectInc(this)">45</button>
+            <button class="tc-cell"        data-val="60" onclick="selectInc(this)">60</button>
+          </div>
+        </div>
       </div>
-      <button onclick="startSearch()" style="margin-top:16px;padding:12px 32px;background:#00ff9d;color:#000;border:none;border-radius:3px;font-size:13px;font-weight:700;letter-spacing:0.08em;cursor:pointer;">Find Game</button>
+
+      <!-- Preview -->
+      <div style="text-align:center;margin-bottom:16px;">
+        <span id="tc-preview" style="font-size:22px;font-weight:bold;color:#e8e6e0;letter-spacing:0.05em;">5+0</span>
+        <span id="tc-category" style="font-size:11px;color:#555;letter-spacing:0.12em;text-transform:uppercase;margin-left:10px;">Blitz</span>
+      </div>
+
+      <button onclick="startSearch()" style="width:100%;padding:13px;background:#00ff9d;color:#000;border:none;border-radius:3px;font-size:13px;font-weight:700;letter-spacing:0.08em;cursor:pointer;">Find Game</button>
     </div>
     <!-- Searching state — shown after clicking Find Game -->
     <div id="tc-searching" style="display:none;">
@@ -753,69 +837,83 @@ global.Chessground = Nr;
   </div>
 
   <!-- ══ GAME SCREEN ══ -->
-  <div id="screen-game" class="screen">
+  <div id="screen-game" class="screen" style="padding:0;gap:0;max-width:100%;">
     <div class="game-wrap">
 
-      <!-- Opponent bar (top) -->
+      <!-- Opponent bar (top) — rank · lag · name · elo · score-change · clock -->
       <div class="player-bar" id="bar-opponent">
-        <span class="player-rank-badge" id="rank-opponent" style="display:none;font-size:10px;color:#555;margin-right:4px;"></span>
+        <span class="player-rank" id="rank-opponent" style="display:none;"></span>
+        <span class="lag-indicator" id="lag-opponent" title="Connection"></span>
         <span class="player-name" id="name-opponent">Opponent</span>
-        <span class="clock" id="clock-opponent">5:00</span>
+        <span class="player-elo" id="elo-opponent"></span>
+        <span class="player-score-change" id="score-change-opponent"></span>
+        <span class="clock" id="clock-opponent">—</span>
       </div>
 
-      <!-- Board -->
+      <!-- Board — flush, no margin -->
       <div id="board-wrap">
         <div id="board" class="cg-wrap"></div>
       </div>
 
       <!-- My bar (bottom) -->
       <div class="player-bar" id="bar-me">
-        <span class="player-rank-badge" id="rank-me" style="display:none;font-size:10px;color:#555;margin-right:4px;"></span>
+        <span class="player-rank" id="rank-me" style="display:none;"></span>
+        <span class="lag-indicator good" id="lag-me" title="Your connection"></span>
         <span class="player-name" id="name-me">You</span>
-        <span class="clock" id="clock-me">5:00</span>
+        <span class="player-elo" id="elo-me"></span>
+        <span class="player-score-change" id="score-change-me"></span>
+        <span class="clock" id="clock-me">—</span>
       </div>
 
-      <div class="status-bar" id="game-status">Waiting for game to start...</div>
+      <!-- Status bar -->
+      <div class="status-bar" id="game-status">Waiting for opponent…</div>
 
-      <div class="controls">
-        <button onclick="offerDraw()">Draw</button>
-        <button class="danger" onclick="resign()">Resign</button>
-        <button onclick="goToLobby()">New Game</button>
+      <!-- Bottom controls -->
+      <div class="controls-bar">
+        <button class="ctrl-btn" onclick="offerDraw()" id="btn-draw">½ Draw</button>
+        <button class="ctrl-btn danger" onclick="resign()" id="btn-resign">⚑ Resign</button>
+        <button class="ctrl-btn" onclick="goToLobby()">+ New</button>
       </div>
 
       <!-- Move list -->
       <div class="move-list-wrap">
-        <div class="move-list-label">Moves</div>
         <div class="move-list" id="move-list"></div>
       </div>
 
     </div>
   </div>
 
-  <!-- ══ GAME OVER OVERLAY ══ -->
+  <!-- ══ GAME OVER OVERLAY ══ — Lichess-style rounded card -->
   <div class="overlay" id="overlay">
-    <div class="result-card" style="position:relative;">
-      <button onclick="forceCloseOverlay()" style="position:absolute;top:8px;right:10px;background:none;border:none;color:#555;font-size:18px;cursor:pointer;line-height:1;padding:4px 6px;" title="Close">✕</button>
-      <div class="result-title" id="result-title">Draw</div>
+    <div class="result-card">
+      <!-- Score e.g. "1-0" or "½-½" -->
+      <div class="result-score" id="result-score">½-½</div>
+      <!-- Reason e.g. "White didn't move · Black is victorious" -->
       <div class="result-reason" id="result-reason">by agreement</div>
-      <div class="session-score" id="session-score" style="display:none; justify-content:center; margin-top:4px;">
+      <!-- ELO change -->
+      <div class="result-elo-change" id="result-elo-change" style="display:none;"></div>
+      <!-- Session score -->
+      <div class="session-score" id="session-score" style="display:none; justify-content:center;">
         <span class="sc-w" id="sc-w">0W</span>
         <span class="sep">/</span>
         <span class="sc-d" id="sc-d">0D</span>
         <span class="sep">/</span>
         <span class="sc-l" id="sc-l">0L</span>
       </div>
-      <div id="rematch-area" style="margin-top:8px;">
-        <div class="controls" style="justify-content:center;flex-direction:column;gap:8px;">
-          <button id="btn-rematch" onclick="offerRematch()" style="width:100%;">Rematch</button>
-          <button onclick="goToLobby()" style="width:100%;">New Game</button>
+
+      <!-- Regular game buttons -->
+      <div id="rematch-area">
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+          <button class="pill-btn primary" id="btn-rematch" onclick="offerRematch()">⟳ Rematch</button>
+          <button class="pill-btn secondary" onclick="goToLobby()">+ New Game</button>
         </div>
-        <!-- Tournament-only buttons — shown via showOverlay -->
-        <div id="tournament-overlay-btns" style="display:none;flex-direction:column;gap:8px;margin-top:4px;">
-          <button id="btn-back-tournament" style="width:100%;background:#00ff9d;color:#000;border:none;border-radius:3px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;">▶ Back to Tournament</button>
-          <button id="btn-overlay-pause" onclick="overlayPauseTournament()" style="width:100%;background:transparent;border:1px solid #333;color:#777;border-radius:3px;padding:10px;font-size:12px;cursor:pointer;">⏸ Pause (stay in tournament)</button>
-        </div>
-        <div id="rematch-status" style="font-size:11px; color:var(--muted); text-align:center; margin-top:6px; letter-spacing:0.08em;"></div>
+        <div id="rematch-status" style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px;letter-spacing:0.08em;"></div>
+      </div>
+
+      <!-- Tournament-only buttons -->
+      <div id="tournament-overlay-btns" style="display:none;flex-direction:column;gap:8px;margin-top:4px;">
+        <button class="pill-btn primary" id="btn-back-tournament">▶ Back to Tournament</button>
+        <button class="pill-btn secondary" id="btn-overlay-pause" onclick="overlayPauseTournament()">⏸ Pause</button>
       </div>
     </div>
   </div>
@@ -852,14 +950,50 @@ function tcCategory(tc) {
   } catch { return ''; }
 }
 
-function selectTc(btn) {
-  document.querySelectorAll('.tc-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  const tc = btn.getAttribute('data-tc');
+// Lichess-style TC picker state
+var _tcBase = 5;   // minutes
+var _tcInc  = 0;   // seconds
+
+function updateTcPreview() {
+  // Format base: show fractions nicely
+  let baseStr = _tcBase < 1 ? (_tcBase === 0.25 ? '¼' : '½') : String(_tcBase);
+  const tc = _tcBase + '+' + _tcInc;
+  const cat = tcCategory(tc);
   window._timeControl = tc;
+  const preview = document.getElementById('tc-preview');
+  const catEl   = document.getElementById('tc-category');
+  if (preview) preview.textContent = baseStr + '+' + _tcInc;
+  if (catEl)   catEl.textContent   = cat;
   const label = document.getElementById('tc-label');
-  if (label) label.textContent = tc + ' · ' + tcCategory(tc);
+  if (label) label.textContent = baseStr + '+' + _tcInc + ' · ' + cat;
 }
+
+function selectBase(btn) {
+  document.querySelectorAll('#tc-base-btns .tc-cell').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _tcBase = parseFloat(btn.getAttribute('data-val'));
+  updateTcPreview();
+}
+
+function selectInc(btn) {
+  document.querySelectorAll('#tc-inc-btns .tc-cell').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _tcInc = parseInt(btn.getAttribute('data-val'), 10);
+  updateTcPreview();
+}
+
+// Init: select 5 base and 0 increment on load
+(function initTcPicker() {
+  document.querySelectorAll('#tc-base-btns .tc-cell').forEach(b => {
+    b.classList.remove('active');
+    if (parseFloat(b.getAttribute('data-val')) === 5) b.classList.add('active');
+  });
+  document.querySelectorAll('#tc-inc-btns .tc-cell').forEach(b => {
+    b.classList.remove('active');
+    if (parseInt(b.getAttribute('data-val'), 10) === 0) b.classList.add('active');
+  });
+  updateTcPreview();
+})();
 
 function startSearch() {
   const active = document.querySelector('.tc-btn.active');
@@ -1178,17 +1312,29 @@ function startGame() {
   game     = new Chess();
   gameOver = false;
   myTurn   = myColor === 'white';
+  myEloChange = null;
 
-  // Player labels
+  // Reset score-change badges
+  ['score-change-me','score-change-opponent'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = ''; el.className = 'player-score-change'; }
+  });
+
+  // Player labels — use separate name + elo elements
   const opponentColor = myColor === 'white' ? 'black' : 'white';
   const myName = myProfile ? myProfile.username : myId;
   const myElo  = myProfile ? myProfile.elo : null;
-  document.getElementById('name-me').textContent = myName + ' (' + myColor + ')';
-  if (myElo) {
-    document.getElementById('name-me').innerHTML =
-      '<strong>' + myName + '</strong> <span style="font-size:11px;color:#444;">' + myElo + ' ELO</span> (' + myColor + ')';
-  }
-  document.getElementById('name-opponent').textContent = 'Opponent (' + opponentColor + ')';
+
+  document.getElementById('name-me').textContent = myName;
+  document.getElementById('elo-me').textContent  = myElo ? myElo : '';
+  document.getElementById('name-opponent').textContent = 'Opponent';
+  document.getElementById('elo-opponent').textContent  = '';
+
+  // Lag indicator — me is always "good" since we're local
+  const lagMe = document.getElementById('lag-me');
+  if (lagMe) lagMe.className = 'lag-indicator good';
+  const lagOpp = document.getElementById('lag-opponent');
+  if (lagOpp) lagOpp.className = 'lag-indicator';  // unknown until they move
 
   // Apply saved zoom (shared with index.html)
   var savedZoom = parseInt(localStorage.getItem('africhess.zoom') || '', 10);
@@ -1266,42 +1412,45 @@ function onGameMessage(e) {
 
   if (msg.type === 'opponent_profile') {
     opponentUsername = msg.username;
-    const opColor = myColor === 'white' ? 'black' : 'white';
-    document.getElementById('name-opponent').innerHTML =
-      '<strong>' + msg.username + '</strong>' +
-      (msg.elo ? ' <span style="font-size:11px;color:#444;">' + msg.elo + ' ELO</span>' : '') +
-      ' (' + opColor + ')';
+    document.getElementById('name-opponent').textContent = msg.username;
+    document.getElementById('elo-opponent').textContent  = msg.elo ? msg.elo : '';
+    // Opponent is connected — light their lag dot green
+    const lagOpp = document.getElementById('lag-opponent');
+    if (lagOpp) lagOpp.className = 'lag-indicator good';
     return;
   }
 
   if (msg.type === 'elo_update') {
     const change = msg.new_elo - msg.old_elo;
-    const sign   = change >= 0 ? '+' : '';
-    const color  = change >= 0 ? '#00ff9d' : '#ff4d4d';
-    const cat    = msg.category || 'Blitz';
-    const el     = document.getElementById('result-reason');
-    if (el) el.innerHTML += ` <span style="color:${color};font-size:12px;">(${sign}${change} ${cat} ELO · now ${msg.new_elo})</span>`;
     myEloChange = change;
-    if (myProfile) {
-      myProfile.eloBefore = msg.old_elo;
-      myProfile.elo = msg.new_elo;
+    if (myProfile) { myProfile.eloBefore = msg.old_elo; myProfile.elo = msg.new_elo; }
+    // Update my ELO on the player bar live
+    const eloEl = document.getElementById('elo-me');
+    if (eloEl) eloEl.textContent = msg.new_elo;
+    const scEl = document.getElementById('score-change-me');
+    if (scEl) {
+      scEl.textContent = (change >= 0 ? '+' : '') + change;
+      scEl.className = 'player-score-change ' + (change >= 0 ? 'up' : 'down');
     }
     return;
   }
 
   if (msg.type === 'draw_offer') {
-    // Show draw offer inline — don't use confirm() which blocks the thread
     showGameStatus('Opponent offers a draw!', true);
-    const area = document.getElementById('rematch-area');
-    if (area && !document.getElementById('btn-accept-draw')) {
-      const btn = document.createElement('button');
-      btn.id = 'btn-accept-draw';
-      btn.textContent = 'Accept Draw';
-      btn.onclick = () => {
-        sendGame({ type: 'draw_accept' });
-        btn.remove();
-      };
-      area.querySelector('.controls').prepend(btn);
+    // Show accept button in controls bar
+    if (!document.getElementById('btn-accept-draw')) {
+      const bar = document.querySelector('.controls-bar');
+      if (bar) {
+        const btn = document.createElement('button');
+        btn.id = 'btn-accept-draw';
+        btn.className = 'ctrl-btn';
+        btn.style.background = '#00ff9d22';
+        btn.style.borderColor = '#00ff9d55';
+        btn.style.color = '#00ff9d';
+        btn.textContent = '✓ Accept Draw';
+        btn.onclick = () => { sendGame({ type: 'draw_accept' }); btn.remove(); };
+        bar.prepend(btn);
+      }
     }
     return;
   }
@@ -1354,20 +1503,22 @@ function onGameMessage(e) {
   }
   if (msg.type === 'rematch_offer') {
     document.getElementById('rematch-status').textContent = 'Opponent wants a rematch!';
-    document.getElementById('btn-rematch').textContent = 'Accept';
-    document.getElementById('btn-rematch').onclick = () => {
+    const rematchBtn = document.getElementById('btn-rematch');
+    rematchBtn.textContent = 'Accept';
+    rematchBtn.onclick = () => {
       sendGame({ type: 'rematch_accept' });
       document.getElementById('rematch-status').textContent = 'Starting rematch...';
-      document.getElementById('btn-rematch').disabled = true;
+      rematchBtn.disabled = true;
     };
-    // Add decline button
-    const area = document.getElementById('rematch-area').querySelector('.controls');
+    // Add decline button if not already there
     if (!document.getElementById('btn-decline')) {
       const btn = document.createElement('button');
-      btn.id = 'btn-decline'; btn.className = 'danger';
+      btn.id = 'btn-decline';
+      btn.className = 'pill-btn secondary';
+      btn.style.marginTop = '4px';
       btn.textContent = 'Decline';
       btn.onclick = () => { sendGame({ type: 'rematch_decline' }); goToLobby(); };
-      area.insertBefore(btn, area.children[1]);
+      document.getElementById('rematch-area').appendChild(btn);
     }
   }
 
@@ -1590,41 +1741,56 @@ function showOverlay(result, reason) {
   if (overlay.classList.contains('active')) return;
   overlay.classList.add('active');
 
-  const title    = document.getElementById('result-title');
+  const scoreEl  = document.getElementById('result-score');
   const reasonEl = document.getElementById('result-reason');
 
-  const reasonText = {
-    checkmate:              'by checkmate',
-    timeout:                'on time',
-    resignation:            'by resignation',
-    disconnect:             'opponent disconnected',
-    stalemate:              'stalemate',
-    agreement:              'by agreement',
-    insufficient_material:  'insufficient material',
-    seventyfive_moves:      '75-move rule',
-    fivefold_repetition:    'fivefold repetition',
-  }[reason] || reason;
+  // Lichess-style score display: "1-0", "0-1", "½-½"
+  // and reason: "White didn't move · Black is victorious" style
+  const reasonMap = {
+    checkmate:             'by checkmate',
+    timeout:               'on time',
+    first_move_timeout:    "didn't move",
+    resignation:           'by resignation',
+    disconnect:            'opponent disconnected',
+    stalemate:             'draw · stalemate',
+    agreement:             'draw · by agreement',
+    insufficient_material: 'draw · insufficient material',
+    seventyfive_moves:     'draw · 75-move rule',
+    fivefold_repetition:   'draw · fivefold repetition',
+  };
+  const reasonText = reasonMap[reason] || reason || '';
 
   if (result === 'draw') {
-    title.className = 'result-title draw';
-    title.textContent = 'Draw';
+    scoreEl.textContent  = '½-½';
+    scoreEl.style.color  = '#aaa';
   } else if (result === myColor) {
-    title.className = 'result-title';
-    title.textContent = 'You Win';
+    scoreEl.textContent  = myColor === 'white' ? '1-0' : '0-1';
+    scoreEl.style.color  = 'var(--green)';
+    reasonEl.textContent = (myColor === 'white' ? 'White' : 'Black') + ' is victorious · ' + reasonText;
   } else {
-    title.className = 'result-title lose';
-    title.textContent = 'You Lose';
+    scoreEl.textContent  = myColor === 'white' ? '0-1' : '1-0';
+    scoreEl.style.color  = 'var(--danger)';
+    reasonEl.textContent = (myColor === 'white' ? 'Black' : 'White') + ' is victorious · ' + reasonText;
   }
-  reasonEl.textContent = reasonText;
+  if (result === 'draw') reasonEl.textContent = reasonText;
+
   updateSessionScore(result);
 
-  const oldDecline = document.getElementById('btn-decline');
-  if (oldDecline) oldDecline.remove();
+  // Show ELO change if available
+  if (myEloChange !== null) {
+    const eloEl = document.getElementById('result-elo-change');
+    if (eloEl) {
+      const sign  = myEloChange >= 0 ? '+' : '';
+      const cls   = myEloChange >= 0 ? 'up' : 'down';
+      eloEl.innerHTML = `ELO: <span class="${cls}">${sign}${myEloChange}</span>`;
+      eloEl.style.display = '';
+    }
+  }
 
   if (window._tournamentId) {
-    // Show tournament buttons, hide regular rematch buttons
-    const regularBtns = document.getElementById('btn-rematch').closest('.controls');
-    if (regularBtns) regularBtns.style.display = 'none';
+    // Show tournament buttons, hide regular
+    const rematchArea = document.getElementById('rematch-area');
+    if (rematchArea) rematchArea.style.display = 'none';
     const tourneyBtns = document.getElementById('tournament-overlay-btns');
     if (tourneyBtns) tourneyBtns.style.display = 'flex';
     document.getElementById('rematch-status').textContent = 'Submitting result…';

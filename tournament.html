@@ -166,6 +166,14 @@
       font-size: 18px; cursor: pointer;
     }
     .field { margin-bottom: 16px; }
+    .tc-cell {
+      background: #111; border: 1px solid #222; border-radius: 2px;
+      color: #555; font-size: 12px; font-family: Georgia, serif;
+      padding: 7px 4px; cursor: pointer; text-align: center; width: 100%;
+      transition: border-color 0.12s, color 0.12s, background 0.12s;
+    }
+    .tc-cell:hover { border-color: #444; color: #e8e6e0; }
+    .tc-cell.active { border-color: #00ff9d; color: #00ff9d; background: #0a1f14; }
     .field label {
       display: block; font-size: 10px; letter-spacing: 0.15em;
       text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
@@ -400,12 +408,45 @@
         </select>
       </div>
       <div class="field">
-        <label for="t-time">Time Control</label>
-        <select id="t-time">
-          <option value="3+0">3+0 Bullet</option>
-          <option value="5+0" selected>5+0 Blitz</option>
-          <option value="10+0">10+0 Rapid</option>
-        </select>
+        <label>Time Control</label>
+        <!-- Lichess-style two-column grid picker -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px;">
+          <div>
+            <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#444;margin-bottom:6px;">Minutes per side</div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:3px;" id="t-base-btns">
+              <button type="button" class="tc-cell" data-val="1"  onclick="tSelectBase(this)">1</button>
+              <button type="button" class="tc-cell" data-val="2"  onclick="tSelectBase(this)">2</button>
+              <button type="button" class="tc-cell" data-val="3"  onclick="tSelectBase(this)">3</button>
+              <button type="button" class="tc-cell active" data-val="5"  onclick="tSelectBase(this)">5</button>
+              <button type="button" class="tc-cell" data-val="10" onclick="tSelectBase(this)">10</button>
+              <button type="button" class="tc-cell" data-val="15" onclick="tSelectBase(this)">15</button>
+              <button type="button" class="tc-cell" data-val="20" onclick="tSelectBase(this)">20</button>
+              <button type="button" class="tc-cell" data-val="30" onclick="tSelectBase(this)">30</button>
+              <button type="button" class="tc-cell" data-val="45" onclick="tSelectBase(this)">45</button>
+              <button type="button" class="tc-cell" data-val="60" onclick="tSelectBase(this)">60</button>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#444;margin-bottom:6px;">Increment (seconds)</div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:3px;" id="t-inc-btns">
+              <button type="button" class="tc-cell active" data-val="0"  onclick="tSelectInc(this)">0</button>
+              <button type="button" class="tc-cell" data-val="1"  onclick="tSelectInc(this)">1</button>
+              <button type="button" class="tc-cell" data-val="2"  onclick="tSelectInc(this)">2</button>
+              <button type="button" class="tc-cell" data-val="3"  onclick="tSelectInc(this)">3</button>
+              <button type="button" class="tc-cell" data-val="5"  onclick="tSelectInc(this)">5</button>
+              <button type="button" class="tc-cell" data-val="10" onclick="tSelectInc(this)">10</button>
+              <button type="button" class="tc-cell" data-val="15" onclick="tSelectInc(this)">15</button>
+              <button type="button" class="tc-cell" data-val="20" onclick="tSelectInc(this)">20</button>
+              <button type="button" class="tc-cell" data-val="30" onclick="tSelectInc(this)">30</button>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:10px;text-align:center;">
+          <span id="t-tc-preview" style="font-size:18px;font-weight:bold;color:#e8e6e0;">5+0</span>
+          <span id="t-tc-category" style="font-size:11px;color:#555;letter-spacing:0.12em;text-transform:uppercase;margin-left:8px;">Blitz</span>
+        </div>
+        <!-- Hidden input carries the value to createTournament() -->
+        <input type="hidden" id="t-time" value="5+0">
       </div>
     </div>
     <div class="field-row">
@@ -628,6 +669,34 @@ function tcCategory(tc) {
     if (equiv <= 15)  return 'Rapid';
     return 'Classical';
   } catch { return ''; }
+}
+
+// ── Tournament TC picker (Lichess-style grid) ───────────────────
+var _tBase = 5, _tInc = 0;
+
+function tUpdatePreview() {
+  const tc  = _tBase + '+' + _tInc;
+  const cat = tcCategory(tc);
+  const el  = document.getElementById('t-time');
+  if (el) el.value = tc;
+  const prev = document.getElementById('t-tc-preview');
+  const catEl = document.getElementById('t-tc-category');
+  if (prev)  prev.textContent  = _tBase + '+' + _tInc;
+  if (catEl) catEl.textContent = cat;
+}
+
+function tSelectBase(btn) {
+  document.querySelectorAll('#t-base-btns .tc-cell').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _tBase = parseFloat(btn.getAttribute('data-val'));
+  tUpdatePreview();
+}
+
+function tSelectInc(btn) {
+  document.querySelectorAll('#t-inc-btns .tc-cell').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _tInc = parseInt(btn.getAttribute('data-val'), 10);
+  tUpdatePreview();
 }
 
 // Map time control → profile ELO column (mirrors server elo_col_for_tc)

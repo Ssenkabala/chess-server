@@ -756,10 +756,12 @@ global.Chessground = Nr;
       inset: 0;
       background: rgba(0,0,0,0.85);
       display: none;
-      align-items: center;
+      align-items: flex-start;       /* not center — keyboard pushes viewport up */
       justify-content: center;
       z-index: 200;
       backdrop-filter: blur(4px);
+      overflow-y: auto;              /* scrollable when keyboard open */
+      padding: 20px 16px 40px;       /* breathing room top + bottom */
     }
     .auth-overlay.active { display: flex !important; }
 
@@ -768,11 +770,13 @@ global.Chessground = Nr;
       border: 1px solid #2a2a2a;
       border-top: 2px solid #00ff9d;
       border-radius: 3px;
-      padding: 36px 40px;
-      width: 360px;
+      padding: 28px 24px;
+      width: 100%;
+      max-width: 360px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
+      margin: auto;                  /* vertically center when not scrolling */
     }
     .auth-title {
       font-size: 13px;

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>Africhess — Play</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon_16x16.png">
@@ -10,10 +10,24 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
   <meta name="theme-color" content="#0a0a0a">
-  <meta name="description" content="Play live 5+0 blitz chess against other players on AfriChess.">
+  <meta name="description" content="Play live chess against other players on AfriChess.">
   <meta property="og:title" content="AfriChess — Live Multiplayer">
   <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
   <meta property="og:url" content="https://www.africhess.org/multiplayer">
+  <!-- Set zoom CSS variable BEFORE any style renders -->
+  <script>
+    (function() {
+      var saved = parseInt(localStorage.getItem('africhess.zoom') || '', 10);
+      var zoom;
+      if (saved >= 0 && saved <= 100) {
+        zoom = saved;
+      } else {
+        var vw = Math.min(screen.width, window.innerWidth || screen.width);
+        zoom = Math.round(Math.min(100, Math.max(0, (vw - 32 - 200) / 3)));
+      }
+      document.documentElement.style.setProperty('---zoom', zoom.toString());
+    })();
+  </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
   <style>
 .cg-wrap {
@@ -950,7 +964,7 @@ function makeBoardResizable(wrapId, cgGetter) {
   handle.addEventListener('touchstart', onDragStart, { passive: false });
 }
 
-initBoardZoom();
+// Zoom already set by inline <head> script before CSS rendered
 
 function offerRematch() {
   sendGame({ type: 'rematch_offer' });

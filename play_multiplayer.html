@@ -729,25 +729,106 @@ global.Chessground = Nr;
     .highlight-selected { background: rgba(0,255,157,0.18) !important; }
     .highlight-square { background: radial-gradient(circle, rgba(0,255,157,0.55) 25%, transparent 27%) !important; }
     .highlight-capture { background: radial-gradient(circle, transparent 55%, rgba(0,255,157,0.55) 57%) !important; }
-    .tc-btn {
-      background: var(--bg2); border: 1px solid var(--border); border-radius: 3px;
-      color: var(--muted); font-size: 13px; font-family: Georgia, serif;
-      padding: 10px 14px; cursor: pointer; line-height: 1.4; min-width: 60px;
-      transition: border-color 0.15s, color 0.15s;
+    /* ── Lichess-style TC picker ── */
+    .tc-picker-wrap {
+      background: #0d0d0d;
+      border: 1px solid #1e1e1e;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 16px;
     }
-    .tc-btn span { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; display: block; }
-    .tc-btn:hover { border-color: #444; color: var(--text); }
-    .tc-btn.active { border-color: var(--green); color: var(--green); background: #0a1f14; }
+    .tc-picker-title {
+      padding: 14px 16px 4px;
+      font-size: 13px;
+      color: var(--text);
+      letter-spacing: 0.05em;
+    }
+    .tc-picker-subtitle {
+      padding: 0 16px 12px;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .tc-section {
+      padding: 10px 14px 14px;
+      border-top: 1px solid #161616;
+    }
+    .tc-section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 8px;
+      letter-spacing: 0.04em;
+    }
+    .tc-section-icon { font-size: 16px; }
+    .tc-presets {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+    .tc-preset {
+      background: #161616;
+      border: 1px solid #222;
+      border-radius: 6px;
+      color: #aaa;
+      font-size: 14px;
+      font-family: Georgia, serif;
+      padding: 12px 6px;
+      cursor: pointer;
+      text-align: center;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+      line-height: 1;
+    }
+    .tc-preset:hover  { background: #222; border-color: #444; color: var(--text); }
+    .tc-preset.active { background: #6b3f1a; border-color: #a0622a; color: #f5c483; }
 
-    /* Lichess-style TC cell grid */
-    .tc-cell {
-      background: var(--bg2); border: 1px solid var(--border); border-radius: 2px;
-      color: var(--muted); font-size: 13px; font-family: Georgia, serif;
-      padding: 8px 4px; cursor: pointer; text-align: center;
-      transition: border-color 0.12s, color 0.12s, background 0.12s;
+    /* Custom section */
+    .tc-custom-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-top: 1px solid #161616;
+      cursor: pointer;
+      font-size: 13px;
+      color: #888;
     }
-    .tc-cell:hover { border-color: #444; color: var(--text); }
-    .tc-cell.active { border-color: var(--green); color: var(--green); background: #0a1f14; }
+    .tc-custom-header:hover { color: var(--text); }
+    .tc-custom-body {
+      display: none;
+      padding: 4px 16px 16px;
+      border-top: 1px solid #161616;
+    }
+    .tc-custom-body.open { display: block; }
+    .tc-slider-label {
+      font-size: 12px;
+      color: #888;
+      margin: 12px 0 6px;
+      letter-spacing: 0.04em;
+    }
+    .tc-slider-label strong { color: var(--text); }
+    .tc-slider {
+      width: 100%;
+      accent-color: #a0622a;
+      cursor: pointer;
+    }
+    .tc-custom-ok {
+      display: block;
+      width: 100%;
+      margin-top: 16px;
+      padding: 12px;
+      background: #a0622a;
+      color: #fff;
+      border: none;
+      border-radius: 50px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      letter-spacing: 0.06em;
+    }
+    .tc-custom-ok:hover { background: #b8732e; }
   </style>
 </head>
 <body>
@@ -766,57 +847,71 @@ global.Chessground = Nr;
   <div id="screen-lobby" class="screen active">
     <!-- Time control picker — shown before searching -->
     <div id="tc-picker" style="margin-bottom:20px;">
-      <div style="font-size:11px;letter-spacing:0.15em;text-transform:uppercase;color:#555;margin-bottom:16px;text-align:center;">Choose Time Control</div>
+      <div class="tc-picker-wrap">
+        <div class="tc-picker-title">Time control</div>
+        <div class="tc-picker-subtitle">Minutes per side + Increment in seconds</div>
 
-      <!-- Lichess-style: two columns — Base time | Increment -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
-
-        <!-- Left: Base time -->
-        <div>
-          <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#333;margin-bottom:8px;text-align:center;">Minutes per side</div>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;" id="tc-base-btns">
-            <button class="tc-cell active" data-val="1"  onclick="selectBase(this)">¼</button>
-            <button class="tc-cell"        data-val="0.5" onclick="selectBase(this)">½</button>
-            <button class="tc-cell"        data-val="1"  onclick="selectBase(this)">1</button>
-            <button class="tc-cell"        data-val="2"  onclick="selectBase(this)">2</button>
-            <button class="tc-cell"        data-val="3"  onclick="selectBase(this)">3</button>
-            <button class="tc-cell"        data-val="5"  onclick="selectBase(this)">5</button>
-            <button class="tc-cell"        data-val="10" onclick="selectBase(this)">10</button>
-            <button class="tc-cell"        data-val="15" onclick="selectBase(this)">15</button>
-            <button class="tc-cell"        data-val="20" onclick="selectBase(this)">20</button>
-            <button class="tc-cell"        data-val="25" onclick="selectBase(this)">25</button>
-            <button class="tc-cell"        data-val="30" onclick="selectBase(this)">30</button>
-            <button class="tc-cell"        data-val="45" onclick="selectBase(this)">45</button>
-            <button class="tc-cell"        data-val="60" onclick="selectBase(this)">60</button>
+        <!-- Bullet -->
+        <div class="tc-section">
+          <div class="tc-section-header"><span class="tc-section-icon">💨</span> Bullet</div>
+          <div class="tc-presets">
+            <button class="tc-preset" data-tc="0+1"  onclick="selectPreset(this)">0+1</button>
+            <button class="tc-preset" data-tc="1+0"  onclick="selectPreset(this)">1+0</button>
+            <button class="tc-preset" data-tc="1+1"  onclick="selectPreset(this)">1+1</button>
+            <button class="tc-preset" data-tc="2+1"  onclick="selectPreset(this)">2+1</button>
           </div>
         </div>
 
-        <!-- Right: Increment -->
-        <div>
-          <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#333;margin-bottom:8px;text-align:center;">Increment in seconds</div>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;" id="tc-inc-btns">
-            <button class="tc-cell active" data-val="0"  onclick="selectInc(this)">0</button>
-            <button class="tc-cell"        data-val="1"  onclick="selectInc(this)">1</button>
-            <button class="tc-cell"        data-val="2"  onclick="selectInc(this)">2</button>
-            <button class="tc-cell"        data-val="3"  onclick="selectInc(this)">3</button>
-            <button class="tc-cell"        data-val="5"  onclick="selectInc(this)">5</button>
-            <button class="tc-cell"        data-val="10" onclick="selectInc(this)">10</button>
-            <button class="tc-cell"        data-val="15" onclick="selectInc(this)">15</button>
-            <button class="tc-cell"        data-val="20" onclick="selectInc(this)">20</button>
-            <button class="tc-cell"        data-val="30" onclick="selectInc(this)">30</button>
-            <button class="tc-cell"        data-val="45" onclick="selectInc(this)">45</button>
-            <button class="tc-cell"        data-val="60" onclick="selectInc(this)">60</button>
+        <!-- Blitz -->
+        <div class="tc-section">
+          <div class="tc-section-header"><span class="tc-section-icon">🔥</span> Blitz</div>
+          <div class="tc-presets">
+            <button class="tc-preset" data-tc="3+0"  onclick="selectPreset(this)">3+0</button>
+            <button class="tc-preset" data-tc="3+2"  onclick="selectPreset(this)">3+2</button>
+            <button class="tc-preset active" data-tc="5+0"  onclick="selectPreset(this)">5+0</button>
+            <button class="tc-preset" data-tc="5+3"  onclick="selectPreset(this)">5+3</button>
           </div>
+        </div>
+
+        <!-- Rapid -->
+        <div class="tc-section">
+          <div class="tc-section-header"><span class="tc-section-icon">🐎</span> Rapid</div>
+          <div class="tc-presets">
+            <button class="tc-preset" data-tc="10+0"  onclick="selectPreset(this)">10+0</button>
+            <button class="tc-preset" data-tc="10+5"  onclick="selectPreset(this)">10+5</button>
+            <button class="tc-preset" data-tc="15+0"  onclick="selectPreset(this)">15+0</button>
+            <button class="tc-preset" data-tc="15+10" onclick="selectPreset(this)">15+10</button>
+          </div>
+        </div>
+
+        <!-- Classical -->
+        <div class="tc-section">
+          <div class="tc-section-header"><span class="tc-section-icon">🐢</span> Classical</div>
+          <div class="tc-presets">
+            <button class="tc-preset" data-tc="25+0"  onclick="selectPreset(this)">25+0</button>
+            <button class="tc-preset" data-tc="30+0"  onclick="selectPreset(this)">30+0</button>
+            <button class="tc-preset" data-tc="30+20" onclick="selectPreset(this)">30+20</button>
+            <button class="tc-preset" data-tc="60+0"  onclick="selectPreset(this)">60+0</button>
+          </div>
+        </div>
+
+        <!-- Custom -->
+        <div class="tc-custom-header" onclick="toggleCustomTc()">
+          <span>⚙ Custom</span>
+          <span id="tc-custom-arrow">▼</span>
+        </div>
+        <div class="tc-custom-body" id="tc-custom-body">
+          <div class="tc-slider-label">Minutes per side: <strong id="tc-slider-base-val">5</strong></div>
+          <input type="range" class="tc-slider" id="tc-slider-base" min="1" max="60" value="5"
+            oninput="onTcSliderChange()">
+          <div class="tc-slider-label">Increment in seconds: <strong id="tc-slider-inc-val">0</strong></div>
+          <input type="range" class="tc-slider" id="tc-slider-inc" min="0" max="60" value="0"
+            oninput="onTcSliderChange()">
+          <button class="tc-custom-ok" onclick="applyCustomTc()">OK</button>
         </div>
       </div>
 
-      <!-- Preview -->
-      <div style="text-align:center;margin-bottom:16px;">
-        <span id="tc-preview" style="font-size:22px;font-weight:bold;color:#e8e6e0;letter-spacing:0.05em;">5+0</span>
-        <span id="tc-category" style="font-size:11px;color:#555;letter-spacing:0.12em;text-transform:uppercase;margin-left:10px;">Blitz</span>
-      </div>
-
-      <button onclick="startSearch()" style="width:100%;padding:13px;background:#00ff9d;color:#000;border:none;border-radius:3px;font-size:13px;font-weight:700;letter-spacing:0.08em;cursor:pointer;">Find Game</button>
+      <button onclick="startSearch()" style="width:100%;padding:14px;background:#00ff9d;color:#000;border:none;border-radius:3px;font-size:14px;font-weight:700;letter-spacing:0.08em;cursor:pointer;">Find Game</button>
     </div>
     <!-- Searching state — shown after clicking Find Game -->
     <div id="tc-searching" style="display:none;">
@@ -950,50 +1045,52 @@ function tcCategory(tc) {
   } catch { return ''; }
 }
 
-// Lichess-style TC picker state
-var _tcBase = 5;   // minutes
-var _tcInc  = 0;   // seconds
-
-function updateTcPreview() {
-  // Format base: show fractions nicely
-  let baseStr = _tcBase < 1 ? (_tcBase === 0.25 ? '¼' : '½') : String(_tcBase);
-  const tc = _tcBase + '+' + _tcInc;
-  const cat = tcCategory(tc);
+function selectPreset(btn) {
+  document.querySelectorAll('.tc-preset').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const tc = btn.getAttribute('data-tc');
   window._timeControl = tc;
-  const preview = document.getElementById('tc-preview');
-  const catEl   = document.getElementById('tc-category');
-  if (preview) preview.textContent = baseStr + '+' + _tcInc;
-  if (catEl)   catEl.textContent   = cat;
+  // Update header label
   const label = document.getElementById('tc-label');
-  if (label) label.textContent = baseStr + '+' + _tcInc + ' · ' + cat;
+  if (label) label.textContent = tc + ' · ' + tcCategory(tc);
+  // Sync sliders if custom is open
+  const parts = tc.split('+');
+  const base = document.getElementById('tc-slider-base');
+  const inc  = document.getElementById('tc-slider-inc');
+  if (base) { base.value = parseFloat(parts[0]); document.getElementById('tc-slider-base-val').textContent = parts[0]; }
+  if (inc)  { inc.value  = parseFloat(parts[1]||0); document.getElementById('tc-slider-inc-val').textContent = parts[1]||'0'; }
 }
 
-function selectBase(btn) {
-  document.querySelectorAll('#tc-base-btns .tc-cell').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  _tcBase = parseFloat(btn.getAttribute('data-val'));
-  updateTcPreview();
+function toggleCustomTc() {
+  const body  = document.getElementById('tc-custom-body');
+  const arrow = document.getElementById('tc-custom-arrow');
+  const open  = body.classList.toggle('open');
+  if (arrow) arrow.textContent = open ? '▲' : '▼';
 }
 
-function selectInc(btn) {
-  document.querySelectorAll('#tc-inc-btns .tc-cell').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  _tcInc = parseInt(btn.getAttribute('data-val'), 10);
-  updateTcPreview();
+function onTcSliderChange() {
+  const base = document.getElementById('tc-slider-base').value;
+  const inc  = document.getElementById('tc-slider-inc').value;
+  document.getElementById('tc-slider-base-val').textContent = base;
+  document.getElementById('tc-slider-inc-val').textContent  = inc;
 }
 
-// Init: select 5 base and 0 increment on load
-(function initTcPicker() {
-  document.querySelectorAll('#tc-base-btns .tc-cell').forEach(b => {
-    b.classList.remove('active');
-    if (parseFloat(b.getAttribute('data-val')) === 5) b.classList.add('active');
-  });
-  document.querySelectorAll('#tc-inc-btns .tc-cell').forEach(b => {
-    b.classList.remove('active');
-    if (parseInt(b.getAttribute('data-val'), 10) === 0) b.classList.add('active');
-  });
-  updateTcPreview();
-})();
+function applyCustomTc() {
+  const base = document.getElementById('tc-slider-base').value;
+  const inc  = document.getElementById('tc-slider-inc').value;
+  const tc   = base + '+' + inc;
+  // Deselect all presets — custom is active
+  document.querySelectorAll('.tc-preset').forEach(b => b.classList.remove('active'));
+  window._timeControl = tc;
+  const label = document.getElementById('tc-label');
+  if (label) label.textContent = tc + ' · ' + tcCategory(tc);
+  // Close custom panel
+  document.getElementById('tc-custom-body').classList.remove('open');
+  document.getElementById('tc-custom-arrow').textContent = '▼';
+}
+
+// Init: 5+0 selected by default
+window._timeControl = '5+0';
 
 function startSearch() {
   const active = document.querySelector('.tc-btn.active');

@@ -2275,6 +2275,12 @@ function buildPGN(chessGame, result) {
 if (sb) {
   sb.auth.getSession().then(({ data }) => {
     if (data.session) setUser(data.session.user);
+    else {
+      // Auto-open sign-in modal if redirected here with ?signin=1
+      if (new URLSearchParams(window.location.search).get('signin') === '1') {
+        setTimeout(openAuth, 300);
+      }
+    }
   });
   sb.auth.onAuthStateChange((event, session) => {
     if (session) setUser(session.user);

@@ -1218,25 +1218,35 @@ function updateSessionScore(result) {
 //  AUTH + PROFILE
 // ═══════════════════════════════════════════════════════════════
 async function bootAuth() {
-  if (!sb) { startSearch(); return; }
+  if (!sb) {
+    // Supabase failed to load — show error, don't allow play
+    document.getElementById('screen-lobby').innerHTML =
+      '<div style="text-align:center;padding:60px 20px;color:#555;font-size:13px;letter-spacing:0.08em;">' +
+      'Connection error. Please refresh the page.</div>';
+    return;
+  }
 
   const { data } = await sb.auth.getSession();
-  if (data.session) {
-    currentUser = data.session.user;
-    const { data: profile } = await sb
-      .from('profiles')
-      .select('username, elo')
-      .eq('user_id', currentUser.id)
-      .single();
-
-    if (profile) {
-      myProfile = profile;
-    } else {
-      alert('Please set your username before playing multiplayer.');
-      window.location.href = '/play';
-      return;
-    }
+  if (!data.session) {
+    // Not signed in — redirect to play page which has the sign-in modal
+    window.location.href = '/play?signin=1';
+    return;
   }
+
+  currentUser = data.session.user;
+  const { data: profile } = await sb
+    .from('profiles')
+    .select('username, elo, elo_bullet, elo_blitz, elo_rapid')
+    .eq('user_id', currentUser.id)
+    .single();
+
+  if (!profile || !profile.username) {
+    alert('Please set your username before playing multiplayer.');
+    window.location.href = '/play';
+    return;
+  }
+
+  myProfile = profile;
 
   // Check for Arena tournament game_id in URL
   const params = new URLSearchParams(window.location.search);
@@ -1653,7 +1663,16 @@ function onGameMessage(e) {
     gameWs.onopen = () => {
       gameWs.send(JSON.stringify({ type: 'claim', color: myColor }));
       if (myProfile && currentUser) {
-        gameWs.send(JSON.stringify({ type: 'profile', username: myProfile.username, elo: myProfile.elo, user_id: currentUser.id, time_control: window._timeControl || null }));
+        gameWs.send(JSON.stringify({
+          type:         'profile',
+          username:     myProfile.username,
+          elo:          myProfile.elo,
+          elo_bullet:   myProfile.elo_bullet,
+          elo_blitz:    myProfile.elo_blitz,
+          elo_rapid:    myProfile.elo_rapid,
+          user_id:      currentUser.id,
+          time_control: window._timeControl || null
+        }));
       }
       gameWs._ping = setInterval(() => {
         if (gameWs && gameWs.readyState === WebSocket.OPEN) gameWs.send(JSON.stringify({ type: 'ping' }));

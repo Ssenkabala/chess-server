@@ -609,23 +609,29 @@ async def cleanup_game(game_id: str, delay: int = 10):
     active_games.pop(game_id, None)
 
 
-def parse_clock_seconds(time_control: str | None) -> int:
-    """Convert '5+0', '3+2', '10+0' etc. to total seconds per player."""
+def parse_clock_seconds(time_control: str | None) -> tuple[int, int]:
+    """
+    Convert '5+0', '3+2', '10+5', '0+1' etc. to (base_seconds, increment_seconds).
+    base_seconds: starting clock per player
+    increment_seconds: added to clock after each move (Fischer increment)
+    Special case: '0+1' → base=0s but minimum 0s start (pure increment game)
+    """
     if not time_control:
-        return 300  # default 5 min
+        return 300, 0  # default 5+0
     try:
         parts = time_control.split('+')
         base_secs = int(float(parts[0]) * 60)
-        return max(30, base_secs)
+        inc_secs  = int(float(parts[1])) if len(parts) > 1 else 0
+        return max(0, base_secs), max(0, inc_secs)
     except (ValueError, IndexError):
-        return 300
+        return 300, 0
 
 
 def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
              white_id: str, black_id: str, time_control: str | None = None) -> dict:
-    clock_secs = parse_clock_seconds(time_control)
-    # First-move timeout: give white 60s on blitz/rapid, 30s on bullet
-    base_mins = clock_secs / 60
+    base_secs, inc_secs = parse_clock_seconds(time_control)
+    # First-move timeout: 30s bullet, 60s blitz/rapid/classical
+    base_mins = base_secs / 60
     first_move_timeout = 30 if base_mins <= 3 else 60
     return {
         "id":                   game_id,
@@ -636,7 +642,8 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
         "black_game_ws":        None,
         "white_id":             white_id,
         "black_id":             black_id,
-        "clock":                {"w": clock_secs, "b": clock_secs},
+        "clock":                {"w": base_secs, "b": base_secs},
+        "increment":            inc_secs,          # added to clock after each move
         "last_move_ts":         None,        # set when both_connected fires
         "first_move_timeout":   first_move_timeout,
         "first_move_deadline":  None,        # set when both_connected fires
@@ -697,22 +704,27 @@ async def broadcast(game: dict, msg: dict):
 
 
 def deduct_clock(game: dict) -> float:
-    """Deduct elapsed time from the side that just moved, return remaining.
-    On the very first move, just starts the clock without deducting (no time before move 1).
+    """
+    Deduct elapsed time from the side that just moved, then add increment (Fischer).
+    On the very first move, just starts the clock without deducting.
+    Returns the remaining clock for the side that just moved (after increment).
     """
     now = time.time()
     game["moves_made"] = game.get("moves_made", 0) + 1
+    inc = game.get("increment", 0)
 
     if game["moves_made"] == 1:
-        # First move — start the clock, don't deduct anything
+        # First move — start the clock, don't deduct. Add increment to white's time.
         game["last_move_ts"] = now
+        game["clock"]["w"] = game["clock"]["w"] + inc
         return game["clock"]["w"]
 
     last_ts = game.get("last_move_ts") or now
     elapsed = now - last_ts
-    # The side that just moved is the OPPOSITE of board.turn (move already pushed)
+    # The side that just moved is OPPOSITE of board.turn (move already pushed)
     just_moved = "b" if game["board"].turn == chess.WHITE else "w"
-    game["clock"][just_moved] = max(0, game["clock"][just_moved] - elapsed)
+    # Deduct time then add increment (Fischer: you always get the increment)
+    game["clock"][just_moved] = max(0, game["clock"][just_moved] - elapsed + inc)
     game["last_move_ts"] = now
     return game["clock"][just_moved]
 
@@ -1412,27 +1424,41 @@ async def game_ws(ws: WebSocket, game_id: str):
 
             # ΓöÇΓöÇ Profile (sent on connect) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
             if msg_type == "profile":
+                tc  = data.get("time_control") or game.get("time_control") or "5+0"
+                col = elo_col_for_tc(tc)
+                # Pick the correct per-category ELO for display
+                elo_map = {
+                    "elo_bullet": data.get("elo_bullet"),
+                    "elo_blitz":  data.get("elo_blitz"),
+                    "elo_rapid":  data.get("elo_rapid"),
+                    "elo":        data.get("elo"),
+                }
+                display_elo = elo_map.get(col) or data.get("elo") or 1500
+
                 profile = {
-                    "username": data.get("username", "guest"),
-                    "elo":      data.get("elo"),
-                    "user_id":  data.get("user_id"),
+                    "username":   data.get("username", "guest"),
+                    "elo":        display_elo,
+                    "elo_bullet": data.get("elo_bullet"),
+                    "elo_blitz":  data.get("elo_blitz"),
+                    "elo_rapid":  data.get("elo_rapid"),
+                    "user_id":    data.get("user_id"),
                 }
                 # Store time_control on game so update_elos can use correct K-factor
-                if data.get("time_control") and not game.get("time_control"):
-                    game["time_control"] = data["time_control"]
+                if tc and not game.get("time_control"):
+                    game["time_control"] = tc
                 if color == "w":
                     game["white_profile"] = profile
-                    await send(game["black_ws"], {
+                    await send(game.get("black_game_ws") or game["black_ws"], {
                         "type":     "opponent_profile",
                         "username": profile["username"],
-                        "elo":      profile["elo"],
+                        "elo":      display_elo,
                     })
                 else:
                     game["black_profile"] = profile
-                    await send(game["white_ws"], {
+                    await send(game.get("white_game_ws") or game["white_ws"], {
                         "type":     "opponent_profile",
                         "username": profile["username"],
-                        "elo":      profile["elo"],
+                        "elo":      display_elo,
                     })
                 continue
 

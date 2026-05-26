@@ -430,7 +430,15 @@ global.Chessground = Nr;
       height: min(calc(200px + var(---zoom) * 3px), calc(100vw - 32px));
       margin: 0 auto;
     }
-    #analysis-wrap { display: block; width: 100%; position: relative; }
+    #analysis-wrap {
+      display: block;
+      width: 100%;
+      position: relative;
+      /* Explicit square sizing — board needs a real height to render */
+      aspect-ratio: 1 / 1;
+      max-width: min(calc(200px + var(---zoom) * 3px), calc(100vw - 32px));
+      margin: 0 auto;
+    }
     #board, #analysis-board { display: block; width: 100%; height: 100%; }
     cg-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
     cg-resize {
@@ -1188,8 +1196,8 @@ global.Chessground = Nr;
 
   <!-- Tab switcher -->
   <div class="tabs">
-    <button class="tab-btn active" onclick="switchTab('play')">Play</button>
-    <button class="tab-btn" onclick="switchTab('analysis')">Analysis</button>
+    <button class="tab-btn active" onclick="switchTab('play', this)">Play</button>
+    <button class="tab-btn" onclick="switchTab('analysis', this)">Analysis</button>
   </div>
 
   <!-- ══════════════════ PLAY PANEL ══════════════════ -->
@@ -1490,12 +1498,20 @@ function setDifficulty(level) {
 }
 
 // ─── Tab switching ─────────────────────────────────────────────
-function switchTab(tab) {
+function switchTab(tab, btn) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('panel-' + tab).classList.add('active');
-  event.target.classList.add('active');
+  if (btn) btn.classList.add('active');
 
+  // Init analysis board on first switch to analysis tab
+  // Defer one frame so the panel is visible and has dimensions before cg init
+  if (tab === 'analysis') {
+    requestAnimationFrame(function() {
+      if (!analysisCg) initAnalysisBoard();
+      else analysisCg.redrawAll();
+    });
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1506,7 +1522,8 @@ var cg = null;  // chessground instance
 var playerColor = 'w';
 var engineThinking = false;
 var gameStarted = false;
-var moveHistory = [];
+var moveHistory = [];   // SAN history for display
+var uciHistory  = [];   // UCI history for engine repetition detection
 
 function setStatus(msg) { document.getElementById('status').textContent = msg; }
 
@@ -1569,6 +1586,7 @@ function executePlayerMove(source, target, promotion) {
   var move = game.move({ from: source, to: target, promotion: promotion });
   if (move === null) { cg.set({ fen: game.fen() }); return; }
   moveHistory.push(move.san);
+  uciHistory.push(source + target + (promotion && promotion !== 'q' ? promotion : ''));
   if (cg) cg.set({ fen: game.fen(), lastMove: [source, target] });
   refreshDests();
   updateCapturedPieces();
@@ -1596,13 +1614,15 @@ function getEngineMove() {
   fetch(API_BASE + '/move', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fen: game.fen(), difficulty: currentDifficulty })
+    body: JSON.stringify({
+      fen:        game.fen(),
+      difficulty: currentDifficulty,
+      moves:      uciHistory.slice()   // full history so engine detects repetitions
+    })
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
-    // Always update board first
     if (data.fen) {
-      // Get SAN before loading new position
       if (data.move) {
         var tempGame = new Chess(game.fen());
         var engineMove = tempGame.move({
@@ -1610,7 +1630,10 @@ function getEngineMove() {
           to:   data.move.slice(2,4),
           promotion: data.move[4] || 'q'
         });
-        if (engineMove) moveHistory.push(engineMove.san);
+        if (engineMove) {
+          moveHistory.push(engineMove.san);
+          uciHistory.push(data.move);   // track engine UCI moves too
+        }
       }
       game.load(data.fen);
       if (data.move) {
@@ -1618,17 +1641,12 @@ function getEngineMove() {
       } else {
         if (cg) cg.set({ fen: data.fen });
       }
-      engineThinking = false;   // must be false BEFORE refreshDests
+      engineThinking = false;
       refreshDests();
       updateCapturedPieces();
     }
     renderCandidates(data.candidates);
-    
-    // Then check game over
-    if (data.is_game_over) { 
-      showResult(); 
-      return; 
-    }
+    if (data.is_game_over) { showResult(); return; }
     setStatus('Your move.');
   })
   .catch(function() {
@@ -1726,6 +1744,7 @@ function startGame(color) {
   document.getElementById('pregame-setup').style.display = 'none';
   document.getElementById('status').style.display = 'none';
   moveHistory = [];
+  uciHistory  = [];
   playerColor = (color === 'white') ? 'w' : 'b';
   gameStarted = true;
   engineThinking = false;
@@ -1848,32 +1867,33 @@ function setAnalysisStatus(msg) {
 }
 
 function initAnalysisBoard() {
-  analysisGame = new Chess();
-
   if (analysisCg) { analysisCg.destroy(); analysisCg = null; }
 
-  analysisCg = Chessground(document.getElementById('analysis-board'), {
-    orientation: 'white',
-    fen: 'start',
-    movable: {
-      color: 'both',
-      free: true,
-      events: {
-        after: function(source, target) {
-          var move = analysisGame.move({ from: source, to: target, promotion: 'q' });
-          if (move === null) { analysisCg.set({ fen: analysisGame.fen() }); return; }
-          analysisCg.set({ fen: analysisGame.fen(), lastMove: [source, target] });
-          resetCoachCard();
-          clearBestMoveHighlight();
-          scheduleAutoAnalyse();
+  requestAnimationFrame(function() {
+    analysisCg = Chessground(document.getElementById('analysis-board'), {
+      orientation: 'white',
+      fen: 'start',
+      movable: {
+        color: 'both',
+        free: true,
+        events: {
+          after: function(source, target) {
+            var move = analysisGame.move({ from: source, to: target, promotion: 'q' });
+            if (move === null) { analysisCg.set({ fen: analysisGame.fen() }); return; }
+            analysisCg.set({ fen: analysisGame.fen(), lastMove: [source, target] });
+            resetCoachCard();
+            clearBestMoveHighlight();
+            scheduleAutoAnalyse();
+          }
         }
-      }
-    },
-    draggable: { enabled: true },
-    selectable: { enabled: true },
-    animation: { enabled: true, duration: 120 },
-    highlight: { lastMove: true },
-    coordinates: true,
+      },
+      draggable: { enabled: true },
+      selectable: { enabled: true },
+      animation: { enabled: true, duration: 120 },
+      highlight: { lastMove: true },
+      coordinates: true,
+    });
+    analysisCg.redrawAll();
   });
 }
 

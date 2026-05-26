@@ -549,73 +549,187 @@
        MOBILE — everything ≤ 768px
        ════════════════════════════════════════════ */
     @media (max-width: 768px) {
+      nav { padding: 12px 16px; }
+      .nav-logo { font-size: 20px; }
+      .nav-logo img { height: 30px; }
 
-      /* Nav */
-      nav { padding: 16px 20px; }
-
-      /* Hero — single column, board below text */
       .hero {
         grid-template-columns: 1fr;
-        padding: 90px 20px 48px;
-        gap: 32px;
+        padding: 72px 16px 36px;
+        gap: 24px;
         min-height: auto;
       }
-      .hero::after { display: none; } /* remove grid bg on mobile */
+      .hero::after { display: none; }
 
-      /* H1 much smaller on mobile */
-      h1 {
-        font-size: clamp(36px, 9vw, 52px);
-        margin-bottom: 16px;
+      h1 { font-size: clamp(32px, 8.5vw, 48px); margin-bottom: 12px; }
+      h2 { font-size: clamp(26px, 6.5vw, 38px); }
+
+      .hero-eyebrow { margin-bottom: 12px; font-size: 9px; }
+      .hero-sub { font-size: 12px; margin-bottom: 20px; max-width: 100%; }
+
+      .hero-ctas { flex-direction: column; gap: 8px; }
+      .btn-primary, .btn-secondary {
+        padding: 13px 20px; font-size: 11px;
+        text-align: center; width: 100%;
       }
 
-      .hero-eyebrow { margin-bottom: 16px; }
-      .hero-sub { font-size: 13px; margin-bottom: 28px; }
-      .hero-ctas { gap: 10px; }
-      .btn-primary, .btn-secondary { padding: 12px 22px; font-size: 11px; }
-
-      /* Board — full width, no rotation animation on mobile (performance) */
       .hero-board {
-        width: 100%;
-        max-width: 340px;
+        width: min(300px, 80vw);
         margin: 0 auto;
-        animation: none;
-        transform: none;
+        animation: none; transform: none;
       }
-      .hero-board .sq { font-size: clamp(14px, 4vw, 22px); }
+      .hero-board .sq { font-size: clamp(12px, 3.5vw, 20px); }
 
-      .elo-badge { margin-top: 24px; }
+      .elo-badge { margin-top: 16px; padding: 8px 14px; }
+      .elo-num { font-size: 22px; }
 
-      /* Stats — 2 columns */
+      /* Stats */
       .stats-row { grid-template-columns: 1fr 1fr; }
-      .stat { padding: 24px 16px; }
-      .stat-num { font-size: 36px; }
+      .stat { padding: 20px 12px; }
+      .stat-num { font-size: 30px; }
+      .stat-label { font-size: 9px; }
 
-      /* Section padding */
-      section { padding: 60px 20px !important; }
-      .section-inner { max-width: 100% !important; }
+      /* Sections */
+      section { padding: 48px 16px !important; }
 
-      /* API section — stack */
-      .api-section { grid-template-columns: 1fr; gap: 32px; }
-      .code-block { padding: 20px; font-size: 11px; }
+      /* Features */
+      .features-grid { grid-template-columns: 1fr; }
+      .feature-card { padding: 28px 20px; }
 
-      /* Plans — stack */
-      .plans-grid { grid-template-columns: 1fr !important; }
+      /* Tournament cards — stack label + button */
+      #tournaments-schedule [style*="justify-content:space-between"] {
+        flex-direction: column; gap: 12px;
+      }
+      #tournaments-schedule .btn-primary,
+      #tournaments-schedule .btn-secondary { text-align: center; width: 100%; }
+
+      /* Pricing */
+      .pricing-grid { grid-template-columns: 1fr !important; max-width: 100%; }
+      .plan { padding: 28px 20px; }
+      .plan-price { font-size: 38px; }
+
+      /* API */
+      .api-section { grid-template-columns: 1fr; gap: 24px; }
+      .code-block { padding: 16px; font-size: 10px; line-height: 1.7; overflow-x: auto; }
 
       /* Footer */
       footer {
-        flex-direction: column;
-        gap: 20px;
-        padding: 32px 20px;
-        text-align: center;
+        flex-direction: column; gap: 16px;
+        padding: 28px 16px; text-align: center;
       }
-      .footer-links { flex-wrap: wrap; justify-content: center; gap: 16px; }
+      .footer-links { flex-wrap: wrap; justify-content: center; gap: 14px; }
     }
 
-    /* Very small phones */
     @media (max-width: 400px) {
-      h1 { font-size: 32px; }
-      .hero { padding: 80px 16px 40px; }
+      h1 { font-size: 28px; }
+      .hero { padding: 68px 12px 28px; }
+      .hero-board { width: min(260px, 90vw); }
     }
+
+    /* ════════════════════════════════════════════
+       FEEDBACK WIDGET
+       ════════════════════════════════════════════ */
+    #feedback-btn {
+      position: fixed;
+      bottom: 24px; right: 20px;
+      background: var(--green);
+      color: #000;
+      border: none;
+      border-radius: 50px;
+      padding: 10px 18px;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+      z-index: 300;
+      box-shadow: 0 4px 24px rgba(0,255,157,0.25);
+      transition: background 0.2s, transform 0.15s;
+      display: flex; align-items: center; gap: 6px;
+    }
+    #feedback-btn:hover { background: var(--green2); transform: translateY(-2px); }
+
+    #feedback-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75);
+      z-index: 400;
+      align-items: flex-end; justify-content: center;
+      padding-bottom: 80px;
+    }
+    #feedback-overlay.open { display: flex; }
+    @media (min-width: 500px) {
+      #feedback-overlay { align-items: center; padding-bottom: 0; }
+    }
+
+    #feedback-card {
+      background: #111;
+      border: 1px solid #222;
+      border-top: 2px solid var(--green);
+      border-radius: 6px;
+      padding: 28px 24px;
+      width: min(420px, calc(100vw - 24px));
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .fb-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 18px; color: #f0ede6;
+      letter-spacing: -0.02em;
+    }
+    .fb-stars { display: flex; gap: 8px; }
+    .fb-star {
+      font-size: 28px; cursor: pointer;
+      color: #333; transition: color 0.1s, transform 0.1s;
+      background: none; border: none; padding: 0; line-height: 1;
+    }
+    .fb-star.lit { color: #f0c040; transform: scale(1.15); }
+    .fb-star:hover { color: #f0c040; }
+    .fb-label {
+      font-size: 10px; letter-spacing: 0.18em;
+      text-transform: uppercase; color: #444;
+    }
+    .fb-textarea {
+      width: 100%;
+      background: #0a0a0a;
+      border: 1px solid #1e1e1e;
+      border-radius: 2px;
+      color: #ccc;
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      padding: 12px 14px;
+      resize: vertical;
+      min-height: 90px;
+      outline: none;
+    }
+    .fb-textarea:focus { border-color: #00ff9d44; }
+    .fb-textarea::placeholder { color: #333; }
+    .fb-row { display: flex; gap: 8px; }
+    .fb-submit {
+      flex: 1; padding: 12px;
+      background: var(--green); color: #000;
+      border: none; border-radius: 2px;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px; font-weight: 500;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .fb-submit:hover { background: var(--green2); }
+    .fb-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+    .fb-cancel {
+      padding: 12px 16px;
+      background: transparent;
+      border: 1px solid #222;
+      border-radius: 2px;
+      color: #555;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px; letter-spacing: 0.1em;
+      cursor: pointer;
+    }
+    .fb-cancel:hover { border-color: #444; color: #888; }
+    .fb-status { font-size: 11px; color: #555; text-align: center; min-height: 16px; letter-spacing: 0.06em; }
+    .fb-status.ok  { color: var(--green); }
+    .fb-status.err { color: #ff4d4d; }
   </style>
 </head>
 <body>
@@ -927,6 +1041,95 @@ function navTo(dest) {
     if (target) setTimeout(function() { target.scrollIntoView({ behavior: 'smooth' }); }, 50);
   } else {
     window.location.href = dest;
+  }
+}
+</script>
+
+<!-- FEEDBACK BUTTON -->
+<button id="feedback-btn" onclick="openFeedback()">💬 Feedback</button>
+
+<!-- FEEDBACK MODAL -->
+<div id="feedback-overlay" onclick="if(event.target===this)closeFeedback()">
+  <div id="feedback-card">
+    <div class="fb-title">Share your thoughts</div>
+    <div>
+      <div class="fb-label" style="margin-bottom:8px;">How's your experience?</div>
+      <div class="fb-stars" id="fb-stars">
+        <button class="fb-star" data-v="1" onclick="setRating(1)">★</button>
+        <button class="fb-star" data-v="2" onclick="setRating(2)">★</button>
+        <button class="fb-star" data-v="3" onclick="setRating(3)">★</button>
+        <button class="fb-star" data-v="4" onclick="setRating(4)">★</button>
+        <button class="fb-star" data-v="5" onclick="setRating(5)">★</button>
+      </div>
+    </div>
+    <div>
+      <div class="fb-label" style="margin-bottom:6px;">Tell us more (optional)</div>
+      <textarea class="fb-textarea" id="fb-text"
+        placeholder="What's working well? What needs improving?"></textarea>
+    </div>
+    <div class="fb-row">
+      <button class="fb-cancel" onclick="closeFeedback()">Cancel</button>
+      <button class="fb-submit" id="fb-submit" onclick="submitFeedback()">Send Feedback</button>
+    </div>
+    <div class="fb-status" id="fb-status"></div>
+  </div>
+</div>
+
+<script>
+var _fbRating = 0;
+
+function openFeedback() {
+  document.getElementById('feedback-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeFeedback() {
+  document.getElementById('feedback-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function setRating(v) {
+  _fbRating = v;
+  document.querySelectorAll('.fb-star').forEach(function(s) {
+    s.classList.toggle('lit', parseInt(s.dataset.v) <= v);
+  });
+}
+
+async function submitFeedback() {
+  var text   = document.getElementById('fb-text').value.trim();
+  var status = document.getElementById('fb-status');
+  var btn    = document.getElementById('fb-submit');
+
+  if (!_fbRating) { status.textContent = 'Please select a rating.'; status.className = 'fb-status err'; return; }
+
+  btn.disabled = true;
+  status.textContent = 'Sending…';
+  status.className = 'fb-status';
+
+  try {
+    var res = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rating:  _fbRating,
+        message: text || null,
+        page:    window.location.pathname
+      })
+    });
+    if (res.ok) {
+      status.textContent = '✓ Thank you — feedback received!';
+      status.className = 'fb-status ok';
+      document.getElementById('fb-text').value = '';
+      _fbRating = 0;
+      document.querySelectorAll('.fb-star').forEach(function(s) { s.classList.remove('lit'); });
+      setTimeout(closeFeedback, 1800);
+    } else {
+      var d = await res.json().catch(function(){ return {}; });
+      throw new Error(d.detail || 'Server error');
+    }
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+    status.className = 'fb-status err';
+    btn.disabled = false;
   }
 }
 </script>

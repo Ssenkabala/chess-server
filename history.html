@@ -481,26 +481,34 @@ function openReplay(id) {
   }
   document.getElementById('rh-elo-opp').textContent = '';
 
-  // Init chessground (view only, no CDN images needed — SVG pieces inline)
+  // Init chessground — defer one frame so board-outer has been reflowed after display:''
   const boardEl = document.getElementById('replay-board');
   if (cg) { cg.destroy(); cg = null; }
   boardEl.innerHTML = '';
   const wrap = document.createElement('div');
   wrap.className = 'cg-wrap';
-  wrap.style.cssText = 'width:100%;height:100%;';
+  wrap.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;';
   boardEl.appendChild(wrap);
 
-  cg = Chessground(wrap, {
-    fen:         'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR',
-    orientation: g.player_color || 'white',
-    viewOnly:    true,
-    coordinates: true,
-    animation:   { enabled: true, duration: 150 },
-    highlight:   { lastMove: true, check: true },
-    drawable:    { enabled: false },
+  const orientation = g.player_color || 'white';
+
+  requestAnimationFrame(() => {
+    cg = Chessground(wrap, {
+      fen:         'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR',
+      orientation: orientation,
+      viewOnly:    true,
+      coordinates: true,
+      animation:   { enabled: true, duration: 150 },
+      highlight:   { lastMove: true, check: true },
+      drawable:    { enabled: false },
+    });
+    // Force resize recalc after chessground mounts
+    cg.redrawAll();
+    // Go to move 0 so the starting position renders
+    replayGoto(0);
   });
 
-  // Render
+  // Render move list and counter immediately (board loads async above)
   renderMoveList(g.pgn);
   replayIdx = 0;
   updateControls();

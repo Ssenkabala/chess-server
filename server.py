@@ -210,7 +210,8 @@ DIFFICULTY_SETTINGS = {
 class MoveRequest(BaseModel):
     fen: str
     think_time: float = 1.0
-    difficulty: int = 3  # 1=Beginner ΓåÆ 5=Expert
+    difficulty: int = 3  # 1=Beginner → 5=Expert
+    moves: list[str] = []  # full UCI move history for repetition detection
 
 class CoachRequest(BaseModel):
     fen: str
@@ -274,78 +275,79 @@ def verify_key(x_api_key: str = Header(...)):
 
 # ΓöÇΓöÇΓöÇ Engine helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
-def analyse_position(fen: str, think_time: float):
-    """Returns best_move and score by talking directly to engine process."""
-    import subprocess, threading
+def analyse_position(fen: str, think_time: float, moves: list[str] | None = None):
+    """
+    Talk directly to SenkabalaIII via raw subprocess.
+    SenkabalaIII non-standard output: bestmove → stdout, info → stderr.
+    Sends full move history so engine posHistory[] tracks repetitions.
+    """
+    import subprocess
 
-    board = chess.Board(fen)
-    think_ms = int(max(think_time, 2.0) * 1000)
+    board = chess.Board()
+    if moves:
+        for uci in moves:
+            try:
+                board.push_uci(uci)
+            except Exception:
+                board = chess.Board(fen)
+                break
+    else:
+        board = chess.Board(fen)
+
+    think_ms = int(max(think_time, 1.0) * 1000)
+    pos_cmd = f"position startpos moves {' '.join(moves)}" if moves else f"position fen {fen}"
+    commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
+
+    try:
+        proc = subprocess.Popen(
+            [ENGINE_PATH],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1
+        )
+        stdout_data, stderr_data = proc.communicate(input=commands, timeout=think_ms/1000 + 8)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout_data, stderr_data = proc.communicate()
 
     best_move = None
     score = 0
     pv_moves = []
-    stderr_lines = []
+    best_depth = -1
 
-    proc = subprocess.Popen(
-        [ENGINE_PATH],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1
-    )
-
-    def read_stderr():
-        for line in proc.stderr:
-            stderr_lines.append(line.strip())
-
-    t = threading.Thread(target=read_stderr, daemon=True)
-    t.start()
-
-    commands = f"uci\nucinewgame\nposition fen {board.fen()}\ngo movetime {think_ms}\n"
-    try:
-        stdout_data, _ = proc.communicate(input=commands, timeout=think_ms/1000 + 5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        stdout_data, _ = proc.communicate()
-    t.join(timeout=2)
-
-    # Parse stdout for bestmove
+    # bestmove on stdout
     for line in stdout_data.splitlines():
-        line = line.strip()
         if line.startswith("bestmove"):
             parts = line.split()
             if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
                 best_move = parts[1]
+            break
 
-    # Parse stderr for score and pv — engine writes info lines there
-    best_depth = -1
-    for line in stderr_lines:
-        if "score cp" in line and "depth" in line:
-            try:
-                parts = line.split()
-                depth = int(parts[parts.index("depth") + 1]) if "depth" in parts else 0
-                cp_idx = parts.index("cp")
-                cp = int(parts[cp_idx + 1])
-                if depth > best_depth:
-                    best_depth = depth
-                    score = cp
-                    # Parse pv from this line if present
-                    if "pv" in parts:
-                        pv_idx = parts.index("pv")
-                        pv_moves = parts[pv_idx + 1: pv_idx + 6]
-            except (ValueError, IndexError):
+    # info lines on stderr
+    for line in stderr_data.splitlines():
+        if "depth" not in line:
+            continue
+        try:
+            parts = line.split()
+            depth = int(parts[parts.index("depth") + 1])
+            if "score" not in parts or depth <= best_depth:
                 continue
+            si = parts.index("score")
+            stype, sval = parts[si+1], int(parts[si+2])
+            best_depth = depth
+            score = sval if stype == "cp" else (10000 - abs(sval)) * 100 * (1 if sval > 0 else -1)
+            if "pv" in parts:
+                pvi = parts.index("pv")
+                pv_moves = parts[pvi+1:pvi+6]
+        except (ValueError, IndexError):
+            continue
 
-    # Score is from side-to-move perspective — convert to white's perspective
     if board.turn == chess.BLACK:
         score = -score
-
-    # Fallback best_move from pv
     if not best_move and pv_moves:
         best_move = pv_moves[0]
 
     return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
+
 
 # ΓöÇΓöÇΓöÇ Original /move endpoint (unchanged) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 engine_semaphore = asyncio.Semaphore(3)
@@ -354,45 +356,85 @@ engine_semaphore = asyncio.Semaphore(3)
 async def get_move(req: MoveRequest):
     async with engine_semaphore:
         try:
+            # Validate FEN
             board = chess.Board(req.fen)
-            # Don't run engine on finished positions
             if board.is_game_over():
                 return {
-                    "move": None,
-                    "fen": req.fen,
+                    "move": None, "fen": req.fen,
                     "is_game_over": True,
                     "outcome": str(board.outcome()),
-                    "score_cp": 0,
-                    "eval_pawns": 0,
-                    "candidates": []
+                    "score_cp": 0, "eval_pawns": 0, "candidates": []
                 }
 
-            # Instance 1: get the best move
             import random
             think_ms = DIFFICULTY_SETTINGS.get(req.difficulty, int(req.think_time * 1000))
 
-            # At low difficulty, randomly pick a legal move instead of engine's best
+            # Reconstruct game board from full move history (needed for repetition detection)
+            game_board = chess.Board()
+            if req.moves:
+                for uci in req.moves:
+                    try:
+                        game_board.push_uci(uci)
+                    except Exception:
+                        game_board = chess.Board(req.fen)
+                        break
+            else:
+                game_board = chess.Board(req.fen)
+
+            # Low difficulties: random legal move
             random_chance = {1: 0.75, 2: 0.40, 3: 0.15, 4: 0.0, 5: 0.0}
             if random.random() < random_chance.get(req.difficulty, 0):
-                move = random.choice(list(board.legal_moves))
+                move = random.choice(list(game_board.legal_moves))
+                move_uci = move.uci()
             else:
-                with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine:
-                    result = engine.play(board, chess.engine.Limit(
-                        white_clock=think_ms / 1000,
-                        black_clock=think_ms / 1000,
-                        remaining_moves=1
-                    ))
-                    move = result.move
+                # Use raw subprocess so we can send the full position command.
+                # python-chess engine.play() only sends `position fen <fen>` internally,
+                # which means the engine's posHistory[] never gets populated — it can't
+                # detect repetitions. We must send `position startpos moves <all>` ourselves.
+                import subprocess
+                if req.moves:
+                    pos_cmd = f"position startpos moves {' '.join(req.moves)}"
+                else:
+                    pos_cmd = f"position fen {req.fen}"
 
-            # Instance 2: get candidates separately
+                commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
+                move_uci = None
+                try:
+                    proc = subprocess.Popen(
+                        [ENGINE_PATH],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        bufsize=1
+                    )
+                    stdout_data, _ = proc.communicate(
+                        input=commands,
+                        timeout=think_ms / 1000 + 8
+                    )
+                    for line in stdout_data.splitlines():
+                        if line.startswith("bestmove"):
+                            parts = line.split()
+                            if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
+                                move_uci = parts[1]
+                            break
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.communicate()
+
+                if not move_uci:
+                    # Fallback: any legal move
+                    move_uci = random.choice(list(game_board.legal_moves)).uci()
+
+                # Convert UCI string to chess.Move for pushing
+                move = chess.Move.from_uci(move_uci)
+
+            # Candidate moves — analyse current position
+            fen_board = chess.Board(req.fen)
             candidates = []
             try:
                 with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine2:
-                    infos = engine2.analyse(
-                        board,
-                        chess.engine.Limit(time=0.5),
-                        multipv=5
-                    )
+                    infos = engine2.analyse(fen_board, chess.engine.Limit(time=0.5), multipv=5)
                     info_list = infos if isinstance(infos, list) else [infos]
                     for info in info_list:
                         if info.get("pv"):
@@ -402,19 +444,19 @@ async def get_move(req: MoveRequest):
                                 "eval_pawns": round(cp / 100, 2) if cp is not None else 0
                             })
             except Exception:
-                pass  # candidates are optional, don't break the move if this fails
+                pass
 
             score_cp = int(candidates[0]["eval_pawns"] * 100) if candidates else 0
 
-            board.push(move)
+            game_board.push(move)
             return {
-                "move": move.uci(),
-                "fen": board.fen(),
-                "is_game_over": board.is_game_over(),
-                "outcome": str(board.outcome()) if board.is_game_over() else None,
-                "score_cp": score_cp,
-                "eval_pawns": round(score_cp / 100, 2),
-                "candidates": candidates
+                "move":         move.uci(),
+                "fen":          game_board.fen(),
+                "is_game_over": game_board.is_game_over(),
+                "outcome":      str(game_board.outcome()) if game_board.is_game_over() else None,
+                "score_cp":     score_cp,
+                "eval_pawns":   round(score_cp / 100, 2),
+                "candidates":   candidates
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -1962,6 +2004,37 @@ async def analyse_pos(req: AnalyseRequest):
 def health():
     return {"status": "ok"}
 
+class FeedbackRequest(BaseModel):
+    rating:  int              # 1–5
+    message: Optional[str] = None
+    page:    Optional[str] = None
+
+@app.post("/api/feedback")
+async def submit_feedback(req: FeedbackRequest):
+    """Store user feedback in Supabase feedback table."""
+    if not (1 <= req.rating <= 5):
+        raise HTTPException(400, "Rating must be 1–5")
+
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{SUPABASE_URL}/rest/v1/feedback",
+            headers={
+                "apikey":        SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type":  "application/json",
+                "Prefer":        "return=minimal"
+            },
+            json={
+                "rating":     req.rating,
+                "message":    req.message,
+                "page":       req.page,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+        )
+    if r.status_code not in (200, 201, 204):
+        raise HTTPException(500, f"DB error: {r.text}")
+    return {"ok": True}
+
 app.mount("/img", StaticFiles(directory="img"), name="img")
 app.mount("/static", StaticFiles(directory="."), name="static")
 
@@ -2419,10 +2492,27 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
 
 @app.post("/api/update-country")
 async def update_country(request: Request, authorization: str = Header(None)):
-    """Update user country — verified server-side to avoid client RLS issues."""
+    """Set user country once — cannot be changed after initial registration."""
     user_id = await verify_jwt(authorization)
     body = await request.json()
     country = body.get("country", None)
+
+    if not country:
+        raise HTTPException(400, "Country is required.")
+
+    # Fetch current country — if already set, reject
+    async with httpx.AsyncClient() as client:
+        check = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{user_id}", "select": "country"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        rows = check.json()
+        existing_country = rows[0].get("country") if rows else None
+
+    if existing_country:
+        raise HTTPException(403, "Country cannot be changed after registration.")
 
     async with httpx.AsyncClient() as client:
         r = await client.patch(

@@ -120,6 +120,12 @@
     /* ── Replay panel ── */
     .replay-panel { display:flex; flex-direction:column; align-items:center;
       padding:20px 16px; gap:14px; overflow-y:auto; max-height:calc(100vh - 110px); position:relative; }
+    /* Children that need to stretch to container width */
+    .replay-panel > .board-outer,
+    .replay-panel > .replay-header,
+    .replay-panel > .replay-controls,
+    .replay-panel > .move-list-wrap,
+    .replay-panel > .pgn-wrap { align-self:center; width:100%; max-width:460px; }
     .mobile-back-btn { display:none; position:fixed; top:0; left:0; right:0;
       background:#0d0d0d; border-bottom:1px solid var(--border); padding:12px 16px;
       z-index:101; align-items:center; gap:8px; font-size:12px; color:var(--green);
@@ -128,10 +134,25 @@
     .replay-empty { margin:auto; text-align:center; color:#333; font-size:13px; line-height:2.4; }
     .replay-empty-icon { font-size:40px; margin-bottom:12px; opacity:0.25; }
 
-    .board-outer { width:100%; max-width:460px; }
-    .board-ratio { padding-top:100%; position:relative; }
-    #replay-board { position:absolute; inset:0; width:100%; height:100%; }
-    #replay-board .cg-wrap { width:100%; height:100%; }
+    .board-outer {
+      width: 100%;
+      max-width: 460px;
+      align-self: stretch; /* don't let flex-column center shrink it */
+      flex-shrink: 0;
+    }
+    .board-ratio {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1; /* modern approach — no padding-top hack */
+      min-height: 200px;   /* fallback for very old browsers */
+    }
+    #replay-board {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+    #replay-board .cg-wrap { width: 100%; height: 100%; }
 
     .replay-header { width:100%; max-width:460px; display:flex;
       justify-content:space-between; align-items:center; font-size:12px; color:var(--muted); }

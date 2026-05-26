@@ -672,9 +672,9 @@ def parse_clock_seconds(time_control: str | None) -> tuple[int, int]:
 def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
              white_id: str, black_id: str, time_control: str | None = None) -> dict:
     base_secs, inc_secs = parse_clock_seconds(time_control)
-    # First-move timeout: 30s bullet, 60s blitz/rapid/classical
-    base_mins = base_secs / 60
-    first_move_timeout = 30 if base_mins <= 3 else 60
+    # First-move timeout = 25% of base time, minimum 10s
+    # e.g. 1+0 → 15s, 3+0 → 45s, 5+0 → 75s, 10+0 → 150s
+    first_move_timeout = max(10, int(base_secs * 0.25))
     return {
         "id":                   game_id,
         "board":                chess.Board(),
@@ -685,10 +685,10 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
         "white_id":             white_id,
         "black_id":             black_id,
         "clock":                {"w": base_secs, "b": base_secs},
-        "increment":            inc_secs,          # added to clock after each move
-        "last_move_ts":         None,        # set when both_connected fires
+        "increment":            inc_secs,
+        "last_move_ts":         None,
         "first_move_timeout":   first_move_timeout,
-        "first_move_deadline":  None,        # set when both_connected fires
+        "first_move_deadline":  None,
         "moves_made":           0,
         "over":                 False,
         "time_control":         time_control,
@@ -698,35 +698,75 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
 
 
 async def first_move_timeout_loop(game_id: str):
-    """Give white N seconds to play the first move, else they forfeit."""
+    """
+    Enforce first-move timeout for BOTH sides:
+    - White must play within first_move_timeout seconds of game start
+    - Black must respond within first_move_timeout seconds of white's first move
+    After move 2 this loop exits and clock_loop handles normal time management.
+    """
     await asyncio.sleep(1)
+    black_deadline = None   # set after white's first move
+
     while True:
         await asyncio.sleep(1)
         game = active_games.get(game_id)
         if not game or game["over"]:
             return
+
         deadline = game.get("first_move_deadline")
+        moves_made = game.get("moves_made", 0)
+
+        # Phase 1: waiting for both_connected to set the deadline
         if deadline is None:
-            continue  # both_connected not fired yet
-        if game.get("moves_made", 0) > 0:
-            return   # first move made — hand off to clock_loop
-        if time.time() >= deadline:
-            game["over"] = True
-            await broadcast(game, {
-                "type":   "gameover",
-                "result": "black",
-                "reason": "timeout",
-                "detail": "White did not make a move in time.",
-                "clock":  game["clock"],
-            })
-            if not game.get("_elo_updated"):
-                game["_elo_updated"] = True
-                await update_elos(game, "black")
-            # Delay removal so the gameover message is delivered before WS closes
-            await asyncio.sleep(1)
-            active_games.pop(game_id, None)
-            print(f"[game] {game_id} — white forfeited (no first move)", flush=True)
-            return
+            continue
+
+        # Phase 2: white hasn't moved yet
+        if moves_made == 0:
+            if time.time() >= deadline:
+                game["over"] = True
+                await broadcast(game, {
+                    "type":   "gameover",
+                    "result": "black",
+                    "reason": "first_move_timeout",
+                    "detail": "White did not move in time.",
+                    "clock":  game["clock"],
+                })
+                if not game.get("_elo_updated"):
+                    game["_elo_updated"] = True
+                    await update_elos(game, "black")
+                await asyncio.sleep(1)
+                active_games.pop(game_id, None)
+                print(f"[game] {game_id} — white forfeited (no first move)", flush=True)
+                return
+            continue
+
+        # Phase 3: white just made move 1 — start black's deadline
+        if moves_made == 1 and black_deadline is None:
+            black_deadline = time.time() + game["first_move_timeout"]
+            continue
+
+        # Phase 4: black hasn't responded
+        if moves_made == 1 and black_deadline is not None:
+            if time.time() >= black_deadline:
+                game["over"] = True
+                await broadcast(game, {
+                    "type":   "gameover",
+                    "result": "white",
+                    "reason": "first_move_timeout",
+                    "detail": "Black did not respond in time.",
+                    "clock":  game["clock"],
+                })
+                if not game.get("_elo_updated"):
+                    game["_elo_updated"] = True
+                    await update_elos(game, "white")
+                await asyncio.sleep(1)
+                active_games.pop(game_id, None)
+                print(f"[game] {game_id} — black forfeited (no first response)", flush=True)
+                return
+            continue
+
+        # Both sides have made their first moves — hand off to clock_loop
+        return
 
 
 async def send(ws: WebSocket, msg: dict):
@@ -2738,6 +2778,52 @@ def player_in_region(player_country: str | None, region: str) -> bool:
     if not player_country:
         return False
     return player_country in REGIONS.get(region, [])
+
+@app.post("/api/admin/force-end-game")
+async def force_end_game(request: Request, authorization: str = Header(None)):
+    """
+    Force-end a stuck game. Admin only.
+    Body: { "game_id": "...", "winner": "white"|"black"|"draw" }
+    """
+    caller_id = await verify_jwt(authorization)
+    if caller_id not in ADMIN_USER_IDS:
+        raise HTTPException(403, "Admin access required")
+
+    body    = await request.json()
+    game_id = body.get("game_id")
+    winner  = body.get("winner", "draw")  # "white", "black", or "draw"
+
+    if not game_id:
+        # List all active games for the admin
+        games = [
+            {"id": gid, "tc": g.get("time_control"), "moves": g.get("moves_made", 0),
+             "over": g.get("over"), "white": g.get("white_profile", {}) and g["white_profile"].get("username"),
+             "black": g.get("black_profile", {}) and g["black_profile"].get("username")}
+            for gid, g in active_games.items()
+        ]
+        return {"active_games": games}
+
+    game = active_games.get(game_id)
+    if not game:
+        raise HTTPException(404, f"Game {game_id} not found in active_games")
+
+    game["over"] = True
+    result_msg = winner if winner != "draw" else "draw"
+    await broadcast(game, {
+        "type":   "gameover",
+        "result": result_msg,
+        "reason": "admin_ended",
+        "detail": "This game was ended by an administrator.",
+        "clock":  game["clock"],
+    })
+    if winner != "draw" and not game.get("_elo_updated"):
+        game["_elo_updated"] = True
+        await update_elos(game, winner)
+    await asyncio.sleep(1)
+    active_games.pop(game_id, None)
+    print(f"[admin] {caller_id} force-ended game {game_id} → {winner}", flush=True)
+    return {"ok": True, "game_id": game_id, "winner": winner}
+
 
 @app.post("/api/admin/ban")
 async def ban_user(request: Request, authorization: str = Header(None)):

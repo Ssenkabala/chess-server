@@ -722,6 +722,8 @@ async def first_move_timeout_loop(game_id: str):
             if not game.get("_elo_updated"):
                 game["_elo_updated"] = True
                 await update_elos(game, "black")
+            # Delay removal so the gameover message is delivered before WS closes
+            await asyncio.sleep(1)
             active_games.pop(game_id, None)
             print(f"[game] {game_id} — white forfeited (no first move)", flush=True)
             return
@@ -811,6 +813,8 @@ async def clock_loop(game_id: str):
             if not game.get("_elo_updated"):
                 game["_elo_updated"] = True
                 await update_elos(game, winner)
+            # Delay removal so gameover message is delivered before WS closes
+            await asyncio.sleep(1)
             active_games.pop(game_id, None)
             return
 
@@ -2646,6 +2650,13 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
                 raise HTTPException(403,
                     f"This tournament is restricted to players from {label}. "
                     f"Make sure your country is set correctly in your profile.")
+
+        # Country must be set for ALL tournaments — needed for regional eligibility
+        # and leaderboards even on open tournaments
+        if not player_country:
+            raise HTTPException(403,
+                "Please set your country in your profile before joining a tournament. "
+                "Go to Profile → select your country → Save.")
 
         # Check not already joined
         existing = await client.get(

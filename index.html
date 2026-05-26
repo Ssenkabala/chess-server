@@ -2336,19 +2336,24 @@ function closeMenuThenAuth() {
   document.getElementById('panel-analysis').classList.add('active');
   document.querySelectorAll('.tab-btn')[1].classList.add('active');
 
-  // Load the FEN
-  setTimeout(function() {
-    if (!analysisCg) initAnalysisBoard();
-    var test = new Chess();
-    if (test.load(decodeURIComponent(fen))) {
+  // initAnalysisBoard uses rAF internally — wait for it then set FEN
+  initAnalysisBoard();
+  // Two rAFs: first fires the cg init inside initAnalysisBoard, second applies the FEN
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const decodedFen = decodeURIComponent(fen);
+    const test = new Chess();
+    if (test.load(decodedFen)) {
       analysisGame = test;
-      if (!analysisCg) initAnalysisBoard();
-      analysisCg.set({ fen: decodeURIComponent(fen) });
-      document.getElementById('fen-input').value = decodeURIComponent(fen);
+      if (analysisCg) {
+        analysisCg.set({ fen: decodedFen });
+        analysisCg.redrawAll();
+      }
+      document.getElementById('fen-input').value = decodedFen;
       document.getElementById('analysis-status').textContent =
-        'Position loaded from saved game. Press Analyse or Coach Me.';
+        'Position loaded. Press Analyse or Coach Me.';
+      scheduleAutoAnalyse();
     }
-  }, 400);
+  }));
 })();
 </script>
 

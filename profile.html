@@ -221,14 +221,33 @@
     <img src="/logo.png" height="28" alt="AfriChess">
     <span>Afri<span style="color:#00ff9d">Chess</span></span>
   </a>
-  <div class="nav-links">
-    <a onclick="window.location.href='/play'">Play</a>
-    <a onclick="window.location.href='/multiplayer'">Live</a>
-    <a onclick="window.location.href='/history'">History</a>
-    <a onclick="window.location.href='/tournaments'">Tournaments</a>
-    <a id="nav-signout" onclick="signOut()" style="display:none">Sign Out</a>
+  <div class="nav-links" id="nav-links-desktop">
+    <a href="/">Home</a>
+    <a href="/play">vs Bot</a>
+    <a href="/multiplayer">Live</a>
+    <a href="/tournaments">Tournaments</a>
+    <a href="/history">History</a>
+    <a href="/profile" style="color:var(--green)">Profile</a>
+    <a id="nav-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
   </div>
+  <button id="hamburger" onclick="toggleMobileNav()" style="display:none;flex-direction:column;gap:5px;background:none;border:none;cursor:pointer;padding:6px;">
+    <span style="display:block;width:22px;height:2px;background:#888;pointer-events:none;"></span>
+    <span style="display:block;width:22px;height:2px;background:#888;pointer-events:none;"></span>
+    <span style="display:block;width:22px;height:2px;background:#888;pointer-events:none;"></span>
+  </button>
 </div>
+<div id="mobile-drawer" style="position:fixed;top:0;right:-260px;width:240px;height:100vh;background:#0d0d0d;border-left:1px solid #1a1a1a;display:flex;flex-direction:column;padding:72px 24px 32px;gap:20px;z-index:500;transition:right 0.28s ease;">
+  <a href="/" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Home</a>
+  <a href="/play" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">vs Bot</a>
+  <a href="/multiplayer" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Live</a>
+  <a href="/tournaments" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Tournaments</a>
+  <a href="/history" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">History</a>
+  <a href="/profile" style="color:var(--green);text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Profile</a>
+</div>
+<div id="drawer-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:499;" onclick="toggleMobileNav()"></div>
+<style>
+@media (max-width:768px) { #nav-links-desktop { display:none !important; } #hamburger { display:flex !important; } }
+</style>
 
 <div class="page" id="page-content">
   <div class="loading">Loading profile…</div>
@@ -307,66 +326,72 @@ function renderProfile(d) {
           </div>
         </div>
         ${since ? `<div class="profile-since">Member since ${since}</div>` : ''}
-        <div class="country-row">
-          <select class="country-select" id="country-select" onchange="countryChanged()">
-            <option value="">🌍 Select country</option>
-            <option value="DZ">🇩🇿 Algeria</option>
-            <option value="AO">🇦🇴 Angola</option>
-            <option value="BJ">🇧🇯 Benin</option>
-            <option value="BW">🇧🇼 Botswana</option>
-            <option value="BF">🇧🇫 Burkina Faso</option>
-            <option value="BI">🇧🇮 Burundi</option>
-            <option value="CM">🇨🇲 Cameroon</option>
-            <option value="CV">🇨🇻 Cape Verde</option>
-            <option value="CF">🇨🇫 Central African Republic</option>
-            <option value="TD">🇹🇩 Chad</option>
-            <option value="KM">🇰🇲 Comoros</option>
-            <option value="CG">🇨🇬 Congo</option>
-            <option value="CD">🇨🇩 DR Congo</option>
-            <option value="DJ">🇩🇯 Djibouti</option>
-            <option value="EG">🇪🇬 Egypt</option>
-            <option value="GQ">🇬🇶 Equatorial Guinea</option>
-            <option value="ER">🇪🇷 Eritrea</option>
-            <option value="SZ">🇸🇿 Eswatini</option>
-            <option value="ET">🇪🇹 Ethiopia</option>
-            <option value="GA">🇬🇦 Gabon</option>
-            <option value="GM">🇬🇲 Gambia</option>
-            <option value="GH">🇬🇭 Ghana</option>
-            <option value="GN">🇬🇳 Guinea</option>
-            <option value="GW">🇬🇼 Guinea-Bissau</option>
-            <option value="CI">🇨🇮 Ivory Coast</option>
-            <option value="KE">🇰🇪 Kenya</option>
-            <option value="LS">🇱🇸 Lesotho</option>
-            <option value="LR">🇱🇷 Liberia</option>
-            <option value="LY">🇱🇾 Libya</option>
-            <option value="MG">🇲🇬 Madagascar</option>
-            <option value="MW">🇲🇼 Malawi</option>
-            <option value="ML">🇲🇱 Mali</option>
-            <option value="MR">🇲🇷 Mauritania</option>
-            <option value="MU">🇲🇺 Mauritius</option>
-            <option value="MA">🇲🇦 Morocco</option>
-            <option value="MZ">🇲🇿 Mozambique</option>
-            <option value="NA">🇳🇦 Namibia</option>
-            <option value="NE">🇳🇪 Niger</option>
-            <option value="NG">🇳🇬 Nigeria</option>
-            <option value="RW">🇷🇼 Rwanda</option>
-            <option value="ST">🇸🇹 São Tomé & Príncipe</option>
-            <option value="SN">🇸🇳 Senegal</option>
-            <option value="SC">🇸🇨 Seychelles</option>
-            <option value="SL">🇸🇱 Sierra Leone</option>
-            <option value="SO">🇸🇴 Somalia</option>
-            <option value="ZA">🇿🇦 South Africa</option>
-            <option value="SS">🇸🇸 South Sudan</option>
-            <option value="SD">🇸🇩 Sudan</option>
-            <option value="TZ">🇹🇿 Tanzania</option>
-            <option value="TG">🇹🇬 Togo</option>
-            <option value="TN">🇹🇳 Tunisia</option>
-            <option value="UG">🇺🇬 Uganda</option>
-            <option value="ZM">🇿🇲 Zambia</option>
-            <option value="ZW">🇿🇼 Zimbabwe</option>
-          </select>
-          <button class="btn-save-country" id="btn-save-country" onclick="saveCountry()" style="display:none;">Save</button>
-          <span class="country-saved" id="country-saved" style="display:none;">✓ Saved</span>
+        <div class="country-row" id="country-row">
+          ${d.country
+            ? `<span id="country-locked" style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;">
+                <span id="country-flag-label"></span>
+                <span style="font-size:10px;color:#333;letter-spacing:0.1em;text-transform:uppercase;margin-left:4px;">🔒 locked</span>
+               </span>`
+            : `<select class="country-select" id="country-select" onchange="countryChanged()">
+                <option value="">🌍 Select your country</option>
+                <option value="DZ">🇩🇿 Algeria</option>
+                <option value="AO">🇦🇴 Angola</option>
+                <option value="BJ">🇧🇯 Benin</option>
+                <option value="BW">🇧🇼 Botswana</option>
+                <option value="BF">🇧🇫 Burkina Faso</option>
+                <option value="BI">🇧🇮 Burundi</option>
+                <option value="CM">🇨🇲 Cameroon</option>
+                <option value="CV">🇨🇻 Cape Verde</option>
+                <option value="CF">🇨🇫 Central African Republic</option>
+                <option value="TD">🇹🇩 Chad</option>
+                <option value="KM">🇰🇲 Comoros</option>
+                <option value="CG">🇨🇬 Congo</option>
+                <option value="CD">🇨🇩 DR Congo</option>
+                <option value="DJ">🇩🇯 Djibouti</option>
+                <option value="EG">🇪🇬 Egypt</option>
+                <option value="GQ">🇬🇶 Equatorial Guinea</option>
+                <option value="ER">🇪🇷 Eritrea</option>
+                <option value="SZ">🇸🇿 Eswatini</option>
+                <option value="ET">🇪🇹 Ethiopia</option>
+                <option value="GA">🇬🇦 Gabon</option>
+                <option value="GM">🇬🇲 Gambia</option>
+                <option value="GH">🇬🇭 Ghana</option>
+                <option value="GN">🇬🇳 Guinea</option>
+                <option value="GW">🇬🇼 Guinea-Bissau</option>
+                <option value="CI">🇨🇮 Ivory Coast</option>
+                <option value="KE">🇰🇪 Kenya</option>
+                <option value="LS">🇱🇸 Lesotho</option>
+                <option value="LR">🇱🇷 Liberia</option>
+                <option value="LY">🇱🇾 Libya</option>
+                <option value="MG">🇲🇬 Madagascar</option>
+                <option value="MW">🇲🇼 Malawi</option>
+                <option value="ML">🇲🇱 Mali</option>
+                <option value="MR">🇲🇷 Mauritania</option>
+                <option value="MU">🇲🇺 Mauritius</option>
+                <option value="MA">🇲🇦 Morocco</option>
+                <option value="MZ">🇲🇿 Mozambique</option>
+                <option value="NA">🇳🇦 Namibia</option>
+                <option value="NE">🇳🇪 Niger</option>
+                <option value="NG">🇳🇬 Nigeria</option>
+                <option value="RW">🇷🇼 Rwanda</option>
+                <option value="ST">🇸🇹 São Tomé & Príncipe</option>
+                <option value="SN">🇸🇳 Senegal</option>
+                <option value="SC">🇸🇨 Seychelles</option>
+                <option value="SL">🇸🇱 Sierra Leone</option>
+                <option value="SO">🇸🇴 Somalia</option>
+                <option value="ZA">🇿🇦 South Africa</option>
+                <option value="SS">🇸🇸 South Sudan</option>
+                <option value="SD">🇸🇩 Sudan</option>
+                <option value="TZ">🇹🇿 Tanzania</option>
+                <option value="TG">🇹🇬 Togo</option>
+                <option value="TN">🇹🇳 Tunisia</option>
+                <option value="UG">🇺🇬 Uganda</option>
+                <option value="ZM">🇿🇲 Zambia</option>
+                <option value="ZW">🇿🇼 Zimbabwe</option>
+               </select>
+               <button class="btn-save-country" id="btn-save-country" onclick="saveCountry()" style="display:none;">Save</button>
+               <span class="country-saved" id="country-saved" style="display:none;">✓ Saved</span>`
+          }
         </div>
       </div>
     </div>
@@ -544,55 +569,86 @@ function switchEloTab(cat, btn) {
   document.getElementById('elo-rating-label').textContent = labels[cat] + ' ELO';
 }
 
+// Country code → flag + name map for locked display
+const COUNTRY_NAMES = {
+  DZ:'🇩🇿 Algeria',AO:'🇦🇴 Angola',BJ:'🇧🇯 Benin',BW:'🇧🇼 Botswana',BF:'🇧🇫 Burkina Faso',
+  BI:'🇧🇮 Burundi',CM:'🇨🇲 Cameroon',CV:'🇨🇻 Cape Verde',CF:'🇨🇫 Central African Republic',
+  TD:'🇹🇩 Chad',KM:'🇰🇲 Comoros',CG:'🇨🇬 Congo',CD:'🇨🇩 DR Congo',DJ:'🇩🇯 Djibouti',
+  EG:'🇪🇬 Egypt',GQ:'🇬🇶 Equatorial Guinea',ER:'🇪🇷 Eritrea',SZ:'🇸🇿 Eswatini',
+  ET:'🇪🇹 Ethiopia',GA:'🇬🇦 Gabon',GM:'🇬🇲 Gambia',GH:'🇬🇭 Ghana',GN:'🇬🇳 Guinea',
+  GW:'🇬🇼 Guinea-Bissau',CI:'🇨🇮 Ivory Coast',KE:'🇰🇪 Kenya',LS:'🇱🇸 Lesotho',
+  LR:'🇱🇷 Liberia',LY:'🇱🇾 Libya',MG:'🇲🇬 Madagascar',MW:'🇲🇼 Malawi',ML:'🇲🇱 Mali',
+  MR:'🇲🇷 Mauritania',MU:'🇲🇺 Mauritius',MA:'🇲🇦 Morocco',MZ:'🇲🇿 Mozambique',
+  NA:'🇳🇦 Namibia',NE:'🇳🇪 Niger',NG:'🇳🇬 Nigeria',RW:'🇷🇼 Rwanda',
+  ST:'🇸🇹 São Tomé & Príncipe',SN:'🇸🇳 Senegal',SC:'🇸🇨 Seychelles',SL:'🇸🇱 Sierra Leone',
+  SO:'🇸🇴 Somalia',ZA:'🇿🇦 South Africa',SS:'🇸🇸 South Sudan',SD:'🇸🇩 Sudan',
+  TZ:'🇹🇿 Tanzania',TG:'🇹🇬 Togo',TN:'🇹🇳 Tunisia',UG:'🇺🇬 Uganda',ZM:'🇿🇲 Zambia',ZW:'🇿🇼 Zimbabwe'
+};
+
 function countryChanged() {
   const sel = document.getElementById('country-select');
+  if (!sel) return;
   const btn = document.getElementById('btn-save-country');
   const saved = document.getElementById('country-saved');
-  saved.style.display = 'none';
-  btn.style.display = sel.value !== _currentCountry ? '' : 'none';
+  if (saved) saved.style.display = 'none';
+  if (btn) btn.style.display = sel.value ? '' : 'none';
 }
 
 async function saveCountry() {
   const sel   = document.getElementById('country-select');
   const btn   = document.getElementById('btn-save-country');
   const saved = document.getElementById('country-saved');
+  if (!sel) return;
   const val   = sel.value;
+  if (!val) { alert('Please select a country.'); return; }
   btn.disabled = true;
   btn.textContent = '...';
-  // Use server endpoint — avoids client-side RLS/auth issues
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) {
-    alert('Your session has expired. Please sign in again.');
-    window.location.href = '/play';
-    return;
-  }
+  if (!session) { window.location.href = '/play'; return; }
   try {
     const r = await fetch('/api/update-country', {
       method: 'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${session.access_token}`
-      },
-      body: JSON.stringify({ country: val || null })
+      headers: { 'Content-Type': 'application/json',
+                 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ country: val })
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Update failed');
     _currentCountry = val;
-    btn.style.display = 'none';
-    saved.style.display = '';
-    setTimeout(() => { saved.style.display = 'none'; }, 2000);
+    // Replace dropdown with locked display immediately
+    const row = document.getElementById('country-row');
+    if (row) {
+      row.innerHTML = `<span style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;">
+        <span>${COUNTRY_NAMES[val] || val}</span>
+        <span style="font-size:10px;color:#333;letter-spacing:0.1em;text-transform:uppercase;margin-left:4px;">🔒 locked</span>
+      </span>`;
+    }
   } catch (err) {
     btn.textContent = 'Save';
     btn.disabled = false;
-    console.error('Country save failed:', err.message);
+    alert('Could not save: ' + err.message);
   }
 }
 
 function setCountryDropdown(country) {
   if (!country) return;
   _currentCountry = country;
+  // If locked display is shown, populate its label
+  const flagEl = document.getElementById('country-flag-label');
+  if (flagEl) {
+    flagEl.textContent = COUNTRY_NAMES[country] || country;
+    return;
+  }
+  // Otherwise set the dropdown value (shouldn't happen if country is set — template handles it)
   const sel = document.getElementById('country-select');
   if (sel) sel.value = country;
+}
+
+function toggleMobileNav() {
+  const d = document.getElementById('mobile-drawer');
+  const o = document.getElementById('drawer-overlay');
+  d.style.right = d.style.right === '0px' ? '-260px' : '0px';
+  o.style.display = o.style.display === 'block' ? 'none' : 'block';
 }
 
 async function signOut() {

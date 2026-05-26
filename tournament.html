@@ -148,13 +148,15 @@
     .modal-overlay {
       display: none; position: fixed; inset: 0;
       background: rgba(0,0,0,0.8); z-index: 100;
-      align-items: center; justify-content: center; padding: 20px;
+      align-items: flex-start; justify-content: center;
+      padding: 20px; overflow-y: auto;
     }
     .modal-overlay.active { display: flex; }
     .modal {
       background: var(--bg2); border: 1px solid var(--border);
       border-radius: 4px; width: 100%; max-width: 480px;
       padding: 28px; position: relative;
+      margin: auto; /* vertically centers when content fits, scrolls when not */
     }
     .modal-title {
       font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase;
@@ -201,7 +203,19 @@
     .field-row .field { flex: 1; }
     .field textarea { resize: vertical; min-height: 60px; }
 
-    /* ── Detail view ── */
+    /* ── Hamburger / mobile nav ── */
+    .hamburger { display:none; flex-direction:column; gap:5px; background:none; border:none; cursor:pointer; padding:6px; }
+    .hamburger span { display:block; width:22px; height:2px; background:var(--muted); transition:all 0.25s; pointer-events:none; }
+    .hamburger.open span:nth-child(1) { transform:translateY(7px) rotate(45deg); }
+    .hamburger.open span:nth-child(2) { opacity:0; }
+    .hamburger.open span:nth-child(3) { transform:translateY(-7px) rotate(-45deg); }
+    .mobile-drawer { position:fixed; top:0; right:-260px; width:240px; height:100vh; background:#0d0d0d; border-left:1px solid #1a1a1a; display:flex; flex-direction:column; padding:72px 24px 32px; gap:20px; z-index:500; transition:right 0.28s ease; }
+    .mobile-drawer.open { right:0; }
+    .mobile-drawer a { color:var(--muted); text-decoration:none; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; padding:8px 0; border-bottom:1px solid #1a1a1a; transition:color 0.2s; }
+    .mobile-drawer a:hover, .mobile-drawer a.active { color:var(--green); }
+    .drawer-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:499; }
+    .drawer-overlay.open { display:block; }
+    @media (max-width:768px) { .nav-links { display:none; } .hamburger { display:flex; } }
     .detail { display: none; }
     .detail.active { display: block; }
     .list-view { display: block; }
@@ -340,14 +354,26 @@
     <span>Afri<span style="color:#00ff9d">Chess</span></span>
   </a>
   <div class="nav-links">
-    <a href="/play">Play</a>
+    <a href="/">Home</a>
+    <a href="/play">vs Bot</a>
     <a href="/multiplayer">Live</a>
-    <a href="/history">History</a>
     <a href="/tournaments" class="active">Tournaments</a>
+    <a href="/history">History</a>
     <a href="/profile">Profile</a>
     <a id="nav-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
   </div>
+  <button class="hamburger" id="hamburger" onclick="toggleMobileNav()"><span></span><span></span><span></span></button>
 </div>
+<div class="mobile-drawer" id="mobile-drawer">
+  <a href="/">Home</a>
+  <a href="/play">vs Bot</a>
+  <a href="/multiplayer">Live</a>
+  <a href="/tournaments" class="active">Tournaments</a>
+  <a href="/history">History</a>
+  <a href="/profile">Profile</a>
+  <a id="mobile-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
+</div>
+<div class="drawer-overlay" id="drawer-overlay" onclick="toggleMobileNav()"></div>
 
 <div class="page">
 
@@ -676,13 +702,10 @@ function tcCategory(tc) {
   if (!tc) return '';
   try {
     const parts = tc.split('+');
-    const base = parseFloat(parts[0]);        // minutes
-    const inc  = parts[1] ? parseFloat(parts[1]) : 0;  // seconds
-    // FIDE-style equivalent: base + 40*inc/60
+    const base = parseFloat(parts[0]);
+    const inc  = parts[1] ? parseFloat(parts[1]) : 0;
     const equiv = base + (40 * inc / 60);
-    if (equiv < 0.5)  return 'Hyperbullet';
     if (equiv < 3)    return 'Bullet';
-    if (equiv < 5)    return 'Bullet';
     if (equiv < 10)   return 'Blitz';
     if (equiv <= 15)  return 'Rapid';
     return 'Classical';
@@ -1531,6 +1554,12 @@ async function nextRound(id) {
   if (!r.ok) { alert(data.detail || 'Could not advance round'); return; }
   if (data.completed) { alert('Tournament completed! Final standings are above.'); }
   viewTournament(id);
+}
+
+function toggleMobileNav() {
+  document.getElementById('hamburger').classList.toggle('open');
+  document.getElementById('mobile-drawer').classList.toggle('open');
+  document.getElementById('drawer-overlay').classList.toggle('open');
 }
 
 async function signOut() {

@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leaderboard · AfriChess</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="description" content="AfriChess continental and national ELO rankings — top players by time control.">
+  <meta property="og:title" content="AfriChess Leaderboard">
+  <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
+  <meta property="og:url" content="https://www.africhess.org/leaderboard">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --bg:    #0d0d0d;
+      --bg2:   #111;
+      --bg3:   #1a1a1a;
+      --border:#222;
+      --text:  #e8e6e0;
+      --muted: #555;
+      --green: #00ff9d;
+      --gold:  #d4af37;
+      --silver:#aaa;
+      --bronze:#cd7f32;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Georgia', serif;
+      min-height: 100vh;
+      padding-bottom: 60px;
+    }
+
+    /* ── Nav ── */
+    .top-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 20px; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--bg); z-index: 10;
+    }
+    .top-logo {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none; color: var(--text);
+      font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .nav-links { display: flex; gap: 20px; align-items: center; }
+    .nav-links a {
+      color: var(--muted); font-size: 11px; letter-spacing: 0.15em;
+      text-transform: uppercase; text-decoration: none; cursor: pointer;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover, .nav-links a.active { color: var(--green); }
+
+    /* ── Mobile drawer ── */
+    .hamburger { display:none; flex-direction:column; gap:5px; background:none; border:none; cursor:pointer; padding:6px; }
+    .hamburger span { display:block; width:22px; height:2px; background:var(--muted); transition:all 0.25s; pointer-events:none; }
+    .hamburger.open span:nth-child(1) { transform:translateY(7px) rotate(45deg); }
+    .hamburger.open span:nth-child(2) { opacity:0; }
+    .hamburger.open span:nth-child(3) { transform:translateY(-7px) rotate(-45deg); }
+    .mobile-drawer { position:fixed; top:0; right:-260px; width:240px; height:100vh; background:#0d0d0d; border-left:1px solid #1a1a1a; display:flex; flex-direction:column; padding:72px 24px 32px; gap:20px; z-index:500; transition:right 0.28s ease; }
+    .mobile-drawer.open { right:0; }
+    .mobile-drawer a { color:var(--muted); text-decoration:none; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; padding:8px 0; border-bottom:1px solid #1a1a1a; transition:color 0.2s; }
+    .mobile-drawer a:hover, .mobile-drawer a.active { color:var(--green); }
+    .drawer-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:499; }
+    .drawer-overlay.open { display:block; }
+    @media (max-width:768px) { .nav-links { display:none; } .hamburger { display:flex; } }
+
+    /* ── Page ── */
+    .page { max-width: 860px; margin: 0 auto; padding: 28px 16px; }
+
+    .page-header {
+      margin-bottom: 28px;
+    }
+    .page-title {
+      font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 6px;
+    }
+    .page-title span { color: var(--green); }
+    .page-subtitle {
+      font-size: 20px; color: var(--text); letter-spacing: 0.04em;
+    }
+
+    /* ── Filters ── */
+    .filters {
+      display: flex; gap: 10px; margin-bottom: 24px; flex-wrap: wrap; align-items: center;
+    }
+    .filter-group { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+    .filter-btn {
+      padding: 7px 14px; font-size: 11px; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--muted); background: var(--bg2);
+      border: none; cursor: pointer; font-family: Georgia, serif;
+      transition: all 0.15s;
+    }
+    .filter-btn:hover { color: var(--text); background: var(--bg3); }
+    .filter-btn.active { color: #000; background: var(--green); }
+
+    .region-select {
+      background: var(--bg2); border: 1px solid var(--border); color: var(--text);
+      font-family: Georgia, serif; font-size: 12px; padding: 7px 12px;
+      border-radius: 3px; cursor: pointer; outline: none;
+    }
+    .region-select:focus { border-color: #00ff9d55; }
+
+    .search-wrap { flex: 1; min-width: 160px; max-width: 260px; position: relative; }
+    .search-wrap input {
+      width: 100%; background: var(--bg2); border: 1px solid var(--border);
+      color: var(--text); font-family: Georgia, serif; font-size: 12px;
+      padding: 7px 12px 7px 32px; border-radius: 3px; outline: none;
+    }
+    .search-wrap input:focus { border-color: #00ff9d55; }
+    .search-wrap::before {
+      content: '🔍'; position: absolute; left: 9px; top: 50%;
+      transform: translateY(-50%); font-size: 13px; pointer-events: none;
+    }
+
+    /* ── Table ── */
+    .section-hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+      color: var(--muted); padding-bottom: 10px;
+      border-bottom: 1px solid var(--border); margin-bottom: 0;
+    }
+
+    .lb-table { width: 100%; border-collapse: collapse; }
+    .lb-table thead th {
+      font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase;
+      color: var(--muted); padding: 10px 8px; text-align: left;
+      border-bottom: 1px solid var(--border); font-weight: normal;
+    }
+    .lb-table thead th.num { text-align: right; }
+    .lb-table tbody tr {
+      border-bottom: 1px solid #161616; transition: background 0.1s;
+    }
+    .lb-table tbody tr:hover { background: #111; }
+    .lb-table tbody tr.is-me { background: #0a1a0f; }
+    .lb-table tbody tr:last-child { border-bottom: none; }
+
+    .lb-table td { padding: 10px 8px; vertical-align: middle; }
+    .td-rank {
+      font-size: 13px; color: var(--muted); width: 40px;
+      font-variant-numeric: tabular-nums; text-align: center;
+    }
+    .td-rank.gold   { color: var(--gold); font-weight: bold; }
+    .td-rank.silver { color: var(--silver); }
+    .td-rank.bronze { color: var(--bronze); }
+
+    .td-player { display: flex; align-items: center; gap: 10px; }
+    .td-flag { font-size: 18px; flex-shrink: 0; }
+    .td-name { font-size: 14px; color: var(--text); }
+    .td-name.is-me::after { content: ' (you)'; color: var(--green); font-size: 11px; }
+    .td-country { font-size: 11px; color: var(--muted); }
+
+    .td-elo {
+      text-align: right; font-size: 15px; color: var(--green);
+      font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+    }
+    .td-games {
+      text-align: right; font-size: 12px; color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .td-badge { text-align: right; }
+    .badge-peak {
+      font-size: 10px; color: var(--gold); letter-spacing: 0.08em;
+      padding: 2px 6px; border: 1px solid #3a3010; border-radius: 2px;
+      white-space: nowrap;
+    }
+
+    /* ── Country view ── */
+    .country-section { margin-bottom: 32px; }
+    .country-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 0 10px; border-bottom: 1px solid var(--border);
+      margin-bottom: 2px; cursor: pointer;
+    }
+    .country-header:hover .country-name { color: var(--green); }
+    .country-flag { font-size: 22px; }
+    .country-name { font-size: 14px; color: var(--text); flex: 1; transition: color 0.2s; }
+    .country-count { font-size: 11px; color: var(--muted); }
+    .country-chevron { font-size: 12px; color: var(--muted); transition: transform 0.2s; }
+    .country-chevron.open { transform: rotate(90deg); }
+    .country-players { display: none; }
+    .country-players.open { display: block; }
+
+    /* ── Loading / empty ── */
+    .loading {
+      display: flex; align-items: center; justify-content: center;
+      gap: 10px; padding: 60px 20px; color: var(--muted); font-size: 13px;
+    }
+    .spinner {
+      width: 18px; height: 18px; border: 2px solid #222;
+      border-top-color: var(--green); border-radius: 50%;
+      animation: spin 0.7s linear infinite; flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .empty { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 13px; }
+
+    /* ── Stats strip ── */
+    .stats-strip {
+      display: flex; gap: 0; border: 1px solid var(--border); border-radius: 3px;
+      overflow: hidden; margin-bottom: 24px;
+    }
+    .stat-cell {
+      flex: 1; padding: 14px 16px; border-right: 1px solid var(--border);
+      text-align: center;
+    }
+    .stat-cell:last-child { border-right: none; }
+    .stat-val { font-size: 20px; color: var(--green); letter-spacing: 0.02em; }
+    .stat-lbl { font-size: 10px; color: var(--muted); letter-spacing: 0.12em;
+      text-transform: uppercase; margin-top: 2px; }
+
+    @media (max-width: 500px) {
+      .filters { flex-direction: column; align-items: stretch; }
+      .search-wrap { max-width: none; }
+      .td-games, .td-badge { display: none; }
+      .stats-strip { flex-wrap: wrap; }
+      .stat-cell { min-width: 50%; border-right: none; border-bottom: 1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="top-bar">
+  <a href="/" class="top-logo">
+    <img src="/logo.png" height="28" alt="AfriChess">
+    <span>Afri<span style="color:#00ff9d">Chess</span></span>
+  </a>
+  <div class="nav-links">
+    <a href="/">Home</a>
+    <a href="/play">vs Bot</a>
+    <a href="/multiplayer">Live</a>
+    <a href="/tournaments">Tournaments</a>
+    <a href="/leaderboard" class="active">Leaderboard</a>
+    <a href="/history">History</a>
+    <a href="/profile">Profile</a>
+    <a id="nav-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
+  </div>
+  <button class="hamburger" id="hamburger" onclick="toggleMobileNav()"><span></span><span></span><span></span></button>
+</div>
+<div class="mobile-drawer" id="mobile-drawer">
+  <a href="/">Home</a>
+  <a href="/play">vs Bot</a>
+  <a href="/multiplayer">Live</a>
+  <a href="/tournaments">Tournaments</a>
+  <a href="/leaderboard" class="active">Leaderboard</a>
+  <a href="/history">History</a>
+  <a href="/profile">Profile</a>
+  <a id="mobile-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
+</div>
+<div class="drawer-overlay" id="drawer-overlay" onclick="toggleMobileNav()"></div>
+
+<div class="page">
+
+  <div class="page-header">
+    <div class="page-title">Leaderboard <span>/ AfriChess</span></div>
+    <div class="page-subtitle">Continental Rankings</div>
+  </div>
+
+  <!-- Stats strip -->
+  <div class="stats-strip" id="stats-strip" style="display:none;">
+    <div class="stat-cell">
+      <div class="stat-val" id="stat-players">—</div>
+      <div class="stat-lbl">Players</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-val" id="stat-countries">—</div>
+      <div class="stat-lbl">Countries</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-val" id="stat-top-elo">—</div>
+      <div class="stat-lbl">Top ELO</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-val" id="stat-top-country">—</div>
+      <div class="stat-lbl">Top Country</div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <div class="filter-group">
+      <button class="filter-btn active" onclick="setTc('blitz')" id="tc-blitz">⚡ Blitz</button>
+      <button class="filter-btn" onclick="setTc('bullet')" id="tc-bullet">🔴 Bullet</button>
+      <button class="filter-btn" onclick="setTc('rapid')" id="tc-rapid">🐢 Rapid</button>
+      <button class="filter-btn" onclick="setTc('classical')" id="tc-classical">♟ Classical</button>
+    </div>
+    <div class="filter-group">
+      <button class="filter-btn active" onclick="setView('continental')" id="view-continental">Continental</button>
+      <button class="filter-btn" onclick="setView('country')" id="view-country">By Country</button>
+    </div>
+    <select class="region-select" id="region-select" onchange="setRegion(this.value)">
+      <option value="">All Africa</option>
+      <option value="east_africa">East Africa</option>
+      <option value="west_africa">West Africa</option>
+      <option value="north_africa">North Africa</option>
+      <option value="south_africa">Southern Africa</option>
+      <option value="central_africa">Central Africa</option>
+    </select>
+    <div class="search-wrap">
+      <input type="text" id="search-input" placeholder="Search player…" oninput="applyFilters()">
+    </div>
+  </div>
+
+  <div id="lb-content">
+    <div class="loading"><span class="spinner"></span>Loading rankings…</div>
+  </div>
+
+</div>
+
+<script>
+const SUPABASE_URL  = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ic2tnenN2eWdkbWx2d2JldHhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQxMTM3NDIsImV4cCI6MjA1OTY4OTc0Mn0.BKA2G4fGlhMjJQlHgT8KaHSBjIREbdBQiQsKjy2CkP8';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+const COUNTRY_NAMES = {
+  "UG":"Uganda","KE":"Kenya","TZ":"Tanzania","RW":"Rwanda","BI":"Burundi",
+  "ET":"Ethiopia","SS":"South Sudan","SO":"Somalia","ER":"Eritrea","DJ":"Djibouti",
+  "SD":"Sudan","NG":"Nigeria","GH":"Ghana","SN":"Senegal","CI":"Ivory Coast",
+  "CM":"Cameroon","EG":"Egypt","LY":"Libya","TN":"Tunisia","DZ":"Algeria",
+  "MA":"Morocco","ZA":"South Africa","ZW":"Zimbabwe","ZM":"Zambia","MW":"Malawi",
+  "MZ":"Mozambique","NA":"Namibia","BW":"Botswana","LS":"Lesotho","SZ":"Eswatini",
+  "AO":"Angola","CD":"DR Congo","CG":"Congo","CF":"Central African Republic",
+  "GA":"Gabon","GQ":"Equatorial Guinea","TD":"Chad","MG":"Madagascar",
+  "BJ":"Benin","TG":"Togo","GN":"Guinea","GW":"Guinea-Bissau","SL":"Sierra Leone",
+  "LR":"Liberia","GM":"Gambia","MR":"Mauritania","CV":"Cape Verde",
+  "NE":"Niger","BF":"Burkina Faso","ML":"Mali","MU":"Mauritius","SC":"Seychelles",
+  "KM":"Comoros","ST":"São Tomé and Príncipe",
+};
+const REGIONS = {
+  "east_africa":    ["UG","KE","TZ","RW","BI","ET","SS","SO","ER","DJ","SD"],
+  "west_africa":    ["NG","GH","SN","CI","CM","BJ","TG","GN","GW","SL","LR","GM","MR","CV","NE","BF","ML"],
+  "north_africa":   ["EG","LY","TN","DZ","MA"],
+  "south_africa":   ["ZA","ZW","ZM","MW","MZ","NA","BW","LS","SZ","AO","MG","MU","SC","KM","ST","CV"],
+  "central_africa": ["CD","CG","CF","GA","GQ","TD"],
+};
+
+function FLAG(code) {
+  if (!code || code.length !== 2) return '🌍';
+  return String.fromCodePoint(...[...code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)));
+}
+
+let allPlayers = [];
+let currentTc   = 'blitz';
+let currentView = 'continental';
+let currentRegion = '';
+let currentUser = null;
+let openCountries = new Set();
+
+const TC_COL = {
+  blitz: 'elo_blitz', bullet: 'elo_bullet',
+  rapid: 'elo_rapid', classical: 'elo'
+};
+const TC_LABEL = {
+  blitz: 'Blitz ELO', bullet: 'Bullet ELO',
+  rapid: 'Rapid ELO', classical: 'Classical ELO'
+};
+
+async function init() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    currentUser = session.user;
+    document.getElementById('nav-signout').style.display = 'block';
+    document.getElementById('mobile-signout').style.display = 'block';
+  }
+  await loadLeaderboard();
+}
+
+async function loadLeaderboard() {
+  document.getElementById('lb-content').innerHTML =
+    '<div class="loading"><span class="spinner"></span>Loading rankings…</div>';
+  try {
+    const r = await fetch('/api/leaderboard');
+    if (!r.ok) throw new Error('Failed');
+    allPlayers = await r.json();
+    applyFilters();
+  } catch(e) {
+    document.getElementById('lb-content').innerHTML =
+      '<div class="empty">Could not load rankings. Please try again.</div>';
+  }
+}
+
+function setTc(tc) {
+  currentTc = tc;
+  ['blitz','bullet','rapid','classical'].forEach(t => {
+    document.getElementById('tc-' + t).classList.toggle('active', t === tc);
+  });
+  applyFilters();
+}
+
+function setView(v) {
+  currentView = v;
+  ['continental','country'].forEach(t => {
+    document.getElementById('view-' + t).classList.toggle('active', t === v);
+  });
+  applyFilters();
+}
+
+function setRegion(r) {
+  currentRegion = r;
+  applyFilters();
+}
+
+function applyFilters() {
+  const col      = TC_COL[currentTc];
+  const q        = (document.getElementById('search-input').value || '').toLowerCase().trim();
+  const regionSet = currentRegion ? new Set(REGIONS[currentRegion] || []) : null;
+
+  // Filter
+  let filtered = allPlayers.filter(p => {
+    if (!p[col] || p[col] < 100) return false; // skip default/untouched ELOs? No — show all rated
+    if (regionSet && !regionSet.has(p.country)) return false;
+    if (q && !(p.username || '').toLowerCase().includes(q) &&
+              !(COUNTRY_NAMES[p.country] || '').toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  // Sort by chosen TC elo desc
+  filtered.sort((a, b) => (b[col] || 0) - (a[col] || 0));
+
+  // Stats strip
+  const countries = new Set(filtered.map(p => p.country).filter(Boolean));
+  const topElo = filtered.length ? (filtered[0][col] || 0) : 0;
+  const countByCountry = {};
+  filtered.forEach(p => { if (p.country) countByCountry[p.country] = (countByCountry[p.country]||0)+1; });
+  const topCountry = Object.entries(countByCountry).sort((a,b)=>b[1]-a[1])[0];
+
+  document.getElementById('stat-players').textContent   = filtered.length;
+  document.getElementById('stat-countries').textContent = countries.size;
+  document.getElementById('stat-top-elo').textContent   = topElo || '—';
+  document.getElementById('stat-top-country').textContent = topCountry
+    ? (FLAG(topCountry[0]) + ' ' + (COUNTRY_NAMES[topCountry[0]] || topCountry[0]))
+    : '—';
+  document.getElementById('stats-strip').style.display = '';
+
+  if (currentView === 'continental') {
+    renderContinental(filtered, col);
+  } else {
+    renderByCountry(filtered, col);
+  }
+}
+
+function rankClass(i) {
+  if (i === 0) return 'gold';
+  if (i === 1) return 'silver';
+  if (i === 2) return 'bronze';
+  return '';
+}
+
+function renderContinental(players, col) {
+  const el = document.getElementById('lb-content');
+  if (!players.length) {
+    el.innerHTML = '<div class="empty">No players found for these filters.</div>';
+    return;
+  }
+
+  const rows = players.map((p, i) => {
+    const isMe = currentUser && p.user_id === currentUser.id;
+    const rc   = rankClass(i);
+    return `<tr class="${isMe ? 'is-me' : ''}">
+      <td class="td-rank ${rc}">${rc === 'gold' ? '🥇' : rc === 'silver' ? '🥈' : rc === 'bronze' ? '🥉' : i + 1}</td>
+      <td>
+        <div class="td-player">
+          <span class="td-flag">${FLAG(p.country)}</span>
+          <div>
+            <div class="td-name ${isMe ? 'is-me' : ''}">${esc(p.username || 'Anonymous')}</div>
+            <div class="td-country">${COUNTRY_NAMES[p.country] || p.country || '—'}</div>
+          </div>
+        </div>
+      </td>
+      <td class="td-elo">${p[col] || '—'}</td>
+      <td class="td-games">${p.games_played || 0} games</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="section-hdr">
+      <span>${TC_LABEL[currentTc]}</span>
+      <span>${players.length} players</span>
+    </div>
+    <table class="lb-table">
+      <thead>
+        <tr>
+          <th style="width:44px">#</th>
+          <th>Player</th>
+          <th class="num">${TC_LABEL[currentTc]}</th>
+          <th class="num">Games</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderByCountry(players, col) {
+  const el = document.getElementById('lb-content');
+  if (!players.length) {
+    el.innerHTML = '<div class="empty">No players found for these filters.</div>';
+    return;
+  }
+
+  // Group by country
+  const byCountry = {};
+  players.forEach((p, globalRank) => {
+    const c = p.country || 'XX';
+    if (!byCountry[c]) byCountry[c] = [];
+    byCountry[c].push({ ...p, globalRank: globalRank + 1 });
+  });
+
+  // Sort countries by their top player's ELO
+  const sortedCountries = Object.keys(byCountry).sort(
+    (a, b) => (byCountry[b][0][col] || 0) - (byCountry[a][0][col] || 0)
+  );
+
+  let html = '';
+  sortedCountries.forEach(code => {
+    const ps  = byCountry[code];
+    const isOpen = openCountries.has(code);
+    html += `
+    <div class="country-section">
+      <div class="country-header" onclick="toggleCountry('${code}')">
+        <span class="country-flag">${FLAG(code)}</span>
+        <span class="country-name">${COUNTRY_NAMES[code] || code}</span>
+        <span class="country-count">${ps.length} player${ps.length!==1?'s':''} · Top ${ps[0][col]||'?'} ELO</span>
+        <span class="country-chevron ${isOpen?'open'}" id="chev-${code}">▶</span>
+      </div>
+      <div class="country-players ${isOpen?'open'}" id="cp-${code}">
+        <table class="lb-table">
+          <thead>
+            <tr>
+              <th style="width:44px">#</th>
+              <th>Player</th>
+              <th class="num">${TC_LABEL[currentTc]}</th>
+              <th class="num">Rank</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${ps.map((p, i) => {
+              const isMe = currentUser && p.user_id === currentUser.id;
+              const rc   = rankClass(i);
+              return `<tr class="${isMe?'is-me':''}">
+                <td class="td-rank ${rc}">${rc==='gold'?'🥇':rc==='silver'?'🥈':rc==='bronze'?'🥉':i+1}</td>
+                <td>
+                  <div class="td-player">
+                    <div>
+                      <div class="td-name ${isMe?'is-me':''}">${esc(p.username||'Anonymous')}</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="td-elo">${p[col]||'—'}</td>
+                <td class="td-games">#${p.globalRank} continental</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  });
+
+  el.innerHTML = html;
+}
+
+function toggleCountry(code) {
+  if (openCountries.has(code)) {
+    openCountries.delete(code);
+  } else {
+    openCountries.add(code);
+  }
+  const cp   = document.getElementById('cp-' + code);
+  const chev = document.getElementById('chev-' + code);
+  if (cp)   cp.classList.toggle('open', openCountries.has(code));
+  if (chev) chev.classList.toggle('open', openCountries.has(code));
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function toggleMobileNav() {
+  const h  = document.getElementById('hamburger');
+  const d  = document.getElementById('mobile-drawer');
+  const ov = document.getElementById('drawer-overlay');
+  h.classList.toggle('open');
+  d.classList.toggle('open');
+  ov.classList.toggle('open');
+}
+
+async function signOut() {
+  await sb.auth.signOut();
+  window.location.reload();
+}
+
+init();
+</script>
+</body>
+</html>

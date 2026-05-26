@@ -358,6 +358,7 @@
     <a href="/play">vs Bot</a>
     <a href="/multiplayer">Live</a>
     <a href="/tournaments" class="active">Tournaments</a>
+    <a href="/leaderboard">Leaderboard</a>
     <a href="/history">History</a>
     <a href="/profile">Profile</a>
     <a id="nav-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
@@ -369,6 +370,7 @@
   <a href="/play">vs Bot</a>
   <a href="/multiplayer">Live</a>
   <a href="/tournaments" class="active">Tournaments</a>
+  <a href="/leaderboard">Leaderboard</a>
   <a href="/history">History</a>
   <a href="/profile">Profile</a>
   <a id="mobile-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
@@ -620,6 +622,40 @@ const REGION_LABELS_JS = {
 
 // ── Timer countdown (survives detail-content polls) ──────────────
 let _timerInterval = null;
+
+// Module-level seq/streak so the poll can update them without viewTournament()
+let _playerSeq    = {};
+let _playerStreak = {};
+let _myArenaScore = 0;  // tracks this player's score across games for correct reconnect/available
+
+function computeSeq(games, format) {
+  _playerSeq    = {};
+  _playerStreak = {};
+  if (format !== 'arena' || !games) return;
+  const ordered = [...games].filter(g => g.result).sort((a,b) =>
+    new Date(a.played_at||0) - new Date(b.played_at||0));
+  ordered.forEach(g => {
+    const wid = g.white_id, bid = g.black_id;
+    if (!_playerSeq[wid]) _playerSeq[wid] = [];
+    if (!_playerSeq[bid]) _playerSeq[bid] = [];
+    if (g.result === 'white') {
+      _playerSeq[wid].push('win'); _playerSeq[bid].push('loss');
+    } else if (g.result === 'black') {
+      _playerSeq[wid].push('loss'); _playerSeq[bid].push('win');
+    } else {
+      _playerSeq[wid].push('draw'); _playerSeq[bid].push('draw');
+    }
+  });
+  Object.entries(_playerSeq).forEach(([uid, seq]) => {
+    if (!seq.length) { _playerStreak[uid] = 0; return; }
+    let streak = 0;
+    for (let i = seq.length - 1; i >= 0; i--) {
+      if (seq[i] === 'win') streak++;
+      else break;
+    }
+    _playerStreak[uid] = streak;
+  });
+}
 
 function startTournamentTimer(t) {
   if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
@@ -1043,38 +1079,10 @@ async function viewTournament(id) {
   const eloLabel = eloCol === 'elo_bullet' ? 'Bullet' : eloCol === 'elo_blitz' ? 'Blitz' : eloCol === 'elo_rapid' ? 'Rapid' : 'ELO';
 
   // Build per-player game sequence from games list (arena only)
-  // sequence: array of 'win'|'loss'|'draw'|'bye' per player, in order
-  const playerSeq = {};
-  const playerStreak = {};
-  if (t.format === 'arena' && games) {
-    const ordered = [...games].filter(g => g.result).sort((a,b) =>
-      new Date(a.played_at||0) - new Date(b.played_at||0));
-    ordered.forEach(g => {
-      const wid = g.white_id, bid = g.black_id;
-      if (!playerSeq[wid]) playerSeq[wid] = [];
-      if (!playerSeq[bid]) playerSeq[bid] = [];
-      if (g.result === 'white') {
-        playerSeq[wid].push('win'); playerSeq[bid].push('loss');
-      } else if (g.result === 'black') {
-        playerSeq[wid].push('loss'); playerSeq[bid].push('win');
-      } else {
-        playerSeq[wid].push('draw'); playerSeq[bid].push('draw');
-      }
-    });
-    // Compute current streak for each player
-    Object.entries(playerSeq).forEach(([uid, seq]) => {
-      if (!seq.length) { playerStreak[uid] = 0; return; }
-      let streak = 0;
-      for (let i = seq.length - 1; i >= 0; i--) {
-        if (seq[i] === 'win') streak++;
-        else break;
-      }
-      playerStreak[uid] = streak;
-    });
-  }
+  computeSeq(games, t.format);
 
   function seqHTML(uid) {
-    const seq = (playerSeq[uid] || []).slice(-8); // show last 8 games
+    const seq = (_playerSeq[uid] || []).slice(-8); // show last 8 games
     if (!seq.length) return '';
     return `<div class="player-seq">${seq.map(r =>
       `<div class="seq-chip ${r}">${r==='win'?'1':r==='loss'?'0':r==='bye'?'B':'½'}</div>`
@@ -1082,7 +1090,7 @@ async function viewTournament(id) {
   }
 
   function streakHTML(uid) {
-    const s = playerStreak[uid] || 0;
+    const s = _playerStreak[uid] || 0;
     if (s < 2) return '';
     return `<span class="player-streak">🔥${s}</span>`;
   }
@@ -1200,22 +1208,32 @@ function startDetailPoll(id) {
         return;
       }
 
-      // Update standings in-place
+      // Update standings in-place — recompute seq/streak from fresh game data
+      if (games && games.length) computeSeq(games, t.format);
+      const eloCol2 = tcEloCol(t.time_control);
+      const eloOf2  = p => p[eloCol2] || p.elo || 1500;
       const sorted = [...(players||[])].sort((a, b) =>
         t.status === 'upcoming'
-          ? (b.elo || 1500) - (a.elo || 1500)
-          : ((b.score||0) - (a.score||0)) || ((b.elo||1500) - (a.elo||1500))
+          ? eloOf2(b) - eloOf2(a)
+          : ((b.score||0) - (a.score||0)) || (eloOf2(b) - eloOf2(a))
       );
       const standingsEl = document.querySelector('#detail-content .section .player-row')?.closest('div');
       if (standingsEl && players.length > 0) {
-        standingsEl.innerHTML = sorted.map((p, i) => `
-          <div class="player-row">
+        standingsEl.innerHTML = sorted.map((p, i) => {
+          const isMe     = currentUser && p.user_id === currentUser.id;
+          const isPaused = p.paused;
+          const classes  = ['player-row', isMe ? 'is-me' : '', isPaused ? 'is-paused' : ''].filter(Boolean).join(' ');
+          const pauseIcon = isPaused ? '<span style="font-size:11px;color:#555;margin-left:2px;">⏸</span>' : '';
+          return `<div class="${classes}">
             <div class="player-rank">${i+1}</div>
             <div class="player-country">${FLAG(p.country)}</div>
-            <div class="player-name">${p.username}</div>
-            <div class="player-elo">${p.elo || '?'} ELO</div>
-            <div class="player-score">${p.score || 0}</div>
-          </div>`).join('');
+            <div class="player-name">${p.username}${pauseIcon}</div>
+            ${t.format === 'arena' && t.status !== 'upcoming' ? seqHTML(p.user_id) : ''}
+            ${t.format === 'arena' && t.status !== 'upcoming' ? streakHTML(p.user_id) : ''}
+            <div class="player-elo">${eloOf2(p)}</div>
+            <div class="player-score">${t.status === 'upcoming' ? '' : (p.score || 0)}</div>
+          </div>`;
+        }).join('');
       }
     } catch(e) {}
   }, 10000);
@@ -1364,6 +1382,7 @@ function connectTournamentWs(tid, tournament) {
   if (tournamentWs) { tournamentWs.close(); tournamentWs = null; }
   currentTournamentId = tid;
   if (!currentUser || tournament.format !== 'arena') return;
+  _myArenaScore = 0;  // reset on fresh connect — server will update via game_over
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   tournamentWs = new WebSocket(`${proto}://${location.host}/ws/tournament/${tid}`);
@@ -1376,7 +1395,7 @@ function connectTournamentWs(tid, tournament) {
       elo_bullet: currentProfile ? (currentProfile.elo_bullet || currentProfile.elo || 1500) : 1500,
       elo_blitz:  currentProfile ? (currentProfile.elo_blitz  || currentProfile.elo || 1500) : 1500,
       elo_rapid:  currentProfile ? (currentProfile.elo_rapid  || currentProfile.elo || 1500) : 1500,
-      score: 0,
+      score: _myArenaScore,  // send real accumulated score, not always 0
     }));
     tournamentWs._ping = setInterval(() => {
       if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN)
@@ -1391,8 +1410,10 @@ function connectTournamentWs(tid, tournament) {
         showArenaGameReady(msg);
       } else if (msg.type === 'game_over') {
         hideArenaCountdown();
+        // Track real score from server for correct pairing
+        if (typeof msg.my_score === 'number') _myArenaScore = msg.my_score;
         if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN)
-          tournamentWs.send(JSON.stringify({ type: 'available', score: 0 }));
+          tournamentWs.send(JSON.stringify({ type: 'available', score: _myArenaScore }));
         showArenaStatus('Game over. Waiting for next pairing…');
       } else if (msg.type === 'tournament_ended') {
         hideArenaCountdown();
@@ -1403,6 +1424,9 @@ function connectTournamentWs(tid, tournament) {
         const bar = document.getElementById('arena-timer-bar');
         if (bar) { bar.textContent = '🏁 Tournament ended'; bar.style.display = ''; }
         setTimeout(() => { if (currentDetailId) viewTournament(currentDetailId); }, 2000);
+      } else if (msg.type === 'waiting') {
+        hideArenaCountdown();
+        showArenaStatus('⏳ ' + (msg.message || 'Waiting for an available opponent…'));
       } else if (msg.type === 'bye') {
         hideArenaCountdown();
         showArenaStatus('⏸ ' + (msg.message || 'You have a bye this round — waiting for next pairing…'));

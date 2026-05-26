@@ -1311,7 +1311,8 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
                 if user_id in conns:
                     conns[user_id]["available"] = True
                     conns[user_id]["paused"]    = False
-                    conns[user_id]["score"]     = float(data.get("score", score))
+                    # Do NOT overwrite score from client — server already tracks it correctly
+                    # Only trust client score on initial connect (ident message)
                 if user_id in pg:
                     pg[user_id] = None
                 asyncio.create_task(arena_pair(tournament_id))
@@ -2526,7 +2527,11 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                         conns[uid].get("score", 0) + 0.5 if req.result == "draw"
                         else conns[uid].get("score", 0)
                     )
-                    await arena_send(conns[uid]["ws"], {"type": "game_over", "result": req.result})
+                    await arena_send(conns[uid]["ws"], {
+                        "type": "game_over",
+                        "result": req.result,
+                        "my_score": conns[uid]["score"],
+                    })
             asyncio.create_task(arena_pair_delayed(tid))
     except Exception as e:
         print(f"[arena] re-pair error: {e}", flush=True)
@@ -2885,6 +2890,31 @@ async def leave_tournament(request: Request, authorization: str = Header(None)):
     return {"ok": True}
 
 
+@app.get("/api/leaderboard")
+async def get_leaderboard(region: str = ""):
+    """Return all profiles with ELO data for the continental leaderboard.
+    Optionally filtered by African region (east_africa, west_africa, etc.)."""
+    params: dict = {
+        "select": "user_id,username,country,elo,elo_bullet,elo_blitz,elo_rapid,games_played",
+        "order":  "elo_blitz.desc.nullslast",
+    }
+    if region and region in REGIONS:
+        country_list = ",".join(REGIONS[region])
+        params["country"] = f"in.({country_list})"
+
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params=params,
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+    players = r.json()
+    # Filter out profiles without a username set
+    players = [p for p in players if p.get("username")]
+    return players
+
+
 @app.get("/api/tournaments")
 async def get_tournaments(status: str = "upcoming"):
     order = "starts_at.asc" if status == "upcoming" else "starts_at.desc"
@@ -2974,6 +3004,10 @@ def webmanifest():
 @app.get("/sitemap.xml")
 def sitemap():
     return FileResponse("sitemap.xml", media_type="application/xml")
+
+@app.get("/leaderboard")
+def leaderboard_page():
+    return FileResponse("leaderboard.html")
 
 @app.get("/history")
 def history():

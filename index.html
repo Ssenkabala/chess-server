@@ -1179,18 +1179,35 @@ global.Chessground = Nr;
       <img src="/logo.png" height="32" alt="AfriChess">
       <span>Afri<span style="color:#00d98b">Chess</span></span>
     </a>
+    <!-- Desktop nav — hidden below 760px where hamburger takes over -->
+    <div id="index-desktop-nav" style="display:flex;gap:16px;align-items:center;">
+      <a href="/multiplayer" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Live</a>
+      <a href="/tournaments" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Tournaments</a>
+      <a href="/leaderboard" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Leaderboard</a>
+      <a href="/history"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">History</a>
+      <a href="/profile"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Profile</a>
+      <a id="nav-signin-idx" onclick="openAuth()" style="display:none;color:#00ff9d;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign In</a>
+      <a id="nav-signout-idx" onclick="signOut()" style="display:none;color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign Out</a>
+    </div>
     <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
       <span></span><span></span><span></span>
     </button>
   </div>
+  <style>
+    @media (max-width: 760px) { #index-desktop-nav { display: none !important; } .hamburger { display: flex !important; } }
+    @media (min-width: 761px) { .hamburger { display: none !important; } }
+  </style>
 
 <!-- Mobile menu drawer -->
 <div class="mobile-menu" id="mobile-menu">
   <a onclick="navTo('/')">Home</a>
-  <a onclick="navTo('/multiplayer')">Play Live</a>
+  <a onclick="navTo('/multiplayer')">Live</a>
+  <a onclick="navTo('/tournaments')">Tournaments</a>
+  <a onclick="navTo('/leaderboard')">Leaderboard</a>
   <a onclick="navTo('/history')">My Games</a>
   <a onclick="navTo('/profile')">Profile</a>
-  <a onclick="closeMenuThenAuth()">Sign In</a>
+  <a id="mob-signin-idx" onclick="closeMenuThenAuth()" style="display:none;">Sign In</a>
+  <a id="mob-signout-idx" onclick="signOut()" style="display:none;">Sign Out</a>
 </div>
 <div class="nav-overlay" id="nav-overlay" onclick="toggleMobileMenu()"></div>
 
@@ -2115,6 +2132,14 @@ function setUser(user) {
   document.getElementById('btn-signout').style.display  = 'inline-block';
   document.getElementById('btn-history').style.display  = 'inline-block';
   document.getElementById('btn-profile').style.display  = 'inline-block';
+  var siNav = document.getElementById('nav-signin-idx');
+  var soNav = document.getElementById('nav-signout-idx');
+  var siMob = document.getElementById('mob-signin-idx');
+  var soMob = document.getElementById('mob-signout-idx');
+  if (siNav) siNav.style.display = 'none';
+  if (soNav) soNav.style.display = '';
+  if (siMob) siMob.style.display = 'none';
+  if (soMob) soMob.style.display = '';
   var usageEl = document.getElementById('coach-usage-label');
   if (usageEl) usageEl.textContent = '5 coach uses left today';
   closeAuth();
@@ -2188,6 +2213,14 @@ function clearUser() {
   document.getElementById('btn-signout').style.display  = 'none';
   document.getElementById('btn-history').style.display  = 'none';
   document.getElementById('btn-profile').style.display  = 'none';
+  var siNav = document.getElementById('nav-signin-idx');
+  var soNav = document.getElementById('nav-signout-idx');
+  var siMob = document.getElementById('mob-signin-idx');
+  var soMob = document.getElementById('mob-signout-idx');
+  if (siNav) siNav.style.display = '';
+  if (soNav) soNav.style.display = 'none';
+  if (siMob) siMob.style.display = '';
+  if (soMob) soMob.style.display = 'none';
 }
 
 // ── Auth modal ────────────────────────────────────────────────

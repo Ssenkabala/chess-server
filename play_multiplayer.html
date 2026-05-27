@@ -836,11 +836,14 @@ global.Chessground = Nr;
   <div class="header">
     <a class="logo" href="/">Afri<span style="color:#00ff9d">Chess</span></a>
     <div id="nav-links-desktop" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <a href="/"             class="nav-link">Home</a>
       <a href="/play"         class="nav-link">vs Bot</a>
       <a href="/tournaments"  class="nav-link">Tournaments</a>
       <a href="/leaderboard"  class="nav-link">Leaderboard</a>
       <a href="/history"      class="nav-link">History</a>
       <a href="/profile"      class="nav-link">Profile</a>
+      <a id="nav-signin-mp"  class="nav-link" onclick="openAuth()" style="display:none;cursor:pointer;">Sign In</a>
+      <a id="nav-signout-mp" class="nav-link" onclick="signOutUser()" style="display:none;cursor:pointer;">Sign Out</a>
       <span class="header-right" id="tc-label">5+0 · Blitz</span>
     </div>
     <button id="hamburger" onclick="toggleMobileNav()" style="display:none;flex-direction:column;gap:5px;background:none;border:none;cursor:pointer;padding:6px;">
@@ -857,6 +860,8 @@ global.Chessground = Nr;
     <a href="/leaderboard" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Leaderboard</a>
     <a href="/history" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">History</a>
     <a href="/profile" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Profile</a>
+    <a id="mob-signin-mp"  onclick="toggleMobileNav();openAuth();" style="display:none;color:#00ff9d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;cursor:pointer;">Sign In</a>
+    <a id="mob-signout-mp" onclick="signOutUser()" style="display:none;color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;cursor:pointer;">Sign Out</a>
   </div>
   <div id="drawer-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:499;" onclick="toggleMobileNav()"></div>
   <style>
@@ -1163,6 +1168,63 @@ function toggleMobileNav() {
   o.style.display = o.style.display === 'block' ? 'none' : 'block';
 }
 
+function setNavSignedIn() {
+  const si = document.getElementById('nav-signin-mp');
+  const so = document.getElementById('nav-signout-mp');
+  const msi = document.getElementById('mob-signin-mp');
+  const mso = document.getElementById('mob-signout-mp');
+  if (si)  si.style.display  = 'none';
+  if (so)  so.style.display  = '';
+  if (msi) msi.style.display = 'none';
+  if (mso) mso.style.display = '';
+}
+function setNavSignedOut() {
+  const si = document.getElementById('nav-signin-mp');
+  const so = document.getElementById('nav-signout-mp');
+  const msi = document.getElementById('mob-signin-mp');
+  const mso = document.getElementById('mob-signout-mp');
+  if (si)  si.style.display  = '';
+  if (so)  so.style.display  = 'none';
+  if (msi) msi.style.display = '';
+  if (mso) mso.style.display = 'none';
+}
+function openAuth() {
+  const ov = document.getElementById('auth-overlay-mp');
+  if (ov) { ov.classList.add('active'); setTimeout(()=>document.getElementById('auth-email-mp')?.focus(),100); }
+}
+function closeAuth() { document.getElementById('auth-overlay-mp')?.classList.remove('active'); }
+let _mpAuthMode = 'signin';
+function toggleAuthModeMp() {
+  _mpAuthMode = _mpAuthMode==='signin'?'signup':'signin';
+  const isSI = _mpAuthMode==='signin';
+  document.getElementById('auth-title-mp').textContent = isSI?'Sign In':'Create Account';
+  document.getElementById('auth-submit-mp').textContent = isSI?'Sign In':'Create Account';
+  document.getElementById('auth-toggle-mp').innerHTML = isSI
+    ? 'No account? <span onclick="toggleAuthModeMp()">Create one</span>'
+    : 'Already have one? <span onclick="toggleAuthModeMp()">Sign in</span>';
+  document.getElementById('auth-error-mp').textContent='';
+}
+async function handleAuthMp() {
+  const email=document.getElementById('auth-email-mp').value.trim();
+  const pass=document.getElementById('auth-password-mp').value;
+  const errEl=document.getElementById('auth-error-mp');
+  errEl.textContent='';
+  if (!email||!pass){errEl.textContent='Please enter email and password.';return;}
+  const btn=document.getElementById('auth-submit-mp');
+  btn.textContent='Please wait…';btn.disabled=true;
+  const result=_mpAuthMode==='signin'
+    ?await sb.auth.signInWithPassword({email,password:pass})
+    :await sb.auth.signUp({email,password:pass});
+  btn.disabled=false;btn.textContent=_mpAuthMode==='signin'?'Sign In':'Create Account';
+  if(result.error){errEl.textContent=result.error.message;}
+  else if(_mpAuthMode==='signup'){errEl.style.color='#00ff9d';errEl.textContent='Check your email to confirm.';}
+  else{closeAuth();window.location.reload();}
+}
+async function signInWithGoogleMp() {
+  await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:'https://www.africhess.org/multiplayer'}});
+}
+async function signOutUser() { await sb.auth.signOut(); window.location.reload(); }
+
 // ── Board resize (zoom CSS variable — mirrors Lichess approach) ───────────────
 var ZOOM_STORAGE = 'africhess.zoom';
 
@@ -1255,12 +1317,14 @@ async function bootAuth() {
 
   const { data } = await sb.auth.getSession();
   if (!data.session) {
-    // Not signed in — redirect to play page which has the sign-in modal
-    window.location.href = '/play?signin=1';
+    // Show sign-in modal instead of redirecting
+    setNavSignedOut();
+    openAuth();
     return;
   }
 
   currentUser = data.session.user;
+  setNavSignedIn();
   const { data: profile } = await sb
     .from('profiles')
     .select('username, elo, elo_bullet, elo_blitz, elo_rapid')
@@ -2071,6 +2135,30 @@ bootAuth();
   <div class="promo-box">
     <div class="promo-title">Promote pawn to</div>
     <div class="promo-pieces" id="promo-pieces"></div>
+  </div>
+</div>
+
+<style>
+  .auth-overlay-mp{position:fixed;inset:0;background:rgba(0,0,0,0.85);display:none;align-items:flex-start;justify-content:center;z-index:300;backdrop-filter:blur(4px);overflow-y:auto;padding:20px 16px 40px;}
+  .auth-overlay-mp.active{display:flex !important;}
+  .auth-card-mp{background:#161616;border:1px solid #2a2a2a;border-top:2px solid #00ff9d;border-radius:3px;padding:28px 24px;width:100%;max-width:360px;display:flex;flex-direction:column;gap:14px;margin:auto;position:relative;}
+  .auth-close-mp{position:absolute;top:10px;right:12px;background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;}
+</style>
+<div class="auth-overlay-mp" id="auth-overlay-mp">
+  <div class="auth-card-mp">
+    <button class="auth-close-mp" onclick="closeAuth()">×</button>
+    <div style="font-size:13px;letter-spacing:0.2em;text-transform:uppercase;color:#00ff9d;" id="auth-title-mp">Sign In</div>
+    <div style="font-size:12px;color:#555;">Sign in to play live rated games.</div>
+    <input style="width:100%;background:#111;border:1px solid #2a2a2a;color:#e8e6e0;padding:11px 14px;font-size:13px;font-family:monospace;border-radius:2px;outline:none;" type="email" id="auth-email-mp" placeholder="Email address" />
+    <input style="width:100%;background:#111;border:1px solid #2a2a2a;color:#e8e6e0;padding:11px 14px;font-size:13px;font-family:monospace;border-radius:2px;outline:none;" type="password" id="auth-password-mp" placeholder="Password" onkeydown="if(event.key==='Enter') handleAuthMp()" />
+    <div style="font-size:12px;color:#ff6b6b;min-height:16px;" id="auth-error-mp"></div>
+    <button style="width:100%;padding:12px;background:#00ff9d;color:#111;border:none;font-size:12px;font-family:'Georgia',serif;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;border-radius:2px;" id="auth-submit-mp" onclick="handleAuthMp()">Sign In</button>
+    <div style="display:flex;align-items:center;gap:12px;color:#333;font-size:11px;"><span style="flex:1;height:1px;background:#222;display:block;"></span>or<span style="flex:1;height:1px;background:#222;display:block;"></span></div>
+    <button onclick="signInWithGoogleMp()" style="width:100%;padding:10px 14px;background:#111;border:1px solid #2a2a2a;color:#e8e6e0;font-size:12px;font-family:'Georgia',serif;cursor:pointer;border-radius:2px;display:flex;align-items:center;justify-content:center;gap:10px;">
+      <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+      Continue with Google
+    </button>
+    <div style="font-size:11px;color:#444;text-align:center;" id="auth-toggle-mp">No account? <span onclick="toggleAuthModeMp()" style="color:#00ff9d;cursor:pointer;">Create one</span></div>
   </div>
 </div>
 

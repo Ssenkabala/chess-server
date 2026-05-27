@@ -229,6 +229,7 @@
     <a href="/leaderboard">Leaderboard</a>
     <a href="/history">History</a>
     <a href="/profile" style="color:var(--green)">Profile</a>
+    <a id="nav-signin" onclick="openAuth()" style="display:none;cursor:pointer;">Sign In</a>
     <a id="nav-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
   </div>
   <button id="hamburger" onclick="toggleMobileNav()" style="display:none;flex-direction:column;gap:5px;background:none;border:none;cursor:pointer;padding:6px;">
@@ -245,6 +246,8 @@
   <a href="/leaderboard" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Leaderboard</a>
   <a href="/history" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">History</a>
   <a href="/profile" style="color:var(--green);text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Profile</a>
+  <a id="mob-signin" onclick="toggleMobileNav();openAuth();" style="display:none;color:#00ff9d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;cursor:pointer;">Sign In</a>
+  <a id="mob-signout" onclick="signOut()" style="display:none;color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;cursor:pointer;">Sign Out</a>
 </div>
 <div id="drawer-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:499;" onclick="toggleMobileNav()"></div>
 <style>
@@ -257,7 +260,7 @@
 
 <script>
 const SUPABASE_URL = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
-const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ic2tnenN2eWdkbWx2d2JldHhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQxMTM3NDIsImV4cCI6MjA1OTY4OTc0Mn0.BKA2G4fGlhMjJQlHgT8KaHSBjIREbdBQiQsKjy2CkP8';
+const SUPABASE_ANON = 'sb_publishable_g5BEYnjhPatfmnHG3jNQTQ_fzgKOy4s';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 let currentUser = null;
@@ -266,11 +269,14 @@ let eloChart = null;
 async function init() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) {
+    document.getElementById('nav-signin').style.display = 'block';
+    document.getElementById('mob-signin').style.display = 'block';
     showNotSignedIn();
     return;
   }
   currentUser = session.user;
   document.getElementById('nav-signout').style.display = 'block';
+  document.getElementById('mob-signout').style.display = 'block';
   await loadProfile();
 }
 
@@ -279,8 +285,44 @@ function showNotSignedIn() {
     <div class="not-signed-in">
       <h2>Sign in to view your profile</h2>
       <p style="margin-bottom:24px;font-size:13px;">Track your ELO, coach usage, and game history.</p>
-      <a href="/play" class="btn">Go to Play</a>
+      <button onclick="openAuth()" class="btn" style="cursor:pointer;border:none;">Sign In</button>
     </div>`;
+}
+
+function openAuth() {
+  const ov = document.getElementById('auth-overlay');
+  if (ov) { ov.classList.add('active'); setTimeout(()=>document.getElementById('auth-email')?.focus(),100); }
+}
+function closeAuth() { document.getElementById('auth-overlay')?.classList.remove('active'); }
+let _authMode = 'signin';
+function toggleAuthMode() {
+  _authMode = _authMode==='signin'?'signup':'signin';
+  const isSI = _authMode==='signin';
+  document.getElementById('auth-title').textContent = isSI?'Sign In':'Create Account';
+  document.getElementById('auth-submit-btn').textContent = isSI?'Sign In':'Create Account';
+  document.getElementById('auth-toggle').innerHTML = isSI
+    ? 'No account? <span onclick="toggleAuthMode()">Create one</span>'
+    : 'Already have one? <span onclick="toggleAuthMode()">Sign in</span>';
+  document.getElementById('auth-error').textContent='';
+}
+async function handleAuth() {
+  const email=document.getElementById('auth-email').value.trim();
+  const pass=document.getElementById('auth-password').value;
+  const errEl=document.getElementById('auth-error');
+  errEl.textContent='';
+  if (!email||!pass){errEl.textContent='Please enter email and password.';return;}
+  const btn=document.getElementById('auth-submit-btn');
+  btn.textContent='Please wait…';btn.disabled=true;
+  const result=_authMode==='signin'
+    ?await sb.auth.signInWithPassword({email,password:pass})
+    :await sb.auth.signUp({email,password:pass});
+  btn.disabled=false;btn.textContent=_authMode==='signin'?'Sign In':'Create Account';
+  if(result.error){errEl.textContent=result.error.message;}
+  else if(_authMode==='signup'){errEl.style.color='#00ff9d';errEl.textContent='Check your email to confirm your account.';}
+  else{closeAuth();window.location.reload();}
+}
+async function signInWithGoogle2() {
+  await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:'https://www.africhess.org/profile'}});
 }
 
 async function loadProfile() {
@@ -606,7 +648,7 @@ async function saveCountry() {
   btn.disabled = true;
   btn.textContent = '...';
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) { window.location.href = '/play'; return; }
+  if (!session) { openAuth(); btn.disabled=false; btn.textContent='Save'; return; }
   try {
     const r = await fetch('/api/update-country', {
       method: 'POST',
@@ -660,5 +702,42 @@ async function signOut() {
 
 init();
 </script>
+
+<style>
+  .auth-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);display:none;align-items:flex-start;justify-content:center;z-index:300;backdrop-filter:blur(4px);overflow-y:auto;padding:20px 16px 40px;}
+  .auth-overlay.active{display:flex !important;}
+  .auth-card{background:#161616;border:1px solid #2a2a2a;border-top:2px solid #00ff9d;border-radius:3px;padding:28px 24px;width:100%;max-width:360px;display:flex;flex-direction:column;gap:14px;margin:auto;position:relative;}
+  .auth-close{position:absolute;top:10px;right:12px;background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;}
+  .auth-title{font-size:13px;letter-spacing:0.2em;text-transform:uppercase;color:#00ff9d;}
+  .auth-subtitle{font-size:12px;color:#555;}
+  .auth-input{width:100%;background:#111;border:1px solid #2a2a2a;color:#e8e6e0;padding:11px 14px;font-size:13px;font-family:monospace;border-radius:2px;outline:none;}
+  .auth-input:focus{border-color:#00ff9d55;}
+  .auth-input::placeholder{color:#444;}
+  .auth-btn{width:100%;padding:12px;background:#00ff9d;color:#111;border:none;font-size:12px;font-family:'Georgia',serif;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;border-radius:2px;}
+  .auth-error{font-size:12px;color:#ff6b6b;min-height:16px;}
+  .auth-divider{display:flex;align-items:center;gap:12px;color:#333;font-size:11px;}
+  .auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:#222;}
+  .google-btn{width:100%;padding:10px 14px;background:#111;border:1px solid #2a2a2a;color:#e8e6e0;font-size:12px;font-family:'Georgia',serif;cursor:pointer;border-radius:2px;display:flex;align-items:center;justify-content:center;gap:10px;}
+  .google-btn:hover{border-color:#444;}
+  .auth-toggle{font-size:11px;color:#444;text-align:center;}
+  .auth-toggle span{color:#00ff9d;cursor:pointer;}
+</style>
+<div class="auth-overlay" id="auth-overlay">
+  <div class="auth-card">
+    <button class="auth-close" onclick="closeAuth()">×</button>
+    <div class="auth-title" id="auth-title">Sign In</div>
+    <div class="auth-subtitle">Sign in to access your profile.</div>
+    <input class="auth-input" type="email" id="auth-email" placeholder="Email address" />
+    <input class="auth-input" type="password" id="auth-password" placeholder="Password" onkeydown="if(event.key==='Enter') handleAuth()" />
+    <div class="auth-error" id="auth-error"></div>
+    <button class="auth-btn" id="auth-submit-btn" onclick="handleAuth()">Sign In</button>
+    <div class="auth-divider">or</div>
+    <button class="google-btn" onclick="signInWithGoogle2()">
+      <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+      Continue with Google
+    </button>
+    <div class="auth-toggle" id="auth-toggle">No account? <span onclick="toggleAuthMode()">Create one</span></div>
+  </div>
+</div>
 </body>
 </html>

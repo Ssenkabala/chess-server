@@ -2757,7 +2757,7 @@ REGIONS: dict[str, list[str]] = {
     "east_africa":    ["UG","KE","TZ","RW","BI","ET","SS","SO","ER","DJ","SD"],
     "west_africa":    ["NG","GH","SN","CI","CM","BJ","TG","GN","GW","SL","LR","GM","MR","CV","NE","BF","ML"],
     "north_africa":   ["EG","LY","TN","DZ","MA"],
-    "south_africa":   ["ZA","ZW","ZM","MW","MZ","NA","BW","LS","SZ","AO","MG","MU","SC","KM","ST","CV"],
+    "south_africa":   ["ZA","ZW","ZM","MW","MZ","NA","BW","LS","SZ","AO","MG","MU","SC","KM","ST"],
     "central_africa": ["CD","CG","CF","GA","GQ","TD"],
 }
 REGION_LABELS: dict[str, str] = {

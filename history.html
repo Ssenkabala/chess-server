@@ -379,9 +379,11 @@ sb.auth.getSession().then(({ data }) => {
   loadGames(user.id);
 });
 
+// onAuthStateChange fires immediately on load with the existing session —
+// guard against double-loading by checking if we already have games
 sb.auth.onAuthStateChange((_event, session) => {
-  if (session) { setSignedIn(session.user); loadGames(session.user.id); }
-  else { setSignedOut(); showSignInPrompt(); }
+  if (session && !allGames.length) { setSignedIn(session.user); loadGames(session.user.id); }
+  else if (!session) { setSignedOut(); showSignInPrompt(); }
 });
 
 function setSignedIn(user) {
@@ -471,12 +473,20 @@ async function loadGames(userId) {
     .from('games').select('*').eq('user_id', userId)
     .order('created_at', { ascending: false }).limit(500);
 
-  if (error || !data || !data.length) {
+  if (error) {
+    console.error('[history] loadGames error:', error);
+    document.getElementById('game-list').innerHTML =
+      '<div class="empty-state">Error loading games: ' + (error.message || 'Unknown error') +
+      '<br><small style="color:#555">Check console for details.</small></div>';
+    return;
+  }
+  if (!data || !data.length) {
     document.getElementById('game-list').innerHTML =
       '<div class="empty-state">No games yet.<br>Play a game to see it here.</div>';
     return;
   }
 
+  console.log('[history] Loaded', data.length, 'games');
   allGames = data;
   buildSummary();
   applyFilter();
@@ -578,6 +588,71 @@ function changePage(dir) {
   document.getElementById('game-list').scrollTop = 0;
 }
 
+// ── Robust PGN parser ────────────────────────────────────────────────────────
+// Handles: standard PGN with headers, bare "1. e4 e5 2. Nf3" move text,
+// and UCI move lists ("e2e4 e7e5 g1f3"). Never throws.
+function parsePgnToMoves(pgn) {
+  if (!pgn) return [];
+
+  // Strategy 1: chess.js load_pgn (handles standard + bare move text)
+  try {
+    const c = new Chess();
+    if (c.load_pgn(pgn)) {
+      const moves = c.history();
+      if (moves.length) return moves;
+    }
+  } catch(e) { console.warn('[pgn] load_pgn failed:', e.message); }
+
+  // Strategy 2: strip PGN headers, then load bare move text
+  try {
+    const bare = pgn.replace(/\[[^\]]*\]/g, '').replace(/\{[^}]*\}/g, '').trim();
+    const c2 = new Chess();
+    if (c2.load_pgn(bare)) {
+      const moves = c2.history();
+      if (moves.length) return moves;
+    }
+  } catch(e) { console.warn('[pgn] bare load_pgn failed:', e.message); }
+
+  // Strategy 3: extract only the move tokens (strip move numbers + annotations)
+  try {
+    const tokens = pgn
+      .replace(/\[[^\]]*\]/g, '')   // strip headers
+      .replace(/\{[^}]*\}/g, '')    // strip comments
+      .replace(/\([^)]*\)/g, '')    // strip variations
+      .replace(/\d+\./g, '')        // strip move numbers
+      .replace(/1-0|0-1|1\/2-1\/2|\*/g, '')  // strip result
+      .split(/\s+/)
+      .filter(t => t && t.length > 0 && !/^\d+$/.test(t));
+
+    const c3 = new Chess();
+    const applied = [];
+    for (const tok of tokens) {
+      const m = c3.move(tok, { sloppy: true });
+      if (!m) break;
+      applied.push(m.san);
+    }
+    if (applied.length) return applied;
+  } catch(e) { console.warn('[pgn] token parse failed:', e.message); }
+
+  // Strategy 4: try interpreting as UCI move list ("e2e4 e7e5 ...")
+  try {
+    const uciTokens = pgn.trim().split(/\s+/).filter(t => /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(t));
+    if (uciTokens.length) {
+      const c4 = new Chess();
+      const applied = [];
+      for (const uci of uciTokens) {
+        const m = c4.move({ from: uci.slice(0,2), to: uci.slice(2,4), promotion: uci[4] || 'q' });
+        if (!m) break;
+        applied.push(m.san);
+      }
+      if (applied.length) return applied;
+    }
+  } catch(e) { console.warn('[pgn] UCI parse failed:', e.message); }
+
+  console.warn('[pgn] All parse strategies failed for:', (pgn||'').slice(0, 100));
+  return [];
+}
+
 // ── Replay ────────────────────────────────────────────────────────────────────
 function openReplay(id) {
   const g = allGames.find(x => String(x.id) === String(id));
@@ -589,10 +664,9 @@ function openReplay(id) {
   if (item) { item.classList.add('active'); item.scrollIntoView({block:'nearest'}); }
   activeGameId = g.id;
 
-  // Parse PGN
-  const chess = new Chess();
-  chess.load_pgn(g.pgn);
-  replayMoves = chess.history();
+  // Parse PGN — try multiple strategies since old games may have non-standard format
+  replayMoves = parsePgnToMoves(g.pgn);
+  console.log('[history] Parsed', replayMoves.length, 'moves from game', g.id, '| PGN sample:', (g.pgn||'').slice(0,60));
 
   // Mobile: show replay panel fullscreen
   const replayPanel = document.getElementById('replay-panel');
@@ -730,9 +804,16 @@ function stopAutoPlay() {
 
 // ── Misc ──────────────────────────────────────────────────────────────────────
 function analyseCurrentPosition() {
+  // Build FEN from current replay position without re-navigating if possible
   const chess = new Chess();
-  for (let i = 0; i < replayIdx; i++) chess.move(replayMoves[i]);
-  window.location.href = '/play?analyse=' + encodeURIComponent(chess.fen());
+  for (let i = 0; i < replayIdx; i++) {
+    const m = chess.move(replayMoves[i], { sloppy: true });
+    if (!m) break;
+  }
+  const fen = chess.fen();
+  // Navigate to play page analysis tab with current FEN
+  // The play page reads ?analyse=FEN on load and opens the analysis tab
+  window.location.href = '/play?analyse=' + encodeURIComponent(fen);
 }
 
 function copyPGN() {

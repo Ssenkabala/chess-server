@@ -1522,12 +1522,36 @@ function switchTab(tab, btn) {
   document.getElementById('panel-' + tab).classList.add('active');
   if (btn) btn.classList.add('active');
 
-  // Init analysis board on first switch to analysis tab
-  // Defer one frame so the panel is visible and has dimensions before cg init
   if (tab === 'analysis') {
     requestAnimationFrame(function() {
-      if (!analysisCg) initAnalysisBoard();
-      else analysisCg.redrawAll();
+      var fromGame = gameStarted && game && !game.game_over();
+      if (!analysisCg) {
+        initAnalysisBoard();
+        if (fromGame) {
+          // Board is init'd inside a rAF — poll until ready then apply position
+          var targetFen = game.fen();
+          (function applyGamePos() {
+            if (!analysisCg) { requestAnimationFrame(applyGamePos); return; }
+            analysisGame = new Chess(targetFen);
+            analysisCg.set({ fen: targetFen });
+            analysisCg.redrawAll();
+            document.getElementById('fen-input').value = targetFen;
+            setAnalysisStatus('Current game position loaded.');
+          })();
+        }
+      } else {
+        // Board already exists — update position if a game is in progress
+        if (fromGame) {
+          var fen = game.fen();
+          analysisGame = new Chess(fen);
+          analysisCg.set({ fen: fen });
+          analysisCg.redrawAll();
+          document.getElementById('fen-input').value = fen;
+          setAnalysisStatus('Current game position loaded.');
+        } else {
+          analysisCg.redrawAll();
+        }
+      }
     });
   }
 }
@@ -2365,30 +2389,39 @@ function closeMenuThenAuth() {
   const fen = params.get('analyse');
   if (!fen) return;
 
-  // Switch to analysis tab
+  const decodedFen = decodeURIComponent(fen);
+  const test = new Chess();
+  if (!test.load(decodedFen)) {
+    console.warn('[analyse] Invalid FEN from URL:', decodedFen);
+    return;
+  }
+
+  // Switch to analysis tab immediately
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('panel-analysis').classList.add('active');
   document.querySelectorAll('.tab-btn')[1].classList.add('active');
 
-  // initAnalysisBoard uses rAF internally — wait for it then set FEN
+  // Set the game state now so it's ready when the board renders
+  analysisGame = test;
+  document.getElementById('fen-input').value = decodedFen;
+
+  // initAnalysisBoard sets fen:'start' internally — we need to override after it renders
+  // Use a polling approach identical to history board: keep checking until analysisCg exists
   initAnalysisBoard();
-  // Two rAFs: first fires the cg init inside initAnalysisBoard, second applies the FEN
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    const decodedFen = decodeURIComponent(fen);
-    const test = new Chess();
-    if (test.load(decodedFen)) {
-      analysisGame = test;
-      if (analysisCg) {
-        analysisCg.set({ fen: decodedFen });
-        analysisCg.redrawAll();
-      }
-      document.getElementById('fen-input').value = decodedFen;
-      document.getElementById('analysis-status').textContent =
-        'Position loaded. Press Analyse or Coach Me.';
-      scheduleAutoAnalyse();
-    }
-  }));
+
+  function applyFen() {
+    if (!analysisCg) { requestAnimationFrame(applyFen); return; }
+    // Also check board has non-zero dimensions
+    const el = document.getElementById('analysis-board');
+    if (el && el.getBoundingClientRect().width < 10) { requestAnimationFrame(applyFen); return; }
+    analysisCg.set({ fen: decodedFen });
+    analysisCg.redrawAll();
+    document.getElementById('analysis-status').textContent = 'Position loaded. Press Analyse or Coach Me.';
+    scheduleAutoAnalyse();
+  }
+  // Start polling after one frame (gives initAnalysisBoard's rAF a chance to fire first)
+  requestAnimationFrame(() => requestAnimationFrame(applyFen));
 })();
 </script>
 

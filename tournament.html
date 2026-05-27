@@ -668,8 +668,9 @@ function seqHTML(uid) {
   ).join('')}</div>`;
 }
 
-function streakHTML(uid) {
-  const s = _playerStreak[uid] || 0;
+function streakHTML(uid, consecutiveWins) {
+  // Use server-provided consecutive_wins if available, fall back to computed _playerStreak
+  const s = (consecutiveWins != null ? consecutiveWins : null) ?? _playerStreak[uid] ?? 0;
   if (s < 2) return '';
   return `<span class="player-streak">🔥${s}</span>`;
 }
@@ -1167,7 +1168,7 @@ async function viewTournament(id) {
                   <div class="player-country">${FLAG(p.country)}</div>
                   <div class="player-name">${p.username}${pauseIcon}</div>
                   ${t.format === 'arena' && t.status !== 'upcoming' ? seqHTML(p.user_id) : ''}
-                  ${t.format === 'arena' && t.status !== 'upcoming' ? streakHTML(p.user_id) : ''}
+                  ${t.format === 'arena' && t.status !== 'upcoming' ? streakHTML(p.user_id, p.consecutive_wins) : ''}
                   <div class="player-elo">${eloOf(p)}</div>
                   <div class="player-score">${t.status === 'upcoming' ? '' : (p.score || 0)}</div>
                 </div>`;
@@ -1243,7 +1244,7 @@ function startDetailPoll(id) {
             <div class="player-country">${FLAG(p.country)}</div>
             <div class="player-name">${p.username}${pauseIcon}</div>
             ${t.format === 'arena' && t.status !== 'upcoming' ? seqHTML(p.user_id) : ''}
-            ${t.format === 'arena' && t.status !== 'upcoming' ? streakHTML(p.user_id) : ''}
+            ${t.format === 'arena' && t.status !== 'upcoming' ? streakHTML(p.user_id, p.consecutive_wins) : ''}
             <div class="player-elo">${eloOf2(p)}</div>
             <div class="player-score">${t.status === 'upcoming' ? '' : (p.score || 0)}</div>
           </div>`;
@@ -1428,7 +1429,12 @@ function connectTournamentWs(tid, tournament) {
         if (typeof msg.my_score === 'number') _myArenaScore = msg.my_score;
         if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN)
           tournamentWs.send(JSON.stringify({ type: 'available', score: _myArenaScore }));
-        showArenaStatus('Game over. Waiting for next pairing…');
+        // Show streak bonus notification
+        let statusMsg = 'Game over. Waiting for next pairing…';
+        if (msg.streak_bonus && msg.streak_bonus > 0) {
+          statusMsg = '🔥 Streak bonus! +' + msg.streak_bonus + ' extra point (streak: ' + msg.streak + ' wins). Waiting for next pairing…';
+        }
+        showArenaStatus(statusMsg);
       } else if (msg.type === 'tournament_ended') {
         hideArenaCountdown();
         const reason = msg.reason || 'Tournament has ended.';

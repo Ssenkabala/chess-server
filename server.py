@@ -1287,15 +1287,16 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
     tournament_connections.setdefault(tournament_id, {})
     tournament_player_game.setdefault(tournament_id, {})
     tournament_connections[tournament_id][user_id] = {
-        "ws":         ws,
-        "username":   username,
-        "elo":        elo,
-        "elo_bullet": int(ident.get("elo_bullet", elo)),
-        "elo_blitz":  int(ident.get("elo_blitz",  elo)),
-        "elo_rapid":  int(ident.get("elo_rapid",  elo)),
-        "score":      score,
-        "available":  True,
-        "paused":     False,
+        "ws":               ws,
+        "username":         username,
+        "elo":              elo,
+        "elo_bullet":       int(ident.get("elo_bullet", elo)),
+        "elo_blitz":        int(ident.get("elo_blitz",  elo)),
+        "elo_rapid":        int(ident.get("elo_rapid",  elo)),
+        "score":            score,
+        "available":        True,
+        "paused":           False,
+        "consecutive_wins": 0,   # arena streak bonus tracking
     }
     if tournament_player_game[tournament_id].get(user_id):
         tournament_connections[tournament_id][user_id]["available"] = False
@@ -2518,13 +2519,35 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                 json={"score": current + pts, "elo": elo_snapshot}
             )
 
+        # Streak bonus: +1 extra point for a 2+ game win streak (Lichess-style)
+        # consecutive_wins tracked in tournament_connections (in-memory, survives reconnect via _myArenaScore)
+        conns_now = tournament_connections.get(tid, {})
+
+        def streak_bonus(uid, won):
+            """Update streak counter and return bonus points."""
+            if uid not in conns_now:
+                return 0
+            if won:
+                conns_now[uid]["consecutive_wins"] = conns_now[uid].get("consecutive_wins", 0) + 1
+                streak = conns_now[uid]["consecutive_wins"]
+                return 1 if streak >= 2 else 0   # bonus kicks in on 2nd+ consecutive win
+            else:
+                conns_now[uid]["consecutive_wins"] = 0
+                return 0
+
         if req.result == 'white':
-            await add_score(g['white_id'], 1,   w_elo)
-            await add_score(g['black_id'], 0,   b_elo)
+            w_bonus = streak_bonus(g['white_id'], won=True)
+            b_bonus = streak_bonus(g['black_id'], won=False)
+            await add_score(g['white_id'], 1 + w_bonus, w_elo)
+            await add_score(g['black_id'], 0,            b_elo)
         elif req.result == 'black':
-            await add_score(g['white_id'], 0,   w_elo)
-            await add_score(g['black_id'], 1,   b_elo)
+            w_bonus = streak_bonus(g['white_id'], won=False)
+            b_bonus = streak_bonus(g['black_id'], won=True)
+            await add_score(g['white_id'], 0,            w_elo)
+            await add_score(g['black_id'], 1 + b_bonus,  b_elo)
         else:
+            streak_bonus(g['white_id'], won=False)   # draw resets streak
+            streak_bonus(g['black_id'], won=False)
             await add_score(g['white_id'], 0.5, w_elo)
             await add_score(g['black_id'], 0.5, b_elo)
 
@@ -2538,18 +2561,19 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                     pg[uid] = None
                 if uid in conns:
                     conns[uid]["available"] = True
-                    conns[uid]["score"] = (
-                        conns[uid].get("score", 0) + 1   if (
-                            (req.result == "white" and uid == g['white_id']) or
-                            (req.result == "black" and uid == g['black_id'])
-                        ) else
-                        conns[uid].get("score", 0) + 0.5 if req.result == "draw"
-                        else conns[uid].get("score", 0)
-                    )
+                    won = (req.result == "white" and uid == g['white_id']) or                            (req.result == "black" and uid == g['black_id'])
+                    drew = req.result == "draw"
+                    # Mirror the streak bonus calculated in the DB scoring above
+                    streak = conns_now.get(uid, {}).get("consecutive_wins", 0)
+                    bonus = 1 if (won and streak >= 2) else 0
+                    pts = (1 + bonus) if won else (0.5 if drew else 0)
+                    conns[uid]["score"] = conns[uid].get("score", 0) + pts
                     await arena_send(conns[uid]["ws"], {
-                        "type": "game_over",
-                        "result": req.result,
-                        "my_score": conns[uid]["score"],
+                        "type":       "game_over",
+                        "result":     req.result,
+                        "my_score":   conns[uid]["score"],
+                        "streak":     streak if won else 0,
+                        "streak_bonus": bonus,
                     })
             asyncio.create_task(arena_pair_delayed(tid))
     except Exception as e:
@@ -2996,14 +3020,16 @@ async def get_tournament(tournament_id: str):
         raise HTTPException(404, "Tournament not found")
 
     players = p_r.json()
-    # Merge live paused state from in-memory connections
+    # Merge live paused state and streak from in-memory connections
     conns = tournament_connections.get(tournament_id, {})
     for p in players:
         uid = p.get("user_id")
         if uid and uid in conns:
-            p["paused"] = conns[uid].get("paused", False)
+            p["paused"]           = conns[uid].get("paused", False)
+            p["consecutive_wins"] = conns[uid].get("consecutive_wins", 0)
         else:
-            p["paused"] = False
+            p["paused"]           = False
+            p["consecutive_wins"] = 0
 
     return {"tournament": ts[0], "players": players, "games": g_r.json()}
 

@@ -533,47 +533,44 @@ function renderByCountry(players, col) {
 
   let html = '';
   sortedCountries.forEach(code => {
-    const ps  = byCountry[code];
+    const ps     = byCountry[code];
     const isOpen = openCountries.has(code);
-    html += `
-    <div class="country-section">
-      <div class="country-header" onclick="toggleCountry('${code}')">
-        <span class="country-flag">${FLAG(code)}</span>
-        <span class="country-name">${COUNTRY_NAMES[code] || code}</span>
-        <span class="country-count">${ps.length} player${ps.length!==1?'s':''} · Top ${ps[0][col]||'?'} ELO</span>
-        <span class="country-chevron ${isOpen?'open'}" id="chev-${code}">▶</span>
-      </div>
-      <div class="country-players ${isOpen?'open'}" id="cp-${code}">
-        <table class="lb-table">
-          <thead>
-            <tr>
-              <th style="width:44px">#</th>
-              <th>Player</th>
-              <th class="num">${TC_LABEL[currentTc]}</th>
-              <th class="num">Rank</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${ps.map((p, i) => {
-              const isMe = currentUser && p.user_id === currentUser.id;
-              const rc   = rankClass(i);
-              return `<tr class="${isMe?'is-me':''}">
-                <td class="td-rank ${rc}">${rc==='gold'?'🥇':rc==='silver'?'🥈':rc==='bronze'?'🥉':i+1}</td>
-                <td>
-                  <div class="td-player">
-                    <div>
-                      <div class="td-name ${isMe?'is-me':''}">${esc(p.username||'Anonymous')}</div>
-                    </div>
-                  </div>
-                </td>
-                <td class="td-elo">${p[col]||'—'}</td>
-                <td class="td-games">#${p.globalRank} continental</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
+    const openCls = isOpen ? ' open' : '';
+
+    // Build rows using string concat — no nested backticks
+    let rows = '';
+    ps.forEach((p, i) => {
+      const isMe = currentUser && p.user_id === currentUser.id;
+      const rc   = rankClass(i);
+      const medal = rc === 'gold' ? '🥇' : rc === 'silver' ? '🥈' : rc === 'bronze' ? '🥉' : String(i + 1);
+      rows += '<tr class="' + (isMe ? 'is-me' : '') + '">' +
+        '<td class="td-rank ' + rc + '">' + medal + '</td>' +
+        '<td><div class="td-player"><div>' +
+          '<div class="td-name' + (isMe ? ' is-me' : '') + '">' + esc(p.username || 'Anonymous') + '</div>' +
+        '</div></div></td>' +
+        '<td class="td-elo">' + (p[col] || '—') + '</td>' +
+        '<td class="td-games">#' + p.globalRank + ' continental</td>' +
+        '</tr>';
+    });
+
+    html +=
+      '<div class="country-section">' +
+        '<div class="country-header" onclick="toggleCountry(\'' + code + '\')">' +
+          '<span class="country-flag">' + FLAG(code) + '</span>' +
+          '<span class="country-name">' + (COUNTRY_NAMES[code] || code) + '</span>' +
+          '<span class="country-count">' + ps.length + ' player' + (ps.length !== 1 ? 's' : '') +
+            ' · Top ' + (ps[0][col] || '?') + ' ELO</span>' +
+          '<span class="country-chevron' + openCls + '" id="chev-' + code + '">▶</span>' +
+        '</div>' +
+        '<div class="country-players' + openCls + '" id="cp-' + code + '">' +
+          '<table class="lb-table"><thead><tr>' +
+            '<th style="width:44px">#</th>' +
+            '<th>Player</th>' +
+            '<th class="num">' + TC_LABEL[currentTc] + '</th>' +
+            '<th class="num">Rank</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>' +
+        '</div>' +
+      '</div>';
   });
 
   el.innerHTML = html;

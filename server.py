@@ -351,9 +351,12 @@ def analyse_position(fen: str, think_time: float, moves: list[str] | None = None
 
 # ΓöÇΓöÇΓöÇ Original /move endpoint (unchanged) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 engine_semaphore = asyncio.Semaphore(3)
+_engine_failures = 0          # consecutive engine failures
+_ENGINE_FAILURE_LIMIT = 3     # after this many, log loudly and reset count
 
 @app.post("/move")
 async def get_move(req: MoveRequest):
+    global _engine_failures
     async with engine_semaphore:
         try:
             # Validate FEN
@@ -399,28 +402,44 @@ async def get_move(req: MoveRequest):
 
                 commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
                 move_uci = None
-                try:
-                    proc = subprocess.Popen(
-                        [ENGINE_PATH],
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        bufsize=1
-                    )
-                    stdout_data, _ = proc.communicate(
-                        input=commands,
-                        timeout=think_ms / 1000 + 8
-                    )
-                    for line in stdout_data.splitlines():
-                        if line.startswith("bestmove"):
-                            parts = line.split()
-                            if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
-                                move_uci = parts[1]
+                for _attempt in range(2):   # retry once on failure
+                    try:
+                        proc = subprocess.Popen(
+                            [ENGINE_PATH],
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            bufsize=1
+                        )
+                        stdout_data, _ = proc.communicate(
+                            input=commands,
+                            timeout=think_ms / 1000 + 8
+                        )
+                        for line in stdout_data.splitlines():
+                            if line.startswith("bestmove"):
+                                parts = line.split()
+                                if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
+                                    move_uci = parts[1]
+                                break
+                        if move_uci:
+                            _engine_failures = 0   # reset on success
                             break
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.communicate()
+                        # No bestmove — engine returned empty; retry
+                        _engine_failures += 1
+                        print(f"[engine] no bestmove on attempt {_attempt+1}, failures={_engine_failures}", flush=True)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.communicate()
+                        _engine_failures += 1
+                        print(f"[engine] timeout on attempt {_attempt+1}, failures={_engine_failures}", flush=True)
+                    except Exception as eng_err:
+                        _engine_failures += 1
+                        print(f"[engine] error on attempt {_attempt+1}: {eng_err}, failures={_engine_failures}", flush=True)
+
+                if _engine_failures >= _ENGINE_FAILURE_LIMIT:
+                    print(f"[engine] ALERT: {_engine_failures} consecutive failures — check binary at {ENGINE_PATH}", flush=True)
+                    _engine_failures = 0  # reset so we keep trying rather than silently dying
 
                 if not move_uci:
                     # Fallback: any legal move
@@ -2902,17 +2921,32 @@ async def get_leaderboard(region: str = ""):
         country_list = ",".join(REGIONS[region])
         params["country"] = f"in.({country_list})"
 
-    async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/profiles",
-            params=params,
-            headers={"apikey": SUPABASE_SERVICE_KEY,
-                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-    players = r.json()
-    # Filter out profiles without a username set
-    players = [p for p in players if p.get("username")]
-    return players
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params=params,
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+        if r.status_code != 200:
+            print(f"[leaderboard] Supabase error {r.status_code}: {r.text[:200]}", flush=True)
+            raise HTTPException(status_code=502, detail="Could not fetch leaderboard from database")
+
+        players = r.json()
+        if not isinstance(players, list):
+            print(f"[leaderboard] unexpected response type: {type(players)} — {str(players)[:200]}", flush=True)
+            raise HTTPException(status_code=502, detail="Unexpected database response")
+
+        # Filter out profiles without a username or country set
+        players = [p for p in players if p.get("username") and p.get("country")]
+        return players
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[leaderboard] exception: {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Leaderboard unavailable")
 
 
 @app.get("/api/tournaments")

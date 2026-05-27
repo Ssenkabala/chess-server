@@ -1255,7 +1255,8 @@ global.Chessground = Nr;
     <div class="user-bar">
       <div class="user-info" id="user-info">Not signed in</div>
       <div class="user-actions">
-        <button onclick="openAuth()" id="btn-login">Sign In</button>
+        <!-- Sign In is now in the top nav — keep hidden fallbacks for JS compat -->
+        <button onclick="openAuth()" id="btn-login" style="display:none">Sign In</button>
         <button onclick="window.location.href='/profile'" id="btn-profile" style="display:none">Profile</button>
         <button onclick="goToHistory()" id="btn-history" style="display:none">My Games</button>
         <button onclick="signOut()" id="btn-signout" style="display:none">Sign Out</button>
@@ -2209,7 +2210,8 @@ async function submitUsername() {
 function clearUser() {
   currentUser = null;
   document.getElementById('user-info').innerHTML = 'Not signed in';
-  document.getElementById('btn-login').style.display    = 'inline-block';
+  // Body buttons stay hidden — sign in is in the top nav now
+  document.getElementById('btn-login').style.display    = 'none';
   document.getElementById('btn-signout').style.display  = 'none';
   document.getElementById('btn-history').style.display  = 'none';
   document.getElementById('btn-profile').style.display  = 'none';

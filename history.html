@@ -595,7 +595,8 @@ function openReplay(id) {
   replayMoves = chess.history();
 
   // Mobile: show replay panel fullscreen
-  document.getElementById('replay-panel').classList.add('mobile-active');
+  const replayPanel = document.getElementById('replay-panel');
+  replayPanel.classList.add('mobile-active');
 
   // Show UI
   ['replay-header-top','board-outer','replay-header-bot','replay-controls','move-list-wrap','pgn-wrap']
@@ -618,7 +619,9 @@ function openReplay(id) {
   }
   document.getElementById('rh-elo-opp').textContent = '';
 
-  // Init chessground — defer one frame so board-outer has been reflowed after display:''
+  // Init chessground — defer until panel is fully visible and laid out.
+  // On mobile, the panel transitions from display:none → flex, so double-rAF
+  // isn't enough. We force a reflow, then wait two frames.
   const boardEl = document.getElementById('replay-board');
   if (cg) { cg.destroy(); cg = null; }
   boardEl.innerHTML = '';
@@ -629,8 +632,14 @@ function openReplay(id) {
 
   const orientation = g.player_color || 'white';
 
-  // Double rAF: first frame applies display:'', second frame the browser has laid out
-  requestAnimationFrame(() => requestAnimationFrame(() => {
+  function initBoard() {
+    // Force layout so getBoundingClientRect() is non-zero
+    const rect = wrap.getBoundingClientRect();
+    if (rect.width < 10) {
+      // Panel not visible yet — try again next frame
+      requestAnimationFrame(initBoard);
+      return;
+    }
     cg = Chessground(wrap, {
       fen:         'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR',
       orientation: orientation,
@@ -642,7 +651,9 @@ function openReplay(id) {
     });
     cg.redrawAll();
     replayGoto(0);
-  }));
+  }
+  // Double rAF to ensure display:flex has taken effect, then poll for layout
+  requestAnimationFrame(() => requestAnimationFrame(initBoard));
 
   // Render move list and counter immediately (board loads async above)
   renderMoveList(g.pgn);

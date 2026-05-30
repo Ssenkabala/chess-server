@@ -41,6 +41,143 @@ ANTHROPIC_API_KEY    = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
 SUPABASE_URL         = os.getenv("SUPABASE_URL", "https://nbskgzsvygdmlvwbetxn.supabase.co")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")  # set on Railway
 
+# ── Medal tier definitions ─────────────────────────────────────────────────
+# Medals are stored in profiles.medals as a JSONB array of objects:
+#   { "id": "gold", "label": "Gold Lion", "reason": "1st place – July Continental Open",
+#     "tournament_id": "...", "awarded_at": "2026-07-03T19:00:00Z" }
+#
+# Supabase migration required:
+#   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS medals JSONB DEFAULT '[]';
+#   ALTER TABLE tournaments ADD COLUMN IF NOT EXISTS scope TEXT DEFAULT 'open';
+#   -- scope values: 'open' | 'regional' | 'continental'
+
+MEDAL_TIERS = {
+    # Awarded for 1st place wins — tier escalates with total wins
+    "bronze":   {"label": "Bronze Lion",   "img": "bronze"},
+    "silver":   {"label": "Silver Lion",   "img": "silver"},
+    "gold":     {"label": "Gold Lion",     "img": "gold"},
+    "platinum": {"label": "Platinum Lion", "img": "platinum"},
+    "diamond":  {"label": "Diamond Lion",  "img": "diamond"},
+}
+
+async def award_medals(user_id: str, finish_pos: int, tournament_id: str,
+                       tournament_name: str, scope: str, client) -> list[dict]:
+    """
+    Award podium medals + milestone medals after a tournament ends.
+
+    Podium (every tournament):
+        1st → Gold Lion
+        2nd → Silver Lion
+        3rd → Bronze Lion
+
+    Milestone (lifetime, accumulate across all tournaments):
+        3 regional wins   → Platinum Lion  (every multiple of 3)
+        3 continental wins → Diamond Lion  (every multiple of 3)
+        3 consecutive 1st-place wins → Platinum Lion  (hat-trick)
+        5 consecutive 1st-place wins → Diamond Lion   (legend)
+
+    Returns list of new medal dicts awarded this call.
+    """
+    if finish_pos > 3:
+        return []   # only podium gets medals
+
+    # Map finish position to medal
+    pos_medal = {1: "gold", 2: "silver", 3: "bronze"}
+    medal_id  = pos_medal[finish_pos]
+
+    # Fetch current medals from profile
+    profile_r = await client.get(
+        f"{SUPABASE_URL}/rest/v1/profiles",
+        params={"user_id": f"eq.{user_id}", "select": "medals"},
+        headers={"apikey": SUPABASE_SERVICE_KEY,
+                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+    )
+    profile_data = profile_r.json()
+    if not profile_data:
+        return []
+    current_medals: list = profile_data[0].get("medals") or []
+
+    now = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+    new_medals: list[dict] = []
+
+    def add(mid: str, reason: str, tag: str = ""):
+        new_medals.append({
+            "id":            mid,
+            "label":         MEDAL_TIERS[mid]["label"],
+            "img":           MEDAL_TIERS[mid]["img"],
+            "reason":        reason,
+            "tag":           tag,
+            "tournament_id": tournament_id,
+            "awarded_at":    now,
+        })
+
+    # ── 1. Podium medal (always) ──────────────────────────────
+    pos_label = {1: "1st place", 2: "2nd place", 3: "3rd place"}
+    add(medal_id, f"{pos_label[finish_pos]} — {tournament_name}")
+
+    # ── 2. Milestone medals (1st-place wins only) ─────────────
+    if finish_pos == 1:
+        # Count past wins from medals already held
+        past_wins_regional    = sum(1 for m in current_medals
+                                    if m.get("tag","").startswith("win_regional"))
+        past_wins_continental = sum(1 for m in current_medals
+                                    if m.get("tag","").startswith("win_continental"))
+        past_wins_any         = sum(1 for m in current_medals
+                                    if m.get("tag","").startswith("win_"))
+
+        # Tag this win in the medal so we can count it later
+        win_tag = f"win_{scope}_{tournament_id}"
+        add("gold", f"1st place — {tournament_name}", win_tag)   # duplicate? no — this IS the podium medal, just tagging it
+        # Actually tag the podium medal we already added
+        new_medals[-2]["tag"] = win_tag   # tag the podium medal (index -2, before this one)
+        new_medals.pop()                  # remove the duplicate
+
+        new_regional    = past_wins_regional    + (1 if scope == "regional"    else 0)
+        new_continental = past_wins_continental + (1 if scope == "continental" else 0)
+        new_any         = past_wins_any + 1
+
+        # Regional milestone: every 3 regional wins → Platinum
+        if scope == "regional" and new_regional % 3 == 0:
+            add("platinum", f"{new_regional} regional tournament wins", f"milestone_regional_{new_regional}")
+
+        # Continental milestone: every 3 continental wins → Diamond
+        if scope == "continental" and new_continental % 3 == 0:
+            add("diamond", f"{new_continental} continental tournament wins", f"milestone_continental_{new_continental}")
+
+        # Consecutive wins — check last wins from medals list
+        # Count how many of the most recent win_* medals are consecutive 1st-place
+        win_medals = sorted(
+            [m for m in current_medals if m.get("tag","").startswith("win_")],
+            key=lambda m: m.get("awarded_at",""), reverse=True
+        )
+        consecutive = 1   # include current
+        for m in win_medals:
+            if m.get("id") == "gold":   # gold = 1st place
+                consecutive += 1
+            else:
+                break
+
+        if consecutive == 3:
+            add("platinum", "Hat-Trick — 3 consecutive 1st-place wins", "hat_trick")
+        elif consecutive == 5:
+            add("diamond", "Legend — 5 consecutive 1st-place wins", "legend")
+
+    if not new_medals:
+        return []
+
+    # Persist to Supabase
+    updated_medals = current_medals + new_medals
+    await client.patch(
+        f"{SUPABASE_URL}/rest/v1/profiles",
+        params={"user_id": f"eq.{user_id}"},
+        headers={"apikey": SUPABASE_SERVICE_KEY,
+                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                 "Content-Type": "application/json"},
+        json={"medals": updated_medals}
+    )
+    print(f"[medals] {user_id} pos={finish_pos}: {[m['id'] for m in new_medals]}", flush=True)
+    return new_medals
+
 # Tournament race condition guard
 _tournament_locks: set = set()
 
@@ -965,6 +1102,55 @@ async def arena_send(ws, msg: dict):
         pass
 
 
+async def _grant_tournament_medals(tournament_id: str, client):
+    """Fetch final standings and award podium medals to top 3."""
+    try:
+        # Get tournament info (name, scope)
+        t_r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournaments",
+            params={"id": f"eq.{tournament_id}", "select": "name,scope"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        t_data = t_r.json()
+        if not t_data:
+            return
+        t_name  = t_data[0].get("name", "Tournament")
+        t_scope = t_data[0].get("scope", "open")
+
+        # Get final standings ordered by score desc, then elo desc for tiebreak
+        p_r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournament_players",
+            params={"tournament_id": f"eq.{tournament_id}",
+                    "select": "user_id,score,elo",
+                    "order":  "score.desc,elo.desc"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        players = p_r.json()
+        if not players:
+            return
+
+        # Award medals to top 3 (handles ties by elo tiebreak)
+        for pos, player in enumerate(players[:3], start=1):
+            uid = player.get("user_id")
+            if uid:
+                awarded = await award_medals(uid, pos, tournament_id, t_name, t_scope, client)
+                if awarded:
+                    # Also patch rank into tournament_players for record-keeping
+                    await client.patch(
+                        f"{SUPABASE_URL}/rest/v1/tournament_players",
+                        params={"tournament_id": f"eq.{tournament_id}",
+                                "user_id":        f"eq.{uid}"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY,
+                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                 "Content-Type": "application/json"},
+                        json={"rank": pos}
+                    )
+    except Exception as e:
+        print(f"[medals] _grant_tournament_medals error {tournament_id}: {e}", flush=True)
+
+
 async def arena_auto_start_scheduler():
     """Poll every 30s, auto-start Arena tournaments whose starts_at has passed,
     and auto-end Arena tournaments whose duration has expired."""
@@ -1017,6 +1203,8 @@ async def arena_auto_start_scheduler():
                                 json={"status": "completed"}
                             )
                             print(f"[arena] auto-ended {tid}", flush=True)
+                            # Award podium medals
+                            asyncio.create_task(_grant_tournament_medals(tid, client))
                             # Broadcast tournament_ended to all connected players
                             conns = tournament_connections.get(tid, {})
                             ended_msg = {"type": "tournament_ended"}
@@ -1257,6 +1445,7 @@ async def _arena_end_exhausted(tournament_id: str):
             )
         print(f"[arena] exhausted — ended {tournament_id}", flush=True)
         conns = tournament_connections.get(tournament_id, {})
+        asyncio.create_task(_grant_tournament_medals(tournament_id, httpx.AsyncClient()))
         msg = {"type": "tournament_ended",
                "reason": "All players have faced each other. Final standings are shown below."}
         for uid, info in list(conns.items()):
@@ -2385,6 +2574,7 @@ async def next_round(req: TournamentStartRequest, authorization: str = Header(No
                              "Content-Type": "application/json"},
                     json={"status": "completed"}
                 )
+                asyncio.create_task(_grant_tournament_medals(req.tournament_id, client))
                 return {"ok": True, "completed": True}
 
             current_games = [g for g in all_games if g["round"] == current_round]
@@ -3068,6 +3258,102 @@ def sitemap():
 @app.get("/leaderboard")
 def leaderboard_page():
     return FileResponse("leaderboard.html")
+
+@app.get("/api/stats")
+async def get_live_stats():
+    """
+    Public endpoint for landing page counters.
+    Returns live in-memory counts + cached DB totals.
+    Cached DB totals refresh every 60 seconds to avoid hammering Supabase.
+    """
+    import time
+    now = time.time()
+
+    # ── Live (in-memory, always fresh) ──────────────────────────
+    # Active multiplayer games
+    live_mp_games = len(active_games)
+
+    # Active arena games (players mid-game inside tournaments)
+    live_arena_games = sum(
+        1 for games_map in tournament_player_game.values()
+        for gid in games_map.values() if gid is not None
+    ) // 2   # each game has 2 player entries
+
+    live_games = live_mp_games + live_arena_games
+
+    # Connected users: lobby waiters + arena participants
+    lobby_connected   = len(lobby_queue)
+    arena_connected   = sum(len(conns) for conns in tournament_connections.values())
+    live_connected    = lobby_connected + arena_connected
+
+    # ── Cached DB totals (refresh every 60s) ────────────────────
+    cache = get_live_stats._cache
+    if now - cache.get("ts", 0) > 60:
+        try:
+            async with httpx.AsyncClient() as client:
+                # Total registered players (profiles with username)
+                pr = await client.get(
+                    f"{SUPABASE_URL}/rest/v1/profiles",
+                    params={"select": "count", "username": "not.is.null"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY,
+                             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                             "Prefer": "count=exact", "Range": "0-0"}
+                )
+                players = int(pr.headers.get("content-range", "0/0").split("/")[-1] or 0)
+
+                # Total games played (all tables)
+                gr = await client.get(
+                    f"{SUPABASE_URL}/rest/v1/games",
+                    params={"select": "count"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY,
+                             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                             "Prefer": "count=exact", "Range": "0-0"}
+                )
+                bot_games = int(gr.headers.get("content-range", "0/0").split("/")[-1] or 0)
+
+                tgr = await client.get(
+                    f"{SUPABASE_URL}/rest/v1/tournament_games",
+                    params={"select": "count"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY,
+                             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                             "Prefer": "count=exact", "Range": "0-0"}
+                )
+                tournament_games = int(tgr.headers.get("content-range", "0/0").split("/")[-1] or 0)
+
+            cache["players"]       = players
+            cache["total_games"]   = bot_games + tournament_games
+            cache["ts"]            = now
+        except Exception as e:
+            print(f"[stats] DB fetch error: {e}", flush=True)
+            # Keep stale cache on error
+
+    return {
+        "live_games":    live_games,
+        "live_connected": live_connected,
+        "total_players": cache.get("players", 0),
+        "total_games":   cache.get("total_games", 0),
+    }
+
+get_live_stats._cache = {"ts": 0}   # module-level cache attached to function
+
+
+@app.get("/api/medals/{user_id}")
+async def get_medals(user_id: str):
+    """Return a player's medal collection."""
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{user_id}", "select": "medals,username"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+    data = r.json()
+    if not data:
+        raise HTTPException(404, "Profile not found")
+    return {
+        "username": data[0].get("username"),
+        "medals":   data[0].get("medals") or []
+    }
 
 @app.get("/history")
 def history():

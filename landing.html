@@ -825,6 +825,22 @@
     <p style="font-size:11px;color:var(--green);margin-top:14px;letter-spacing:0.1em;">
       ⚡ OPTIMIZED FOR LOW MOBILE DATA — USES 80% LESS DATA THAN OTHER CHESS PLATFORMS
     </p>
+
+    <!-- Live stats strip -->
+    <div id="live-stats" style="display:flex;gap:0;margin-top:20px;border:1px solid #1e1e1e;border-radius:3px;overflow:hidden;max-width:420px;">
+      <div style="flex:1;padding:12px 16px;border-right:1px solid #1e1e1e;background:#0d0d0d;">
+        <div style="font-size:22px;font-family:Georgia,serif;color:var(--green);letter-spacing:0.02em;" id="stat-live-games">—</div>
+        <div style="font-size:9px;color:#444;letter-spacing:0.18em;text-transform:uppercase;margin-top:2px;">Games in play</div>
+      </div>
+      <div style="flex:1;padding:12px 16px;border-right:1px solid #1e1e1e;background:#0d0d0d;">
+        <div style="font-size:22px;font-family:Georgia,serif;color:var(--green);letter-spacing:0.02em;" id="stat-connected">—</div>
+        <div style="font-size:9px;color:#444;letter-spacing:0.18em;text-transform:uppercase;margin-top:2px;">Players online</div>
+      </div>
+      <div style="flex:1;padding:12px 16px;background:#0d0d0d;">
+        <div style="font-size:22px;font-family:Georgia,serif;color:var(--green);letter-spacing:0.02em;" id="stat-total-games">—</div>
+        <div style="font-size:9px;color:#444;letter-spacing:0.18em;text-transform:uppercase;margin-top:2px;">Total games played</div>
+      </div>
+    </div>
     <div class="elo-badge">
       <span class="elo-num">2050</span>
       <span class="elo-label">Lichess<br>Rated ELO</span>
@@ -1335,6 +1351,35 @@ document.getElementById('auth-overlay').addEventListener('click', function(e) {
 });
 
 initAuth();
+
+// ── Live stats counter ────────────────────────────────────────
+async function fetchStats() {
+  try {
+    const r = await fetch('/api/stats');
+    if (!r.ok) return;
+    const d = await r.json();
+
+    function animateCount(el, target) {
+      if (!el) return;
+      const current = parseInt(el.textContent.replace(/,/g, '')) || 0;
+      if (current === target) return;
+      const step = Math.ceil(Math.abs(target - current) / 12);
+      let val = current;
+      const tick = setInterval(() => {
+        val = current < target ? Math.min(val + step, target) : Math.max(val - step, target);
+        el.textContent = val.toLocaleString();
+        if (val === target) clearInterval(tick);
+      }, 40);
+    }
+
+    animateCount(document.getElementById('stat-live-games'),   d.live_games     || 0);
+    animateCount(document.getElementById('stat-connected'),    d.live_connected  || 0);
+    animateCount(document.getElementById('stat-total-games'),  d.total_games     || 0);
+  } catch(e) { /* silently fail — counters stay at last value */ }
+}
+
+fetchStats();
+setInterval(fetchStats, 30000);
 </script>
 
 </body>

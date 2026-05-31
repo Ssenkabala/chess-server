@@ -3456,7 +3456,7 @@ async def reassure(request: FastAPIRequest):
     response.set_cookie("alina_reassure", new_cookie, max_age=86400, samesite="lax")
     return response
 
-@app.get("/alina")
+@app.get("/alina-oct12")
 def alina_page():
     return FileResponse("alina.html")
 

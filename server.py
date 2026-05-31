@@ -3402,7 +3402,63 @@ def debug_files():
         "files": os.listdir(".")
     }
 
+# ─── /reassure endpoint (for Alina) ──────────────────────────────────────────
+from fastapi import Request as FastAPIRequest
+from fastapi.responses import JSONResponse
 
+REASSURE_PROMPTS = [
+    "You are a warm, loving companion writing to a beautiful Pakistani girl named Alina (sometimes called Lina or Luna). She needs reassurance right now. Write her a sweet, genuine, heartfelt message (3-5 sentences) that uses her name naturally and makes her feel truly seen, loved, and enough. Be specific, warm, and avoid clichés. Vary the message each time.",
+    "You are the most supportive presence in Alina's life — a beautiful Pakistani girl who sometimes goes by Lina or Luna. She needs to hear something kind today. Write her a tender, uplifting message (3-5 sentences) about how wonderful she is. Use her name warmly and make her feel like the entire universe is rooting for her.",
+    "Alina — a stunning Pakistani girl also lovingly called Lina or Luna — needs a big emotional hug right now. Write her a sweet, comforting message (3-5 sentences) full of warmth and sincerity. Use her name at least once. Make her feel safe, cherished, and deeply loved. Be playful but genuine.",
+    "Write a short, sweet reassurance note (3-5 sentences) for Alina, a beautiful Pakistani girl whose nicknames are Lina and Luna. She's doubting herself and needs to hear how amazing she truly is. Be specific, heartfelt, and make her smile. Use her name naturally.",
+    "Alina (also called Lina or Luna) is a gorgeous Pakistani girl who needs some love right now. Write her a warm, poetic little message (3-5 sentences) that celebrates who she is — her beauty, her heart, her strength. Use her name and make it feel personal and real, not generic.",
+]
+
+REASSURE_DAILY_LIMIT = 20
+
+@app.post("/reassure")
+async def reassure(request: FastAPIRequest):
+    import random, json as _json
+    from datetime import date
+
+    # ── Simple daily rate limit via cookie ──────────────────────
+    today = str(date.today())
+    cookie_raw = request.cookies.get("alina_reassure", "{}")
+    try:
+        cookie = _json.loads(cookie_raw)
+    except Exception:
+        cookie = {}
+
+    count = cookie.get("count", 0) if cookie.get("date") == today else 0
+
+    if count >= REASSURE_DAILY_LIMIT:
+        return JSONResponse(
+            {"message": "Alina, you've had 20 sweet messages today — that's how loved you are. Come back tomorrow for more! 🌸"},
+            status_code=200
+        )
+
+    # ── Call Anthropic ───────────────────────────────────────────
+    prompt = random.choice(REASSURE_PROMPTS)
+    try:
+        ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        message = ai_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = message.content[0].text
+    except Exception:
+        text = "Alina, you are so incredibly loved. Don't ever forget that. 🌸"
+
+    # ── Update cookie ────────────────────────────────────────────
+    new_cookie = _json.dumps({"date": today, "count": count + 1})
+    response = JSONResponse({"message": text})
+    response.set_cookie("alina_reassure", new_cookie, max_age=86400, samesite="lax")
+    return response
+
+@app.get("/alina")
+def alina_page():
+    return FileResponse("alina.html")
 
 
 if __name__ == "__main__":

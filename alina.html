@@ -8,15 +8,22 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    html {
+      scrollbar-gutter: stable;
+    }
+
     body {
       min-height: 100vh;
+      width: 100%;
       font-family: 'Lora', Georgia, serif;
       background: radial-gradient(ellipse at 30% 20%, #2d1045 0%, #1a0e24 50%, #0f0a1a 100%);
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
-      overflow: hidden;
+      overflow-y: auto;
+      overflow-x: hidden;
       position: relative;
+      padding: 2.5rem 1rem 3rem;
     }
 
     body::before {
@@ -89,7 +96,7 @@
       border-radius: 20px;
       padding: 2rem 2.2rem;
       min-height: 140px;
-      margin-bottom: 2rem;
+      margin-bottom: 1.5rem;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -269,8 +276,14 @@
       try {
         const res = await fetch("/reassure", { method: "POST" });
         const data = await res.json();
+        // Strip any markdown headings or formatting Claude might return
+        const clean = data.message
+          .replace(/^#+\s.*\n?/gm, "")   // remove # headings
+          .replace(/\*\*(.*?)\*\*/g, "$1") // remove bold
+          .replace(/\*(.*?)\*/g, "$1")     // remove italic markers
+          .trim();
         dots.style.display = "none";
-        msgEl.textContent = data.message;
+        msgEl.textContent = clean;
         setTimeout(() => {
           msgEl.classList.add("revealed");
           box.classList.add("glowing");

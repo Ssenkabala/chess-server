@@ -27,6 +27,15 @@ async def lifespan(app):
     asyncio.create_task(arena_auto_start_scheduler())
     yield
 
+# Puzzle routes
+try:
+    from puzzle_routes import puzzle_router
+    _puzzle_router_loaded = True
+except ImportError:
+    puzzle_router = None
+    _puzzle_router_loaded = False
+    print("[puzzles] puzzle_routes.py not found — puzzle API unavailable", flush=True)
+
 app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
@@ -40,6 +49,10 @@ ENGINE_PATH = "./engines/engine.exe" if os.name == "nt" else "./engines/engine"
 ANTHROPIC_API_KEY    = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
 SUPABASE_URL         = os.getenv("SUPABASE_URL", "https://nbskgzsvygdmlvwbetxn.supabase.co")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")  # set on Railway
+
+# Register puzzle router if available
+if _puzzle_router_loaded and puzzle_router:
+    app.include_router(puzzle_router)
 
 # ── Medal tier definitions ─────────────────────────────────────────────────
 # Medals are stored in profiles.medals as a JSONB array of objects:
@@ -3258,6 +3271,10 @@ def sitemap():
 @app.get("/leaderboard")
 def leaderboard_page():
     return FileResponse("leaderboard.html")
+
+@app.get("/puzzles")
+def puzzles_page():
+    return FileResponse("puzzles.html")
 
 @app.get("/api/stats")
 async def get_live_stats():

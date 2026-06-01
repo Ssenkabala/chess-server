@@ -1184,6 +1184,7 @@ global.Chessground = Nr;
       <a href="/multiplayer" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Live</a>
       <a href="/tournaments" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Tournaments</a>
       <a href="/leaderboard" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Leaderboard</a>
+      <a href="/puzzles" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Puzzles</a>
       <a href="/history"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">History</a>
       <a href="/profile"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Profile</a>
       <a id="nav-signin-idx" onclick="openAuth()" style="display:none;color:#00ff9d;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign In</a>
@@ -1201,9 +1202,11 @@ global.Chessground = Nr;
 <!-- Mobile menu drawer -->
 <div class="mobile-menu" id="mobile-menu">
   <a onclick="navTo('/')">Home</a>
+  <a onclick="navTo('/play')">vs Bot</a>
   <a onclick="navTo('/multiplayer')">Live</a>
   <a onclick="navTo('/tournaments')">Tournaments</a>
   <a onclick="navTo('/leaderboard')">Leaderboard</a>
+  <a onclick="navTo('/puzzles')">Puzzles</a>
   <a onclick="navTo('/history')">My Games</a>
   <a onclick="navTo('/profile')">Profile</a>
   <a id="mob-signin-idx" onclick="closeMenuThenAuth()" style="display:none;">Sign In</a>

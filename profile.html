@@ -134,13 +134,6 @@
       box-shadow: 0 2px 12px rgba(0,0,0,0.5);
     }
     .medal-item:hover .medal-img { transform: scale(1.08); }
-    .medal-item.pioneer-badge .medal-img {
-      border-radius: 50%;
-      box-shadow: 0 0 0 2px #d4af37, 0 4px 18px rgba(212,175,55,0.35);
-    }
-    .medal-item.pioneer-badge .medal-label {
-      color: #d4af37;
-    }
     .medal-count {
       position: absolute; top: -4px; right: 6px;
       background: var(--green); color: #000;
@@ -280,7 +273,6 @@
     <a href="/multiplayer">Live</a>
     <a href="/tournaments">Tournaments</a>
     <a href="/leaderboard">Leaderboard</a>
-    <a href="/puzzles">Puzzles</a>
     <a href="/history">History</a>
     <a href="/profile" style="color:var(--green)">Profile</a>
     <a id="nav-signin" onclick="openAuth()" style="display:none;cursor:pointer;">Sign In</a>
@@ -298,7 +290,6 @@
   <a href="/multiplayer" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Live</a>
   <a href="/tournaments" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Tournaments</a>
   <a href="/leaderboard" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Leaderboard</a>
-  <a href="/puzzles" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Puzzles</a>
   <a href="/history" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">History</a>
   <a href="/profile" style="color:var(--green);text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Profile</a>
   <a id="mob-signin" onclick="toggleMobileNav();openAuth();" style="display:none;color:#00ff9d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;cursor:pointer;">Sign In</a>
@@ -397,7 +388,6 @@ async function loadMedals() {
 }
 
 const MEDAL_IMG = {
-  pioneer:  '/img/medals/pioneer_200.jpg',
   bronze:   '/img/medals/bronze_200.jpg',
   silver:   '/img/medals/silver_200.jpg',
   gold:     '/img/medals/gold_200.jpg',
@@ -405,7 +395,6 @@ const MEDAL_IMG = {
   diamond:  '/img/medals/diamond_200.jpg',
 };
 const MEDAL_LABEL = {
-  pioneer:  '1st 100 Founder',
   bronze: 'Bronze Lion', silver: 'Silver Lion', gold: 'Gold Lion',
   platinum: 'Platinum Lion', diamond: 'Diamond Lion',
 };
@@ -423,8 +412,8 @@ function renderMedals(medals, el) {
     groups[m.id].push(m);
   });
 
-  // Order: pioneer (founder) → diamond → platinum → gold → silver → bronze
-  const order = ['pioneer', 'diamond', 'platinum', 'gold', 'silver', 'bronze'];
+  // Order: diamond → platinum → gold → silver → bronze
+  const order = ['diamond', 'platinum', 'gold', 'silver', 'bronze'];
   let html = '<div class="medal-grid">';
   order.forEach(id => {
     if (!groups[id]) return;
@@ -434,7 +423,7 @@ function renderMedals(medals, el) {
     const tooltipLines = list.slice(-3).reverse()
       .map(m => `<div style="margin-bottom:3px;">${m.reason || id}</div>`).join('');
     html += `
-      <div class="medal-item${id === 'pioneer' ? ' pioneer-badge' : ''}">
+      <div class="medal-item">
         ${count > 1 ? `<div class="medal-count">×${count}</div>` : ''}
         <img class="medal-img" src="${MEDAL_IMG[id]}" alt="${MEDAL_LABEL[id]}" loading="lazy">
         <div class="medal-label">${MEDAL_LABEL[id]}</div>

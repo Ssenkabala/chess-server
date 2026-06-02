@@ -134,6 +134,13 @@
       box-shadow: 0 2px 12px rgba(0,0,0,0.5);
     }
     .medal-item:hover .medal-img { transform: scale(1.08); }
+    .medal-item.pioneer-badge .medal-img {
+      border-radius: 50%;
+      box-shadow: 0 0 0 2px #d4af37, 0 4px 18px rgba(212,175,55,0.35);
+    }
+    .medal-item.pioneer-badge .medal-label {
+      color: #d4af37;
+    }
     .medal-count {
       position: absolute; top: -4px; right: 6px;
       background: var(--green); color: #000;
@@ -390,6 +397,7 @@ async function loadMedals() {
 }
 
 const MEDAL_IMG = {
+  pioneer:  '/img/medals/pioneer_200.jpg',
   bronze:   '/img/medals/bronze_200.jpg',
   silver:   '/img/medals/silver_200.jpg',
   gold:     '/img/medals/gold_200.jpg',
@@ -397,6 +405,7 @@ const MEDAL_IMG = {
   diamond:  '/img/medals/diamond_200.jpg',
 };
 const MEDAL_LABEL = {
+  pioneer:  '1st 100 Founder',
   bronze: 'Bronze Lion', silver: 'Silver Lion', gold: 'Gold Lion',
   platinum: 'Platinum Lion', diamond: 'Diamond Lion',
 };
@@ -414,8 +423,8 @@ function renderMedals(medals, el) {
     groups[m.id].push(m);
   });
 
-  // Order: diamond → platinum → gold → silver → bronze
-  const order = ['diamond', 'platinum', 'gold', 'silver', 'bronze'];
+  // Order: pioneer (founder) → diamond → platinum → gold → silver → bronze
+  const order = ['pioneer', 'diamond', 'platinum', 'gold', 'silver', 'bronze'];
   let html = '<div class="medal-grid">';
   order.forEach(id => {
     if (!groups[id]) return;
@@ -425,7 +434,7 @@ function renderMedals(medals, el) {
     const tooltipLines = list.slice(-3).reverse()
       .map(m => `<div style="margin-bottom:3px;">${m.reason || id}</div>`).join('');
     html += `
-      <div class="medal-item">
+      <div class="medal-item${id === 'pioneer' ? ' pioneer-badge' : ''}">
         ${count > 1 ? `<div class="medal-count">×${count}</div>` : ''}
         <img class="medal-img" src="${MEDAL_IMG[id]}" alt="${MEDAL_LABEL[id]}" loading="lazy">
         <div class="medal-label">${MEDAL_LABEL[id]}</div>

@@ -66,11 +66,13 @@ if _puzzle_router_loaded and puzzle_router:
 
 MEDAL_TIERS = {
     # Awarded for 1st place wins — tier escalates with total wins
-    "bronze":   {"label": "Bronze Lion",   "img": "bronze"},
-    "silver":   {"label": "Silver Lion",   "img": "silver"},
-    "gold":     {"label": "Gold Lion",     "img": "gold"},
-    "platinum": {"label": "Platinum Lion", "img": "platinum"},
-    "diamond":  {"label": "Diamond Lion",  "img": "diamond"},
+    "bronze":   {"label": "Bronze Lion",    "img": "bronze"},
+    "silver":   {"label": "Silver Lion",    "img": "silver"},
+    "gold":     {"label": "Gold Lion",      "img": "gold"},
+    "platinum": {"label": "Platinum Lion",  "img": "platinum"},
+    "diamond":  {"label": "Diamond Lion",   "img": "diamond"},
+    # Special founder badge — awarded to 1st 100 registered users
+    "pioneer":  {"label": "1st 100 Founder", "img": "pioneer"},
 }
 
 async def award_medals(user_id: str, finish_pos: int, tournament_id: str,
@@ -190,6 +192,68 @@ async def award_medals(user_id: str, finish_pos: int, tournament_id: str,
     )
     print(f"[medals] {user_id} pos={finish_pos}: {[m['id'] for m in new_medals]}", flush=True)
     return new_medals
+
+
+async def grant_pioneer_medal(user_id: str, client) -> bool:
+    """
+    Award the '1st 100 Founder' badge if:
+      - the platform has <= 100 registered profiles, AND
+      - this user doesn't already have it.
+    Returns True if a new medal was awarded.
+    Called lazily from /api/profile/{user_id} so it is idempotent.
+    """
+    count_r = await client.get(
+        f"{SUPABASE_URL}/rest/v1/profiles",
+        params={"select": "count"},
+        headers={
+            "apikey":        SUPABASE_SERVICE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            "Prefer":        "count=exact",
+            "Range":         "0-0",
+        }
+    )
+    total_users = int(count_r.headers.get("content-range", "0/0").split("/")[-1] or 9999)
+    if total_users > 100:
+        return False
+
+    profile_r = await client.get(
+        f"{SUPABASE_URL}/rest/v1/profiles",
+        params={"user_id": f"eq.{user_id}", "select": "medals"},
+        headers={"apikey": SUPABASE_SERVICE_KEY,
+                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+    )
+    rows = profile_r.json()
+    if not rows:
+        return False
+
+    current_medals: list = rows[0].get("medals") or []
+    if any(m.get("id") == "pioneer" for m in current_medals):
+        return False   # already awarded
+
+    now = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+    pioneer_medal = {
+        "id":         "pioneer",
+        "label":      "1st 100 Founder",
+        "img":        "pioneer",
+        "reason":     f"Among the first {total_users} players to join AfriChess",
+        "tag":        "founder",
+        "awarded_at": now,
+    }
+    updated_medals = current_medals + [pioneer_medal]
+
+    await client.patch(
+        f"{SUPABASE_URL}/rest/v1/profiles",
+        params={"user_id": f"eq.{user_id}"},
+        headers={
+            "apikey":        SUPABASE_SERVICE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            "Content-Type":  "application/json",
+            "Prefer":        "return=minimal",
+        },
+        json={"medals": updated_medals}
+    )
+    print(f"[medals] pioneer badge awarded to {user_id} (user #{total_users})", flush=True)
+    return True
 
 # Tournament race condition guard
 _tournament_locks: set = set()
@@ -2207,6 +2271,9 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
             headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
         games = r2.json()
+
+        # ── Pioneer badge: award lazily on profile load (idempotent) ──
+        asyncio.create_task(grant_pioneer_medal(user_id, client))
 
     # Compute stats
     wins = sum(1 for g in games if g.get("result") == g.get("player_color"))

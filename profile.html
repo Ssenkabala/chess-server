@@ -155,15 +155,18 @@
       padding: 8px 0; line-height: 1.6;
     }
     .medal-tooltip {
+      display: none;
       position: absolute; bottom: calc(100% + 8px); left: 50%;
       transform: translateX(-50%);
-      background: #1a1a1a; border: 1px solid #2a2a2a;
-      border-radius: 4px; padding: 8px 10px;
+      background: #1a1a1a; border: 1px solid #333;
+      border-radius: 4px; padding: 8px 12px;
       font-size: 11px; color: #ccc; white-space: nowrap;
-      z-index: 50; pointer-events: none; opacity: 0;
-      transition: opacity 0.15s; min-width: 160px; text-align: left;
+      z-index: 50; pointer-events: none;
+      min-width: 180px; max-width: 240px;
+      white-space: normal; line-height: 1.5; text-align: left;
     }
-    .medal-item:hover .medal-tooltip { opacity: 1; }
+    .medal-item:hover .medal-tooltip,
+    .medal-item.tooltip-open .medal-tooltip { display: block; }
 
     /* ── ELO chart ── */
     .chart-wrap { position: relative; height: 180px; }
@@ -425,18 +428,25 @@ function renderMedals(medals, el) {
     const tooltipLines = list.slice(-3).reverse()
       .map(m => `<div style="margin-bottom:3px;">${m.reason || id}</div>`).join('');
     html += `
-      <div class="medal-item${id === 'pioneer' ? ' pioneer-badge' : ''}">
+      <div class="medal-item${id === 'pioneer' ? ' pioneer-badge' : ''}" onclick="this.classList.toggle('tooltip-open')">
         ${count > 1 ? `<div class="medal-count">×${count}</div>` : ''}
         <img class="medal-img" src="${MEDAL_IMG[id]}" alt="${MEDAL_LABEL[id]}" loading="lazy">
         <div class="medal-label">${MEDAL_LABEL[id]}</div>
         <div class="medal-tooltip">
-          <div style="color:#00ff9d;font-weight:bold;margin-bottom:4px;">${MEDAL_LABEL[id]} ×${count}</div>
+          <div style="color:#00ff9d;font-weight:bold;margin-bottom:4px;">${MEDAL_LABEL[id]}${count > 1 ? ' ×' + count : ''}</div>
           ${tooltipLines}
         </div>
       </div>`;
   });
   html += '</div>';
   el.innerHTML = html;
+  // Close tooltips when clicking outside
+  document.addEventListener('click', function closeTips(e) {
+    if (!e.target.closest('.medal-item')) {
+      document.querySelectorAll('.medal-item.tooltip-open')
+        .forEach(el => el.classList.remove('tooltip-open'));
+    }
+  }, { capture: true });
 }
 
 async function loadProfile() {

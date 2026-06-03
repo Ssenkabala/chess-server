@@ -90,7 +90,7 @@
       .replay-panel { display:none; }
       .replay-panel.mobile-active { display:flex; position:fixed; inset:0; z-index:100;
         background:var(--bg); overflow-y:auto; padding-top:48px; }
-      .mobile-back-btn { display:flex !important; }
+      /* mobile-back-btn visibility now controlled by JS in openReplay/closeMobileReplay */
     }
 
     /* ── Game list ── */
@@ -386,9 +386,11 @@ coords.squares:nth-of-type(even) :nth-child(even) {
     </div>
   </div>
 
+  <!-- Mobile back button — OUTSIDE replay panel so position:fixed works correctly -->
+  <div class="mobile-back-btn" id="mobile-back" onclick="closeMobileReplay()" style="display:none;">← Back to games</div>
+
   <!-- Replay panel -->
   <div class="replay-panel" id="replay-panel">
-    <div class="mobile-back-btn" id="mobile-back" onclick="closeMobileReplay()">← Back to games</div>
 
     <div class="replay-empty" id="replay-empty">
       <div class="replay-empty-icon">♟</div>
@@ -767,9 +769,11 @@ function openReplay(id) {
   replayMoves = parsePgnToMoves(g.pgn);
   console.log('[history] Parsed', replayMoves.length, 'moves from game', g.id, '| PGN sample:', (g.pgn||'').slice(0,60));
 
-  // Mobile: show replay panel fullscreen
+  // Mobile: show replay panel fullscreen and show back button
   const replayPanel = document.getElementById('replay-panel');
   replayPanel.classList.add('mobile-active');
+  const mobileBack = document.getElementById('mobile-back');
+  if (mobileBack) mobileBack.style.display = 'flex';
 
   // Show UI
   ['replay-header-top','board-outer','replay-header-bot','replay-controls','move-list-wrap','pgn-wrap']
@@ -927,6 +931,8 @@ function copyPGN() {
 function closeMobileReplay() {
   stopAutoPlay();
   document.getElementById('replay-panel').classList.remove('mobile-active');
+  const mobileBack = document.getElementById('mobile-back');
+  if (mobileBack) mobileBack.style.display = 'none';
 }
 
 document.addEventListener('keydown', e => {

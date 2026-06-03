@@ -1005,7 +1005,12 @@ global.Chessground = Nr;
 
   <!-- ══ GAME OVER OVERLAY ══ — Lichess-style rounded card -->
   <div class="overlay" id="overlay">
-    <div class="result-card">
+    <div class="result-card" style="position:relative;">
+      <!-- Close button -->
+      <button onclick="document.getElementById('overlay').classList.remove('active')"
+        style="position:absolute;top:8px;right:10px;background:none;border:none;color:#555;
+               font-size:18px;cursor:pointer;line-height:1;padding:2px 6px;"
+        title="Close">✕</button>
       <!-- Score e.g. "1-0" or "½-½" -->
       <div class="result-score" id="result-score">½-½</div>
       <!-- Reason e.g. "White didn't move · Black is victorious" -->
@@ -1636,6 +1641,15 @@ function onGameMessage(e) {
       scEl.textContent = (change >= 0 ? '+' : '') + change;
       scEl.className = 'player-score-change ' + (change >= 0 ? 'up' : 'down');
     }
+    // Also update overlay if it is already showing (elo_update can arrive after gameover)
+    const rdStr = msg.rd ? ` (RD ${Math.round(msg.rd)})` : '';
+    const overlayEloEl = document.getElementById('result-elo-change');
+    if (overlayEloEl) {
+      const sign = change >= 0 ? '+' : '';
+      const cls  = change >= 0 ? 'up' : 'down';
+      overlayEloEl.innerHTML = `<span class="${cls}">${sign}${change}</span> ${msg.category || ''} ELO${rdStr}`;
+      overlayEloEl.style.display = '';
+    }
     return;
   }
 
@@ -1989,15 +2003,18 @@ function showOverlay(result, reason) {
 
   updateSessionScore(result);
 
-  // Show ELO change if available
-  if (myEloChange !== null) {
-    const eloEl = document.getElementById('result-elo-change');
-    if (eloEl) {
-      const sign  = myEloChange >= 0 ? '+' : '';
-      const cls   = myEloChange >= 0 ? 'up' : 'down';
-      eloEl.innerHTML = `ELO: <span class="${cls}">${sign}${myEloChange}</span>`;
-      eloEl.style.display = '';
-    }
+  // Show ELO change if available (elo_update may not have arrived yet — that's OK,
+  // the elo_update handler will update the overlay element when it arrives)
+  const overlayEloEl = document.getElementById('result-elo-change');
+  if (overlayEloEl && myEloChange !== null) {
+    const sign = myEloChange >= 0 ? '+' : '';
+    const cls  = myEloChange >= 0 ? 'up' : 'down';
+    overlayEloEl.innerHTML = `<span class="${cls}">${sign}${myEloChange}</span> ELO`;
+    overlayEloEl.style.display = '';
+  } else if (overlayEloEl) {
+    // Show placeholder — elo_update will fill it in
+    overlayEloEl.innerHTML = `<span style="color:#555">Calculating ELO…</span>`;
+    overlayEloEl.style.display = '';
   }
 
   if (window._tournamentId) {

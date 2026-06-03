@@ -388,6 +388,7 @@ async function loadMedals() {
 }
 
 const MEDAL_IMG = {
+  pioneer:  '/img/medals/pioneer_200.jpg',
   bronze:   '/img/medals/bronze_200.jpg',
   silver:   '/img/medals/silver_200.jpg',
   gold:     '/img/medals/gold_200.jpg',
@@ -395,6 +396,7 @@ const MEDAL_IMG = {
   diamond:  '/img/medals/diamond_200.jpg',
 };
 const MEDAL_LABEL = {
+  pioneer: '1st 100 Founder',
   bronze: 'Bronze Lion', silver: 'Silver Lion', gold: 'Gold Lion',
   platinum: 'Platinum Lion', diamond: 'Diamond Lion',
 };
@@ -412,8 +414,8 @@ function renderMedals(medals, el) {
     groups[m.id].push(m);
   });
 
-  // Order: diamond → platinum → gold → silver → bronze
-  const order = ['diamond', 'platinum', 'gold', 'silver', 'bronze'];
+  // Order: pioneer (founder) → diamond → platinum → gold → silver → bronze
+  const order = ['pioneer', 'diamond', 'platinum', 'gold', 'silver', 'bronze'];
   let html = '<div class="medal-grid">';
   order.forEach(id => {
     if (!groups[id]) return;
@@ -423,7 +425,7 @@ function renderMedals(medals, el) {
     const tooltipLines = list.slice(-3).reverse()
       .map(m => `<div style="margin-bottom:3px;">${m.reason || id}</div>`).join('');
     html += `
-      <div class="medal-item">
+      <div class="medal-item${id === 'pioneer' ? ' pioneer-badge' : ''}">
         ${count > 1 ? `<div class="medal-count">×${count}</div>` : ''}
         <img class="medal-img" src="${MEDAL_IMG[id]}" alt="${MEDAL_LABEL[id]}" loading="lazy">
         <div class="medal-label">${MEDAL_LABEL[id]}</div>
@@ -465,20 +467,25 @@ function renderProfile(d) {
       <div class="avatar">${initials}</div>
       <div class="profile-info">
         <div class="profile-username">${d.username || 'Unknown'}</div>
-        <div style="display:flex;gap:20px;margin:8px 0;flex-wrap:wrap;">
+        <div style="display:flex;gap:14px;margin:8px 0;flex-wrap:wrap;">
           <div>
-            <div style="font-size:11px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Bullet</div>
-            <div class="profile-elo" style="font-size:22px;">${d.elo_bullet || 1500}</div>
+            <div style="font-size:10px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Bullet</div>
+            <div class="profile-elo" style="font-size:20px;">${d.elo_bullet || 1500}</div>
           </div>
-          <div style="border-left:1px solid var(--border);margin:0 4px;"></div>
+          <div style="border-left:1px solid var(--border);margin:0 2px;"></div>
           <div>
-            <div style="font-size:11px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Blitz</div>
-            <div class="profile-elo" style="font-size:22px;">${d.elo_blitz || 1500}</div>
+            <div style="font-size:10px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Blitz</div>
+            <div class="profile-elo" style="font-size:20px;">${d.elo_blitz || 1500}</div>
           </div>
-          <div style="border-left:1px solid var(--border);margin:0 4px;"></div>
+          <div style="border-left:1px solid var(--border);margin:0 2px;"></div>
           <div>
-            <div style="font-size:11px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Rapid</div>
-            <div class="profile-elo" style="font-size:22px;">${d.elo_rapid || 1500}</div>
+            <div style="font-size:10px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Rapid</div>
+            <div class="profile-elo" style="font-size:20px;">${d.elo_rapid || 1500}</div>
+          </div>
+          <div style="border-left:1px solid var(--border);margin:0 2px;"></div>
+          <div>
+            <div style="font-size:10px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Classical</div>
+            <div class="profile-elo" style="font-size:20px;">${d.elo_classical || 1500}</div>
           </div>
         </div>
         ${since ? `<div class="profile-since">Member since ${since}</div>` : ''}
@@ -574,20 +581,23 @@ function renderProfile(d) {
 
     <!-- ELO Ratings -->
     <div class="section">
-      <div class="section-header">Ratings</div>
+      <div class="section-header">Rating History</div>
       <div class="section-body">
-        <div style="display:flex;gap:8px;margin-bottom:16px;" id="elo-tabs">
-          <button onclick="switchEloTab('blitz',this)" style="padding:6px 14px;background:#00ff9d;color:#000;border:none;border-radius:3px;font-size:11px;letter-spacing:0.1em;cursor:pointer;font-family:Georgia,serif;">BLITZ</button>
-          <button onclick="switchEloTab('bullet',this)" style="padding:6px 14px;background:#1a1a1a;color:#555;border:1px solid #222;border-radius:3px;font-size:11px;letter-spacing:0.1em;cursor:pointer;font-family:Georgia,serif;">BULLET</button>
-          <button onclick="switchEloTab('rapid',this)" style="padding:6px 14px;background:#1a1a1a;color:#555;border:1px solid #222;border-radius:3px;font-size:11px;letter-spacing:0.1em;cursor:pointer;font-family:Georgia,serif;">RAPID</button>
+        <!-- Legend -->
+        <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:14px;font-size:11px;letter-spacing:0.1em;">
+          <span style="color:#00ff9d;">&#9644; Bullet</span>
+          <span style="color:#f9a825;">&#9644; Blitz</span>
+          <span style="color:#29b6f6;">&#9644; Rapid</span>
+          <span style="color:#ce93d8;">&#9644; Classical</span>
         </div>
-        <div id="elo-rating-display" style="font-size:36px;color:var(--green);font-weight:bold;margin-bottom:4px;">${d.elo_blitz || 1500}</div>
-        <div id="elo-rating-label" style="font-size:11px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:16px;">Blitz ELO</div>
-        ${d.elo_history.length > 1 ? `
-        <div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">Rating History (Blitz)</div>
-        <div class="chart-wrap">
-          <canvas id="elo-chart"></canvas>
-        </div>` : '<div style="font-size:12px;color:var(--muted);">Play more rated games to see your rating history.</div>'}
+        <div id="multi-chart-area">
+          <div class="chart-wrap" style="height:220px;">
+            <canvas id="elo-chart"></canvas>
+          </div>
+        </div>
+        <div id="chart-empty" style="display:none;font-size:12px;color:var(--muted);padding:8px 0;">
+          Play rated games to see your rating history.
+        </div>
       </div>
     </div>
 
@@ -634,41 +644,97 @@ function renderProfile(d) {
     </div>` : ''}
   `;
 
-  // Draw ELO chart
-  if (d.elo_history.length > 1) {
-    const ctx = document.getElementById('elo-chart').getContext('2d');
-    eloChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: d.elo_history.map(e => e.date),
-        datasets: [{
-          data: d.elo_history.map(e => e.elo),
-          borderColor: '#00ff9d',
-          backgroundColor: 'rgba(0,255,157,0.05)',
-          borderWidth: 2,
-          pointRadius: 3,
-          pointBackgroundColor: '#00ff9d',
-          tension: 0.3,
-          fill: true,
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: {
-            ticks: { color: '#555', font: { size: 10 }, maxRotation: 0, maxTicksLimit: 6 },
-            grid: { color: '#1a1a1a' }
-          },
-          y: {
-            ticks: { color: '#555', font: { size: 10 } },
-            grid: { color: '#1a1a1a' }
-          }
-        }
-      }
+  // Draw multi-line ELO chart (all time controls on one graph)
+  drawMultiEloChart(d.tc_histories || {});
+}
+
+function drawMultiEloChart(tcHistories) {
+  if (eloChart) { eloChart.destroy(); eloChart = null; }
+
+  const TC_STYLES = {
+    bullet:    { color: '#00ff9d', dash: [],        label: 'Bullet'    },
+    blitz:     { color: '#f9a825', dash: [],        label: 'Blitz'     },
+    rapid:     { color: '#29b6f6', dash: [6, 3],    label: 'Rapid'     },
+    classical: { color: '#ce93d8', dash: [2, 4],    label: 'Classical' },
+  };
+
+  // Build a merged, sorted label set across all TCs
+  const allDates = new Set();
+  for (const tc of Object.keys(TC_STYLES)) {
+    for (const p of (tcHistories[tc] || [])) allDates.add(p.date);
+  }
+  const labels = [...allDates].sort();
+
+  const datasets = [];
+  let hasAnyData = false;
+
+  for (const [tc, style] of Object.entries(TC_STYLES)) {
+    const pts = tcHistories[tc] || [];
+    if (pts.length < 2) continue;   // need at least 2 points to draw a line
+    hasAnyData = true;
+
+    // Map date → elo; for dates where TC has no game, interpolate (null = gap)
+    const dateMap = Object.fromEntries(pts.map(p => [p.date, p.elo]));
+    const data = labels.map(d => dateMap[d] !== undefined ? dateMap[d] : null);
+
+    datasets.push({
+      label:              style.label,
+      data,
+      borderColor:        style.color,
+      backgroundColor:    'transparent',
+      borderWidth:        2,
+      borderDash:         style.dash,
+      pointRadius:        3,
+      pointBackgroundColor: style.color,
+      tension:            0.3,
+      spanGaps:           false,   // don't connect across gaps
     });
   }
+
+  const emptyEl = document.getElementById('chart-empty');
+  const chartArea = document.getElementById('multi-chart-area');
+
+  if (!hasAnyData) {
+    if (chartArea) chartArea.style.display = 'none';
+    if (emptyEl)   emptyEl.style.display   = '';
+    return;
+  }
+  if (chartArea) chartArea.style.display = '';
+  if (emptyEl)   emptyEl.style.display   = 'none';
+
+  const ctx = document.getElementById('elo-chart').getContext('2d');
+  eloChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive:          true,
+      maintainAspectRatio: false,
+      interaction:         { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },   // we draw our own legend above
+        tooltip: {
+          backgroundColor: '#161616',
+          borderColor:     '#333',
+          borderWidth:     1,
+          titleColor:      '#e8e6e0',
+          bodyColor:       '#aaa',
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#555', font: { size: 10 }, maxRotation: 0, maxTicksLimit: 8 },
+          grid:  { color: '#1a1a1a' }
+        },
+        y: {
+          ticks: { color: '#555', font: { size: 10 } },
+          grid:  { color: '#1a1a1a' }
+        }
+      }
+    }
+  });
 }
 
 function renderGameRow(g) {
@@ -714,24 +780,7 @@ function formatOpponent(opponent) {
 
 let _profileData = null;
 
-function switchEloTab(cat, btn) {
-  // Update button styles
-  document.querySelectorAll('#elo-tabs button').forEach(b => {
-    b.style.background = '#1a1a1a';
-    b.style.color = '#555';
-    b.style.border = '1px solid #222';
-  });
-  btn.style.background = '#00ff9d';
-  btn.style.color = '#000';
-  btn.style.border = 'none';
-
-  if (!_profileData) return;
-  const d = _profileData;
-  const map = { bullet: d.elo_bullet||1500, blitz: d.elo_blitz||1500, rapid: d.elo_rapid||1500 };
-  const labels = { bullet: 'Bullet', blitz: 'Blitz', rapid: 'Rapid' };
-  document.getElementById('elo-rating-display').textContent = map[cat];
-  document.getElementById('elo-rating-label').textContent = labels[cat] + ' ELO';
-}
+// switchEloTab removed — now using multi-line chart
 
 // Country code → flag + name map for locked display
 const COUNTRY_NAMES = {

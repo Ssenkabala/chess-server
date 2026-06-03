@@ -58,8 +58,6 @@ MEDAL_TIERS = {
     "gold":     {"label": "Gold Lion",     "img": "gold"},
     "platinum": {"label": "Platinum Lion", "img": "platinum"},
     "diamond":  {"label": "Diamond Lion",  "img": "diamond"},
-    # Special founder badge — awarded to 1st 100 registered users
-    "pioneer":  {"label": "1st 100 Founder", "img": "pioneer"},
 }
 
 async def award_medals(user_id: str, finish_pos: int, tournament_id: str,
@@ -182,27 +180,17 @@ async def award_medals(user_id: str, finish_pos: int, tournament_id: str,
 
 
 async def grant_pioneer_medal(user_id: str, client) -> bool:
-    """
-    Award the '1st 100 Founder' badge if:
-      - the platform has <= 100 registered profiles, AND
-      - this user doesn't already have it.
-    Returns True if a new medal was awarded.
-    Called lazily from /api/profile/{user_id} so it is idempotent.
-    """
+    """Award '1st 100 Founder' badge to players who joined when total users <= 100."""
     count_r = await client.get(
         f"{SUPABASE_URL}/rest/v1/profiles",
         params={"select": "count"},
-        headers={
-            "apikey":        SUPABASE_SERVICE_KEY,
-            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-            "Prefer":        "count=exact",
-            "Range":         "0-0",
-        }
+        headers={"apikey": SUPABASE_SERVICE_KEY,
+                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                 "Prefer": "count=exact", "Range": "0-0"}
     )
     total_users = int(count_r.headers.get("content-range", "0/0").split("/")[-1] or 9999)
     if total_users > 100:
         return False
-
     profile_r = await client.get(
         f"{SUPABASE_URL}/rest/v1/profiles",
         params={"user_id": f"eq.{user_id}", "select": "medals"},
@@ -212,32 +200,19 @@ async def grant_pioneer_medal(user_id: str, client) -> bool:
     rows = profile_r.json()
     if not rows:
         return False
-
-    current_medals: list = rows[0].get("medals") or []
+    current_medals = rows[0].get("medals") or []
     if any(m.get("id") == "pioneer" for m in current_medals):
-        return False   # already awarded
-
+        return False
     now = __import__("datetime").datetime.utcnow().isoformat() + "Z"
-    pioneer_medal = {
-        "id":         "pioneer",
-        "label":      "1st 100 Founder",
-        "img":        "pioneer",
-        "reason":     f"Among the first {total_users} players to join AfriChess",
-        "tag":        "founder",
-        "awarded_at": now,
-    }
-    updated_medals = current_medals + [pioneer_medal]
-
     await client.patch(
         f"{SUPABASE_URL}/rest/v1/profiles",
         params={"user_id": f"eq.{user_id}"},
-        headers={
-            "apikey":        SUPABASE_SERVICE_KEY,
-            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-            "Content-Type":  "application/json",
-            "Prefer":        "return=minimal",
-        },
-        json={"medals": updated_medals}
+        headers={"apikey": SUPABASE_SERVICE_KEY,
+                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                 "Content-Type": "application/json", "Prefer": "return=minimal"},
+        json={"medals": current_medals + [{"id": "pioneer", "label": "1st 100 Founder",
+              "img": "pioneer", "reason": f"Among the first {total_users} players to join AfriChess",
+              "tag": "founder", "awarded_at": now}]}
     )
     print(f"[medals] pioneer badge awarded to {user_id} (user #{total_users})", flush=True)
     return True
@@ -345,8 +320,9 @@ async def check_prize_eligibility(user_id: str, client: httpx.AsyncClient):
             f"You need at least 10 rated games to enter prize tournaments "
             f"(you have {games_played}). Play some ranked games first!")
 
-async def supabase_update_elo(user_id: str, new_elo: int, time_control: str | None = None):
-    """Update the correct ELO column and increment games_played."""
+async def supabase_update_elo(user_id: str, new_elo: int, time_control: str | None = None,
+                              rd: float | None = None, sigma: float | None = None):
+    """Update the correct ELO column, Glicko-2 rd/sigma, and increment games_played."""
     if not SUPABASE_SERVICE_KEY:
         return
     col = elo_col_for_tc(time_control)
@@ -359,6 +335,9 @@ async def supabase_update_elo(user_id: str, new_elo: int, time_control: str | No
         )
         rows = r.json()
         current_gp = rows[0].get("games_played", 0) if rows else 0
+        patch: dict = {col: new_elo, "games_played": current_gp + 1}
+        if rd    is not None: patch["rd"]    = rd
+        if sigma is not None: patch["sigma"] = sigma
         await client.patch(
             f"{SUPABASE_URL}/rest/v1/profiles",
             params={"user_id": f"eq.{user_id}"},
@@ -368,7 +347,7 @@ async def supabase_update_elo(user_id: str, new_elo: int, time_control: str | No
                 "Content-Type": "application/json",
                 "Prefer": "return=minimal",
             },
-            json={col: new_elo, "games_played": current_gp + 1}
+            json=patch
         )
 
 # ΓöÇΓöÇΓöÇ Database setup ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -784,59 +763,122 @@ tournament_player_game: dict = {}
 
 # ΓöÇΓöÇΓöÇ ELO calculation ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
-def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str,
-             time_control: str | None = None) -> int:
-    """
-    Standard ELO with K-factor adjusted by time control and rating level.
-    winner_color: 'white' | 'black' | 'draw'
-    """
-    if winner_color == 'draw':
-        score = 0.5
-    elif winner_color == my_color:
-        score = 1.0
-    else:
-        score = 0.0
+# ── Glicko-2 rating system (Lichess-style, mu-space correct) ─────────────────
+import math as _math
 
-    expected = 1 / (1 + 10 ** ((opp_elo - my_elo) / 400))
-    k = k_factor(time_control, my_elo)
-    new_elo = round(my_elo + k * (score - expected))
-    return max(100, new_elo)
+# Glicko-2 converts ratings to mu-space before all calculations:
+#   mu  = (r  - 1500) / 173.7178
+#   phi = RD / 173.7178
+# then converts back after.  This matches the Glickman (2012) paper exactly.
+#
+# Supabase migration required (run once):
+#   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS rd    FLOAT DEFAULT 350;
+#   ALTER TABLE profiles ADD COLUMN IF NOT EXISTS sigma FLOAT DEFAULT 0.06;
+
+_GLICKO_SCALE = 173.7178
+_GLICKO_TAU   = 0.5      # volatility change constraint (Lichess default)
+_GLICKO_EPS   = 1e-6     # convergence tolerance
+
+
+def _g(phi: float) -> float:
+    """Glicko-2 g function (phi is RD in mu-space, i.e. RD/173.7178)."""
+    return 1.0 / _math.sqrt(1 + 3 * phi**2 / _math.pi**2)
+
+
+def _E(mu: float, mu_j: float, phi_j: float) -> float:
+    """Expected score in mu-space."""
+    return 1.0 / (1 + _math.exp(-_g(phi_j) * (mu - mu_j)))
+
+
+def calc_glicko2(
+    my_elo: int, my_rd: float, my_sigma: float,
+    opp_elo: int, opp_rd: float,
+    my_color: str, winner_color: str,
+) -> tuple[int, float, float]:
+    """
+    One-game Glicko-2 update (Glickman 2012, Appendix example verified).
+    Returns (new_elo, new_rd, new_sigma).
+
+    New players  (rd=350): large swings ±100-160, rd shrinks quickly
+    Established  (rd=45):  small precise adjustments ±5-20
+    """
+    s = 0.5 if winner_color == "draw" else (1.0 if winner_color == my_color else 0.0)
+
+    # Convert to mu-space
+    mu    = (my_elo  - 1500) / _GLICKO_SCALE
+    phi   = my_rd    / _GLICKO_SCALE
+    mu_j  = (opp_elo - 1500) / _GLICKO_SCALE
+    phi_j = opp_rd   / _GLICKO_SCALE
+    sig   = my_sigma
+
+    g_j   = _g(phi_j)
+    E_val = _E(mu, mu_j, phi_j)
+    v     = 1.0 / (g_j**2 * E_val * (1 - E_val))
+    delta = v * g_j * (s - E_val)
+
+    # Illinois algorithm — update sigma
+    a = _math.log(sig**2)
+
+    def f(x: float) -> float:
+        ex  = _math.exp(x)
+        num = ex * (delta**2 - phi**2 - v - ex)
+        den = 2.0 * (phi**2 + v + ex)**2
+        return num / den - (x - a) / (_GLICKO_TAU**2)
+
+    A = a
+    if delta**2 > phi**2 + v:
+        B = _math.log(delta**2 - phi**2 - v)
+    else:
+        k = 1
+        while f(a - k * _GLICKO_TAU) < 0:
+            k += 1
+        B = a - k * _GLICKO_TAU
+
+    fA, fB = f(A), f(B)
+    for _ in range(200):
+        C  = A + (A - B) * fA / (fB - fA)
+        fC = f(C)
+        if fB * fC < 0: A, fA = B, fB
+        else:           fA /= 2
+        B, fB = C, fC
+        if abs(B - A) < _GLICKO_EPS:
+            break
+
+    new_sigma = _math.exp(A / 2)
+    phi_star  = _math.sqrt(phi**2 + new_sigma**2)
+    new_phi   = _math.sqrt(1.0 / (1.0 / phi_star**2 + 1.0 / v))
+    new_mu    = mu + new_phi**2 * g_j * (s - E_val)
+
+    # Convert back to Elo scale and clamp
+    new_elo = max(100.0, 1500 + _GLICKO_SCALE * new_mu)
+    new_rd  = max(45.0, min(350.0, _GLICKO_SCALE * new_phi))
+
+    return round(new_elo), round(new_rd, 2), round(new_sigma, 6)
+
+
+
+def calc_elo(my_elo: int, opp_elo: int, my_color: str, winner_color: str,
+             time_control: str | None = None,
+             my_rd: float = 200.0, opp_rd: float = 200.0,
+             my_sigma: float = 0.06) -> int:
+    """Convenience wrapper — returns new ELO only. Internally uses Glicko-2."""
+    new_elo, _, _ = calc_glicko2(my_elo, my_rd, my_sigma, opp_elo, opp_rd, my_color, winner_color)
+    return new_elo
 
 
 def k_factor(time_control: str | None, elo: int) -> int:
-    """
-    K-factor based on AfriChess time control categories:
-      < 0:30          → Hyperbullet → K=40
-      0:30 – 2:59     → Bullet      → K=40
-      3:00 – 9:59     → Blitz       → K=32
-      10:00 – 15:00   → Rapid       → K=24
-      > 15:00         → Classical   → K=16
-    Uses FIDE-style equivalent time: base_mins + 40*increment_secs/60
-    Players under 1400 get +8 to converge faster.
-    """
-    equiv = 5.0  # default to blitz if unknown
+    """Legacy reference only — Glicko-2 is used for all calculations."""
+    equiv = 5.0
     if time_control:
         try:
             parts = time_control.split('+')
-            base  = float(parts[0])
-            inc   = float(parts[1]) if len(parts) > 1 else 0.0
-            equiv = base + (40 * inc / 60)
+            equiv = float(parts[0]) + (float(parts[1]) * 40 / 60 if len(parts) > 1 else 0)
         except (ValueError, IndexError):
             pass
-
-    if equiv < 3:
-        k = 40    # Hyperbullet / Bullet (< 3 min equivalent)
-    elif equiv < 10:
-        k = 32    # Blitz (3–9:59)
-    elif equiv <= 15:
-        k = 24    # Rapid (10–15)
-    else:
-        k = 16    # Classical (> 15)
-
-    if elo < 1400:
-        k = min(k + 8, 40)
-
-    return k
+    if equiv < 3:   return 40
+    if equiv < 10:  return 32
+    if equiv <= 15: return 24
+    return 16
 
 
 def elo_col_for_tc(time_control: str | None) -> str:
@@ -1102,9 +1144,8 @@ def validate_and_push(game: dict, uci_move: str) -> chess.Move | None:
 
 async def update_elos(game: dict, result: str):
     """
-    Calculate and persist ELO changes for both players using the correct
-    per-time-control column (elo_bullet, elo_blitz, elo_rapid, or elo).
-    Sends elo_update message to each player.
+    Calculate and persist ELO changes for both players using Glicko-2
+    and the correct per-time-control column.
     """
     wp = game.get("white_profile")
     bp = game.get("black_profile")
@@ -1116,41 +1157,49 @@ async def update_elos(game: dict, result: str):
     tc  = game.get("time_control")
     col = elo_col_for_tc(tc)
 
-    # Fetch current ELO from the correct column for both players
     async with httpx.AsyncClient() as client:
         wr = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles",
-            params={"user_id": f"eq.{wp['user_id']}", "select": col},
+            params={"user_id": f"eq.{wp['user_id']}", "select": f"{col},rd,sigma"},
             headers={"apikey": SUPABASE_SERVICE_KEY,
                      "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
         br = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles",
-            params={"user_id": f"eq.{bp['user_id']}", "select": col},
+            params={"user_id": f"eq.{bp['user_id']}", "select": f"{col},rd,sigma"},
             headers={"apikey": SUPABASE_SERVICE_KEY,
                      "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
-    w_rows = wr.json(); b_rows = br.json()
-    w_elo_old = (w_rows[0].get(col) or 1500) if w_rows else 1500
-    b_elo_old = (b_rows[0].get(col) or 1500) if b_rows else 1500
+    w_row = (wr.json() or [{}])[0]
+    b_row = (br.json() or [{}])[0]
 
-    w_elo_new = calc_elo(w_elo_old, b_elo_old, "white", result, tc)
-    b_elo_new = calc_elo(b_elo_old, w_elo_old, "black", result, tc)
+    w_elo_old = w_row.get(col) or 1500
+    b_elo_old = b_row.get(col) or 1500
+    w_rd      = float(w_row.get("rd")    or 350.0)
+    b_rd      = float(b_row.get("rd")    or 350.0)
+    w_sigma   = float(w_row.get("sigma") or 0.06)
+    b_sigma   = float(b_row.get("sigma") or 0.06)
 
-    await supabase_update_elo(wp["user_id"], w_elo_new, tc)
-    await supabase_update_elo(bp["user_id"], b_elo_new, tc)
+    w_elo_new, w_rd_new, w_sigma_new = calc_glicko2(
+        w_elo_old, w_rd, w_sigma, b_elo_old, b_rd, "white", result)
+    b_elo_new, b_rd_new, b_sigma_new = calc_glicko2(
+        b_elo_old, b_rd, b_sigma, w_elo_old, w_rd, "black", result)
 
-    # Notify players — prefer game WS
+    await supabase_update_elo(wp["user_id"], w_elo_new, tc, rd=w_rd_new, sigma=w_sigma_new)
+    await supabase_update_elo(bp["user_id"], b_elo_new, tc, rd=b_rd_new, sigma=b_sigma_new)
+
     w_ws = game.get("white_game_ws") or game.get("white_ws")
     b_ws = game.get("black_game_ws") or game.get("black_ws")
     cat  = col.replace("elo_", "").capitalize() if col != "elo" else "Classical"
 
     if w_ws:
         await send(w_ws, {"type": "elo_update", "old_elo": w_elo_old,
-                          "new_elo": w_elo_new, "category": cat, "column": col})
+                          "new_elo": w_elo_new, "rd": w_rd_new,
+                          "category": cat, "column": col})
     if b_ws:
         await send(b_ws, {"type": "elo_update", "old_elo": b_elo_old,
-                          "new_elo": b_elo_new, "category": cat, "column": col})
+                          "new_elo": b_elo_new, "rd": b_rd_new,
+                          "category": cat, "column": col})
 
 
 # ΓöÇΓöÇ WebSocket: Lobby (matchmaking) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -2259,7 +2308,7 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         )
         games = r2.json()
 
-        # ── Pioneer badge: award lazily on profile load (idempotent) ──
+        # Award pioneer badge lazily on profile load (idempotent)
         asyncio.create_task(grant_pioneer_medal(user_id, client))
 
     # Compute stats
@@ -2268,11 +2317,26 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
     draws = sum(1 for g in games if g.get("result") == "draw")
     total = len(games)
 
-    # ELO history from games
-    elo_history = []
+    # ELO history per time-control bucket from games (chronological, last 30 per TC)
+    tc_histories: dict = {"bullet": [], "blitz": [], "rapid": [], "classical": []}
     for g in reversed(games):
-        if g.get("player_elo_after"):
-            elo_history.append({"date": g["created_at"][:10], "elo": g["player_elo_after"]})
+        if not g.get("player_elo_after") or not g.get("created_at"):
+            continue
+        tc  = g.get("time_control")
+        col = elo_col_for_tc(tc)   # elo_bullet | elo_blitz | elo_rapid | elo
+        bucket = col.replace("elo_", "") if col != "elo" else "classical"
+        if bucket in tc_histories:
+            tc_histories[bucket].append({
+                "date": g["created_at"][:10],
+                "elo":  g["player_elo_after"],
+            })
+
+    # Trim to last 30 per TC
+    for k in tc_histories:
+        tc_histories[k] = tc_histories[k][-30:]
+
+    # Legacy flat elo_history (blitz, for backwards compat)
+    elo_history = tc_histories["blitz"] or tc_histories["rapid"] or tc_histories["bullet"] or tc_histories["classical"]
 
     # Coach usage
     uses_today = profile.get("coach_uses_today") or 0
@@ -2285,6 +2349,7 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         "elo_bullet": profile.get("elo_bullet", 1500),
         "elo_blitz":  profile.get("elo_blitz",  1500),
         "elo_rapid":  profile.get("elo_rapid",  1500),
+        "elo_classical": profile.get("elo", 1500),   # elo col = classical
         "created_at": profile.get("created_at"),
         "country":    profile.get("country"),
         "games_played": profile.get("games_played", 0),
@@ -2294,7 +2359,8 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         "total":      total,
         "win_rate":   round(wins / total * 100) if total else 0,
         "recent_games":  games[:10],
-        "elo_history":   elo_history[-20:],
+        "elo_history":   elo_history,        # legacy
+        "tc_histories":  tc_histories,       # new: per-TC histories for multi-line chart
         "coach_uses_today":      uses_today,
         "coach_uses_remaining":  max(0, FREE_COACH_LIMIT - uses_today),
         "coach_limit":           FREE_COACH_LIMIT,
@@ -3421,6 +3487,75 @@ async def get_medals(user_id: str):
         "username": data[0].get("username"),
         "medals":   data[0].get("medals") or []
     }
+
+
+
+@app.post("/api/admin/backfill-pioneer")
+async def backfill_pioneer(request: Request):
+    """
+    One-time admin endpoint: award pioneer medal to all existing users if
+    total user count <= 100. Protect with a secret key in the request body.
+    Call once from curl:
+      curl -X POST https://africhess.org/api/admin/backfill-pioneer \
+           -H "Content-Type: application/json" \
+           -d '{"secret": "YOUR_ADMIN_SECRET"}'
+    """
+    import json as _json
+    body = await request.json()
+    secret = os.getenv("ADMIN_SECRET", "")
+    if not secret or body.get("secret") != secret:
+        raise HTTPException(403, "Forbidden")
+
+    async with httpx.AsyncClient() as client:
+        # Count total users
+        count_r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"select": "count"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Prefer": "count=exact", "Range": "0-0"}
+        )
+        total = int(count_r.headers.get("content-range", "0/0").split("/")[-1] or 9999)
+        if total > 100:
+            return {"ok": False, "reason": f"Too many users ({total}) — pioneer badge is for first 100 only"}
+
+        # Fetch all profiles
+        all_r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"select": "user_id,medals"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        profiles = all_r.json()
+        now = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+        awarded = 0
+        skipped = 0
+
+        for p in profiles:
+            uid = p.get("user_id")
+            if not uid:
+                continue
+            medals = p.get("medals") or []
+            if any(m.get("id") == "pioneer" for m in medals):
+                skipped += 1
+                continue
+            medals.append({
+                "id": "pioneer", "label": "1st 100 Founder", "img": "pioneer",
+                "reason": f"Among the first {total} players to join AfriChess",
+                "tag": "founder", "awarded_at": now,
+            })
+            await client.patch(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{uid}"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"},
+                json={"medals": medals}
+            )
+            awarded += 1
+            print(f"[backfill-pioneer] awarded to {uid}", flush=True)
+
+    return {"ok": True, "awarded": awarded, "skipped_already_had": skipped, "total_users": total}
 
 @app.get("/history")
 def history():

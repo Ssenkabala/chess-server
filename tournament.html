@@ -290,7 +290,7 @@
     /* ── Bottom notification bar ── */
     #arena-notify-bar {
       display: none; position: fixed; bottom: 56px; left: 0; right: 0;
-      background: #b8a000; color: #000; font-size: 13px; font-weight: 600;
+      background: #2e7d4f; color: #fff; font-size: 13px; font-weight: 600;
       text-align: center; padding: 12px 16px; z-index: 200;
       letter-spacing: 0.02em; cursor: pointer;
     }
@@ -1418,6 +1418,7 @@ function connectTournamentWs(tid, tournament) {
       elo_rapid:  currentProfile ? (currentProfile.elo_rapid  || currentProfile.elo || 1500) : 1500,
       score: _myArenaScore,  // send real accumulated score, not always 0
     }));
+    showNotifyBar('⏳ Stand by — pairing players, get ready!');
     tournamentWs._ping = setInterval(() => {
       if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN)
         tournamentWs.send(JSON.stringify({ type: 'ping' }));
@@ -1441,6 +1442,7 @@ function connectTournamentWs(tid, tournament) {
           statusMsg = '🔥 Streak bonus! +' + msg.streak_bonus + ' extra point (streak: ' + msg.streak + ' wins). Waiting for next pairing…';
         }
         showArenaStatus(statusMsg);
+        showNotifyBar('⏳ Stand by — pairing players, get ready!');
       } else if (msg.type === 'tournament_ended') {
         hideArenaCountdown();
         const reason = msg.reason || 'Tournament has ended.';
@@ -1450,9 +1452,14 @@ function connectTournamentWs(tid, tournament) {
         const bar = document.getElementById('arena-timer-bar');
         if (bar) { bar.textContent = '🏁 Tournament ended'; bar.style.display = ''; }
         setTimeout(() => { if (currentDetailId) viewTournament(currentDetailId); }, 2000);
+      } else if (msg.type === 'pairings_closed') {
+        hideArenaCountdown();
+        showArenaStatus('🔒 ' + (msg.message || 'Pairings closed — finish your game, tournament ending soon.'));
+        showNotifyBar('🔒 Pairings closed — tournament ending soon');
       } else if (msg.type === 'waiting') {
         hideArenaCountdown();
         showArenaStatus('⏳ ' + (msg.message || 'Waiting for an available opponent…'));
+        showNotifyBar('⏳ Stand by — pairing players, get ready!');
       } else if (msg.type === 'bye') {
         hideArenaCountdown();
         showArenaStatus('⏸ ' + (msg.message || 'You have a bye this round — waiting for next pairing…'));

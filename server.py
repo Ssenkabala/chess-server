@@ -1376,6 +1376,47 @@ async def arena_pair(tournament_id: str):
     if len(available) < 1:
         return
 
+    # ── Pairing cutoff: stop pairing when remaining time ≤ 0.5 × time_control ──
+    # This mirrors Lichess arena behaviour — no new games can start if they
+    # couldn't finish before the tournament ends.
+    try:
+        async with httpx.AsyncClient() as _tc:
+            _tr = await _tc.get(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{tournament_id}",
+                        "select": "starts_at,duration_minutes,time_control,status"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            _rows = _tr.json()
+        if _rows:
+            _t = _rows[0]
+            if _t.get("status") != "active":
+                return  # tournament not active, don't pair
+            _starts    = datetime.fromisoformat(_t["starts_at"].replace("Z", "+00:00"))
+            _ends      = _starts + timedelta(minutes=_t.get("duration_minutes") or 60)
+            _remaining = (_ends - datetime.now(timezone.utc)).total_seconds()
+            # Parse time_control "base+inc" → total seconds (use base only for cutoff)
+            _tc_str    = _t.get("time_control") or "5+0"
+            try:
+                _tc_secs = float(_tc_str.split("+")[0]) * 60
+            except (ValueError, IndexError):
+                _tc_secs = 300
+            _cutoff = _tc_secs * 0.5   # half the time control
+            if _remaining <= _cutoff:
+                # Broadcast pairings_closed to all available players
+                for uid in available:
+                    await arena_send(conns[uid]["ws"], {
+                        "type":    "pairings_closed",
+                        "message": f"Pairings closed — {int(_remaining)}s left, tournament ending soon.",
+                    })
+                print(f"[arena] pairings closed for {tournament_id} "
+                      f"({int(_remaining)}s left, cutoff {int(_cutoff)}s)", flush=True)
+                return
+    except Exception as _e:
+        print(f"[arena] cutoff check error: {_e}", flush=True)
+        # On error, allow pairing to proceed rather than blocking games
+
     # Fetch all games played so far to build a played-count map
     try:
         async with httpx.AsyncClient() as client:

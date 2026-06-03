@@ -9,7 +9,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#0a0a0a">
+  <meta name="theme-color" content="#151310009">
   <meta name="description" content="Play chess against the AfriChess engine — 8 difficulty levels, move analysis, and AI coaching.">
   <meta property="og:title" content="AfriChess — Play vs Engine">
   <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
@@ -368,7 +368,7 @@ global.Chessground = Nr;
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      background: #0d0d0d;
+      background: #141210;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
@@ -413,7 +413,7 @@ global.Chessground = Nr;
       transition: all 0.2s;
     }
     .tab-btn:last-child { border-right: none; }
-    .tab-btn:hover { color: #00ff9d; background: #1a1a1a; }
+    .tab-btn:hover { color: #00ff9d; background: #1e1b17; }
     .tab-btn.active { background: #00ff9d22; color: #00ff9d; }
 
     /* ── Panels ── */
@@ -499,7 +499,7 @@ global.Chessground = Nr;
       border-radius: 2px;
       transition: all 0.2s;
     }
-    button:hover, button.active { background: #00ff9d; color: #111; }
+    button:hover, button.active { background: #00ff9d; color: #151310; }
     button:disabled { opacity: 0.35; cursor: not-allowed; }
 
     /* ── Analysis panel extras ── */
@@ -511,7 +511,7 @@ global.Chessground = Nr;
     }
     #fen-input {
       flex: 1;
-      background: #1a1a1a;
+      background: #1e1b17;
       border: 1px solid #333;
       color: #e8e6e0;
       padding: 10px 14px;
@@ -534,7 +534,7 @@ global.Chessground = Nr;
     }
     #api-key-input {
       flex: 1;
-      background: #1a1a1a;
+      background: #1e1b17;
       border: 1px solid #333;
       color: #e8e6e0;
       padding: 9px 14px;
@@ -548,7 +548,7 @@ global.Chessground = Nr;
     #api-key-input::placeholder { color: #444; }
     .api-label {
       font-size: 11px;
-      color: #555;
+      color: #5a5248;
       letter-spacing: 0.08em;
       text-transform: uppercase;
       white-space: nowrap;
@@ -559,7 +559,7 @@ global.Chessground = Nr;
       width: 100%;
       max-width: 480px;
       height: 6px;
-      background: #222;
+      background: #272319;
       border-radius: 3px;
       overflow: hidden;
     }
@@ -572,7 +572,7 @@ global.Chessground = Nr;
     }
     .eval-label {
       font-size: 12px;
-      color: #555;
+      color: #5a5248;
       letter-spacing: 0.08em;
       width: 100%;
       max-width: 480px;
@@ -583,8 +583,8 @@ global.Chessground = Nr;
     #coach-card {
       width: 100%;
       max-width: 480px;
-      background: #161616;
-      border: 1px solid #2a2a2a;
+      background: #1a1714;
+      border: 1px solid #2e2920;
       border-left: 3px solid #00ff9d44;
       border-radius: 2px;
       padding: 18px 20px;
@@ -634,8 +634,8 @@ global.Chessground = Nr;
     .candidates-wrap {
       width: 100%;
       max-width: 480px;
-      background: #161616;
-      border: 1px solid #2a2a2a;
+      background: #1a1714;
+      border: 1px solid #2e2920;
       border-radius: 2px;
       padding: 12px 14px;
       display: none;
@@ -673,7 +673,7 @@ global.Chessground = Nr;
     .candidate-bar-wrap {
       flex: 1;
       height: 4px;
-      background: #222;
+      background: #272319;
       border-radius: 2px;
       overflow: hidden;
     }
@@ -707,7 +707,7 @@ global.Chessground = Nr;
     .material-score {
       font-size: 12px;
       font-family: monospace;
-      color: #555;
+      color: #5a5248;
       margin-left: 4px;
     }
     .material-score.ahead { color: #00ff9d; }
@@ -718,11 +718,11 @@ global.Chessground = Nr;
       align-items: center; justify-content: center;
     }
     .promo-overlay.active { display: flex; }
-    .promo-box { background: #111; border: 1px solid #333; border-radius: 4px; padding: 20px 24px; text-align: center; }
-    .promo-title { font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: #555; margin-bottom: 16px; }
+    .promo-box { background: #151310; border: 1px solid #333; border-radius: 4px; padding: 20px 24px; text-align: center; }
+    .promo-title { font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: #5a5248; margin-bottom: 16px; }
     .promo-pieces { display: flex; gap: 8px; }
     .promo-piece {
-      width: 64px; height: 64px; background: #1a1a1a; border: 1px solid #333;
+      width: 64px; height: 64px; background: #1e1b17; border: 1px solid #333;
       border-radius: 3px; cursor: pointer; display: flex; align-items: center;
       justify-content: center; transition: border-color 0.15s, background 0.15s;
     }
@@ -737,7 +737,7 @@ global.Chessground = Nr;
     }
     .gameover-overlay.active { display: flex; }
     .gameover-box {
-      background: #111; border: 1px solid #2a2a2a; border-radius: 6px;
+      background: #151310; border: 1px solid #2e2920; border-radius: 6px;
       padding: 36px 40px; text-align: center; max-width: 320px; width: 90%;
       position: relative;
     }
@@ -754,9 +754,9 @@ global.Chessground = Nr;
     }
     .gameover-btn:hover { background: #00e08a; }
     .gameover-btn.secondary {
-      background: transparent; color: #555; border: 1px solid #333;
+      background: transparent; color: #5a5248; border: 1px solid #333;
     }
-    .gameover-btn.secondary:hover { color: #aaa; border-color: #555; }
+    .gameover-btn.secondary:hover { color: #aaa; border-color: #5a5248; }
 
     /* ── Auth modal ── */
     .auth-overlay {
@@ -774,8 +774,8 @@ global.Chessground = Nr;
     .auth-overlay.active { display: flex !important; }
 
     .auth-card {
-      background: #161616;
-      border: 1px solid #2a2a2a;
+      background: #1a1714;
+      border: 1px solid #2e2920;
       border-top: 2px solid #00ff9d;
       border-radius: 3px;
       padding: 28px 24px;
@@ -795,14 +795,14 @@ global.Chessground = Nr;
     }
     .auth-subtitle {
       font-size: 12px;
-      color: #555;
+      color: #5a5248;
       letter-spacing: 0.05em;
       margin-bottom: 8px;
     }
     .auth-input {
       width: 100%;
-      background: #111;
-      border: 1px solid #2a2a2a;
+      background: #151310;
+      border: 1px solid #2e2920;
       color: #e8e6e0;
       padding: 11px 14px;
       font-size: 13px;
@@ -818,7 +818,7 @@ global.Chessground = Nr;
       width: 100%;
       padding: 12px;
       background: #00ff9d;
-      color: #111;
+      color: #151310;
       border: none;
       font-size: 12px;
       font-family: 'Georgia', serif;
@@ -842,7 +842,7 @@ global.Chessground = Nr;
       content: '';
       flex: 1;
       height: 1px;
-      background: #2a2a2a;
+      background: #2e2920;
     }
 
     .google-btn {
@@ -850,7 +850,7 @@ global.Chessground = Nr;
       padding: 11px;
       background: transparent;
       color: #aaa;
-      border: 1px solid #2a2a2a;
+      border: 1px solid #2e2920;
       font-size: 12px;
       font-family: 'Georgia', serif;
       letter-spacing: 0.1em;
@@ -862,11 +862,11 @@ global.Chessground = Nr;
       justify-content: center;
       gap: 10px;
     }
-    .google-btn:hover { border-color: #555; color: #fff; }
+    .google-btn:hover { border-color: #5a5248; color: #fff; }
 
     .auth-toggle {
       font-size: 11px;
-      color: #555;
+      color: #5a5248;
       text-align: center;
       letter-spacing: 0.05em;
     }
@@ -903,8 +903,8 @@ global.Chessground = Nr;
     }
     .username-overlay.active { display: flex; }
     .username-card {
-      background: #161616;
-      border: 1px solid #2a2a2a;
+      background: #1a1714;
+      border: 1px solid #2e2920;
       border-top: 3px solid #00ff9d;
       border-radius: 4px;
       padding: 40px 48px;
@@ -921,7 +921,7 @@ global.Chessground = Nr;
       letter-spacing: 0.06em; line-height: 1.6;
     }
     .username-input {
-      background: #111; border: 1px solid #2a2a2a;
+      background: #151310; border: 1px solid #2e2920;
       color: #e8e6e0; padding: 12px 16px;
       font-size: 15px; font-family: monospace;
       border-radius: 2px; outline: none; text-align: center;
@@ -935,7 +935,7 @@ global.Chessground = Nr;
     }
     .username-btn {
       padding: 12px 28px; background: #00ff9d;
-      color: #111; border: none; font-size: 14px;
+      color: #151310; border: none; font-size: 14px;
       font-family: Georgia, serif; font-weight: bold;
       letter-spacing: 0.12em; cursor: pointer;
       border-radius: 2px; text-transform: uppercase;
@@ -956,7 +956,7 @@ global.Chessground = Nr;
     }
     .user-info {
       font-size: 11px;
-      color: #555;
+      color: #5a5248;
       letter-spacing: 0.08em;
       font-family: monospace;
     }
@@ -1003,7 +1003,7 @@ global.Chessground = Nr;
       display: block;
       width: 22px;
       height: 2px;
-      background: #555;
+      background: #5a5248;
       border-radius: 2px;
       transition: all 0.3s;
       pointer-events: none;
@@ -1018,8 +1018,8 @@ global.Chessground = Nr;
       top: 0; right: -260px;
       width: 240px;
       height: 100vh;
-      background: #0d0d0d;
-      border-left: 1px solid #222;
+      background: #141210;
+      border-left: 1px solid #272319;
       display: flex;
       flex-direction: column;
       padding: 72px 28px 28px;
@@ -1037,7 +1037,7 @@ global.Chessground = Nr;
       transition: color 0.2s;
       cursor: pointer;
       padding: 8px 0;
-      border-bottom: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1e1b17;
       display: block;
     }
     .mobile-menu a:hover { color: #00ff9d; }
@@ -1181,13 +1181,13 @@ global.Chessground = Nr;
     </a>
     <!-- Desktop nav — hidden below 760px where hamburger takes over -->
     <div id="index-desktop-nav" style="display:flex;gap:16px;align-items:center;">
-      <a href="/multiplayer" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Live</a>
-      <a href="/tournaments" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Tournaments</a>
-      <a href="/leaderboard" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Leaderboard</a>
-      <a href="/history"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">History</a>
-      <a href="/profile"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Profile</a>
+      <a href="/multiplayer" style="color:#5a5248;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#5a5248'">Live</a>
+      <a href="/tournaments" style="color:#5a5248;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#5a5248'">Tournaments</a>
+      <a href="/leaderboard" style="color:#5a5248;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#5a5248'">Leaderboard</a>
+      <a href="/history"     style="color:#5a5248;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#5a5248'">History</a>
+      <a href="/profile"     style="color:#5a5248;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#5a5248'">Profile</a>
       <a id="nav-signin-idx" onclick="openAuth()" style="display:none;color:#00ff9d;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign In</a>
-      <a id="nav-signout-idx" onclick="signOut()" style="display:none;color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign Out</a>
+      <a id="nav-signout-idx" onclick="signOut()" style="display:none;color:#5a5248;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign Out</a>
     </div>
     <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
       <span></span><span></span><span></span>
@@ -1225,7 +1225,7 @@ global.Chessground = Nr;
     <!-- Pre-game setup — hidden once game starts -->
     <div id="pregame-setup" style="width:100%;display:flex;flex-direction:column;gap:14px;align-items:center;">
       <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;letter-spacing:0.1em;color:#555;text-transform:uppercase;">
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;letter-spacing:0.1em;color:#5a5248;text-transform:uppercase;">
           <span>Difficulty</span>
           <span id="diff-label" style="color:#00ff9d;font-size:13px;letter-spacing:0.05em;">Beginner</span>
         </div>
@@ -1284,7 +1284,7 @@ global.Chessground = Nr;
     <!-- API key input -->
     <div class="api-row">
       <span class="api-label">API Key</span>
-      <div id="coach-usage-label" style="font-size:11px;color:#555;letter-spacing:0.1em;text-transform:uppercase;text-align:right;margin-bottom:4px;">
+      <div id="coach-usage-label" style="font-size:11px;color:#5a5248;letter-spacing:0.1em;text-transform:uppercase;text-align:right;margin-bottom:4px;">
         Sign in to use coaching
       </div>
     </div>
@@ -2481,7 +2481,7 @@ function closeMenuThenAuth() {
 <!-- Game-over overlay -->
 <div class="gameover-overlay" id="gameover-overlay" onclick="closeGameOver()">
   <div class="gameover-box" onclick="event.stopPropagation()">
-    <button onclick="closeGameOver()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:#555;font-size:18px;cursor:pointer;line-height:1;" title="Close">✕</button>
+    <button onclick="closeGameOver()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:#5a5248;font-size:18px;cursor:pointer;line-height:1;" title="Close">✕</button>
     <div class="gameover-emoji" id="gameover-emoji">♟</div>
     <div class="gameover-title" id="gameover-title">Game Over</div>
     <div class="gameover-sub" id="gameover-sub"></div>

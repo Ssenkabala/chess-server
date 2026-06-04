@@ -1704,5 +1704,17 @@ async function signInWithGoogleT() {
 document.getElementById('t-auth-overlay').addEventListener('click', function(e){if(e.target===this)closeAuth();});
 </script>
 
+<script>
+// ── Presence ping (keeps "players online" counter accurate on landing page) ──
+(function() {
+  const tok = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  function ping() {
+    fetch('/api/ping', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token: tok }) }).catch(() => {});
+  }
+  ping();
+  setInterval(ping, 30000);
+})();
+</script>
 </body>
 </html>

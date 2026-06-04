@@ -219,6 +219,10 @@
       .stats-strip { flex-wrap: wrap; }
       .stat-cell { min-width: 50%; border-right: none; border-bottom: 1px solid var(--border); }
     }
+    /* All-TC table scrolls horizontally on small screens */
+    @media (max-width: 600px) {
+      #lb-content div[style*="overflow-x"] { -webkit-overflow-scrolling: touch; }
+    }
   </style>
 </head>
 <body>
@@ -283,7 +287,7 @@
 
   <!-- Filters -->
   <div class="filters">
-    <div class="filter-group">
+    <div class="filter-group" id="tc-filter-group">
       <button class="filter-btn active" onclick="setTc('blitz')" id="tc-blitz">⚡ Blitz</button>
       <button class="filter-btn" onclick="setTc('bullet')" id="tc-bullet">🔴 Bullet</button>
       <button class="filter-btn" onclick="setTc('rapid')" id="tc-rapid">🐢 Rapid</button>
@@ -292,6 +296,7 @@
     <div class="filter-group">
       <button class="filter-btn active" onclick="setView('continental')" id="view-continental">Continental</button>
       <button class="filter-btn" onclick="setView('country')" id="view-country">By Country</button>
+      <button class="filter-btn" onclick="setView('all-tc')" id="view-all-tc">All TCs</button>
     </div>
     <select class="region-select" id="region-select" onchange="setRegion(this.value)">
       <option value="">All Africa</option>
@@ -410,9 +415,12 @@ function setTc(tc) {
 
 function setView(v) {
   currentView = v;
-  ['continental','country'].forEach(t => {
+  ['continental','country','all-tc'].forEach(t => {
     document.getElementById('view-' + t).classList.toggle('active', t === v);
   });
+  // Hide TC filter group when "All TCs" is active — it's irrelevant there
+  const tcGroup = document.getElementById('tc-filter-group');
+  if (tcGroup) tcGroup.style.display = v === 'all-tc' ? 'none' : '';
   applyFilters();
 }
 
@@ -453,7 +461,17 @@ function applyFilters() {
     : '—';
   document.getElementById('stats-strip').style.display = '';
 
-  if (currentView === 'continental') {
+  if (currentView === 'all-tc') {
+    // All-TC view: sort by blitz by default, show all 4 columns
+    // Include players who have ANY rated game (any TC > 1500 or games_played > 0)
+    let allTcPlayers = allPlayers.slice();
+    if (regionSet) allTcPlayers = allTcPlayers.filter(p => regionSet.has(p.country));
+    if (q) allTcPlayers = allTcPlayers.filter(p =>
+      (p.username||'').toLowerCase().includes(q) ||
+      (COUNTRY_NAMES[p.country]||'').toLowerCase().includes(q));
+    allTcPlayers.sort((a, b) => (b.elo_blitz||0) - (a.elo_blitz||0));
+    renderAllTc(allTcPlayers);
+  } else if (currentView === 'continental') {
     renderContinental(filtered, col);
   } else {
     renderByCountry(filtered, col);
@@ -576,6 +594,72 @@ function renderByCountry(players, col) {
   el.innerHTML = html;
 }
 
+function renderAllTc(players) {
+  const el = document.getElementById('lb-content');
+  if (!players.length) {
+    el.innerHTML = '<div class="empty">No players found for these filters.</div>';
+    return;
+  }
+
+  const TC_DEFS = [
+    { key: 'elo_blitz',  label: '⚡ Blitz',     col: 'blitz'    },
+    { key: 'elo_bullet', label: '🔴 Bullet',    col: 'bullet'   },
+    { key: 'elo_rapid',  label: '🐢 Rapid',     col: 'rapid'    },
+    { key: 'elo',        label: '♟ Classical',  col: 'classical'},
+  ];
+
+  const rows = players.map((p, i) => {
+    const isMe = currentUser && p.user_id === currentUser.id;
+    const rc   = rankClass(i);
+    const medal = rc === 'gold' ? '🥇' : rc === 'silver' ? '🥈' : rc === 'bronze' ? '🥉' : i + 1;
+
+    // Highlight the highest TC for this player
+    const vals = TC_DEFS.map(tc => p[tc.key] || 0);
+    const max  = Math.max(...vals);
+
+    const tcCells = TC_DEFS.map(tc => {
+      const v   = p[tc.key] || 0;
+      const hi  = v > 0 && v === max;
+      return '<td class="td-elo" style="' + (hi ? 'color:#d4af37;' : 'color:#555;') + '">'
+           + (v > 0 ? v : '—') + '</td>';
+    }).join('');
+
+    return '<tr class="' + (isMe ? 'is-me' : '') + '">'
+      + '<td class="td-rank ' + rc + '">' + medal + '</td>'
+      + '<td><div class="td-player">'
+          + '<span class="td-flag">' + FLAG(p.country) + '</span>'
+          + '<div>'
+            + '<div class="td-name' + (isMe ? ' is-me' : '') + '">' + esc(p.username || 'Anonymous') + '</div>'
+            + '<div class="td-country">' + (COUNTRY_NAMES[p.country] || p.country || '—') + '</div>'
+          + '</div>'
+        + '</div></td>'
+      + tcCells
+      + '<td class="td-games">' + (p.games_played || 0) + ' games</td>'
+      + '</tr>';
+  }).join('');
+
+  const headers = TC_DEFS.map(tc =>
+    '<th class="num" style="font-size:10px;">' + tc.label + '</th>'
+  ).join('');
+
+  el.innerHTML =
+    '<div class="section-hdr">'
+      + '<span>All Time Controls</span>'
+      + '<span>' + players.length + ' players · Sorted by Blitz · <span style="color:#d4af37;">Gold</span> = highest rated TC per player</span>'
+    + '</div>'
+    + '<div style="overflow-x:auto;">'
+    + '<table class="lb-table">'
+      + '<thead><tr>'
+        + '<th style="width:44px">#</th>'
+        + '<th>Player</th>'
+        + headers
+        + '<th class="num">Games</th>'
+      + '</tr></thead>'
+      + '<tbody>' + rows + '</tbody>'
+    + '</table>'
+    + '</div>';
+}
+
 function toggleCountry(code) {
   if (openCountries.has(code)) {
     openCountries.delete(code);
@@ -670,6 +754,18 @@ async function signInWithGoogleLb() {
   await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:'https://www.africhess.org/leaderboard'}});
 }
 document.getElementById('lb-auth-overlay').addEventListener('click',function(e){if(e.target===this)closeAuth();});
+</script>
+<script>
+// ── Presence ping (keeps "players online" counter accurate on landing page) ──
+(function() {
+  const tok = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  function ping() {
+    fetch('/api/ping', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token: tok }) }).catch(() => {});
+  }
+  ping();
+  setInterval(ping, 30000);
+})();
 </script>
 </body>
 </html>

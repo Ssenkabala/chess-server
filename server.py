@@ -218,6 +218,23 @@ async def grant_pioneer_medal(user_id: str, client) -> bool:
     print(f"[medals] pioneer badge awarded to {user_id} (user #{total_users})", flush=True)
     return True
 
+# ── Page presence tracker ─────────────────────────────────────────────────────
+# Maps session_token → last_seen timestamp (float).
+# Any page hitting /api/ping within 35s is counted as "online".
+# Landing page calls /api/ping every 30s. No auth required.
+import time as _time
+_presence: dict[str, float] = {}
+_PRESENCE_TTL = 35   # seconds before a session is considered gone
+
+def _presence_count() -> int:
+    """Count sessions seen within the last TTL seconds."""
+    cutoff = _time.time() - _PRESENCE_TTL
+    # Prune stale entries in-place
+    stale = [k for k, v in _presence.items() if v < cutoff]
+    for k in stale:
+        del _presence[k]
+    return len(_presence)
+
 # Tournament race condition guard
 _tournament_locks: set = set()
 
@@ -3525,6 +3542,25 @@ def sitemap():
 def leaderboard_page():
     return FileResponse("leaderboard.html")
 
+
+
+@app.post("/api/ping")
+async def presence_ping(request: Request):
+    """
+    Called by every page every 30s to register presence.
+    Uses a short random token from the client as the session key.
+    Returns the current online count so the client can update its display.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    token = body.get("token", "")
+    if token and len(token) <= 64:
+        _presence[token] = _time.time()
+    count = _presence_count()
+    return {"online": count}
+
 @app.get("/api/stats")
 async def get_live_stats():
     """
@@ -3547,10 +3583,9 @@ async def get_live_stats():
 
     live_games = live_mp_games + live_arena_games
 
-    # Connected users: lobby waiters + arena participants
-    lobby_connected   = len(lobby_queue)
-    arena_connected   = sum(len(conns) for conns in tournament_connections.values())
-    live_connected    = lobby_connected + arena_connected
+    # Connected users: everyone pings /api/ping every 30s regardless of page.
+    # _presence_count() is the single source of truth — no double-counting.
+    live_connected = _presence_count()
 
     # ── Cached DB totals (refresh every 60s) ────────────────────
     cache = get_live_stats._cache

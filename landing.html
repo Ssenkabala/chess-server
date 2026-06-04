@@ -1371,30 +1371,53 @@ document.getElementById('auth-overlay').addEventListener('click', function(e) {
 initAuth();
 
 // ── Live stats counter ────────────────────────────────────────
+function animateCount(el, target) {
+  if (!el) return;
+  const current = parseInt(el.textContent.replace(/,/g, '')) || 0;
+  if (current === target) return;
+  const step = Math.ceil(Math.abs(target - current) / 12);
+  let val = current;
+  const tick = setInterval(() => {
+val = current < target ? Math.min(val + step, target) : Math.max(val - step, target);
+el.textContent = val.toLocaleString();
+if (val === target) clearInterval(tick);
+  }, 40);
+}
+
 async function fetchStats() {
   try {
     const r = await fetch('/api/stats');
     if (!r.ok) return;
     const d = await r.json();
 
-    function animateCount(el, target) {
-      if (!el) return;
-      const current = parseInt(el.textContent.replace(/,/g, '')) || 0;
-      if (current === target) return;
-      const step = Math.ceil(Math.abs(target - current) / 12);
-      let val = current;
-      const tick = setInterval(() => {
-        val = current < target ? Math.min(val + step, target) : Math.max(val - step, target);
-        el.textContent = val.toLocaleString();
-        if (val === target) clearInterval(tick);
-      }, 40);
-    }
-
     animateCount(document.getElementById('stat-live-games'),   d.live_games     || 0);
     animateCount(document.getElementById('stat-connected'),    d.live_connected  || 0);
     animateCount(document.getElementById('stat-total-games'),  d.total_games     || 0);
   } catch(e) { /* silently fail — counters stay at last value */ }
 }
+
+// ── Presence ping ────────────────────────────────────────────────────────────
+// Generate a random session token once per page load (no auth needed)
+const _presenceToken = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+
+async function pingPresence() {
+  try {
+    const r = await fetch('/api/ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: _presenceToken }),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      // Update counter directly from ping response for faster feedback
+      const el = document.getElementById('stat-connected');
+      if (el && d.online != null) animateCount(el, d.online);
+    }
+  } catch(e) { /* silent */ }
+}
+
+pingPresence();                          // fire immediately on page load
+setInterval(pingPresence, 30000);        // keep presence alive every 30s
 
 fetchStats();
 setInterval(fetchStats, 30000);

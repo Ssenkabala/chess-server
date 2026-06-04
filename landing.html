@@ -780,6 +780,7 @@
     <a href="javascript:void(0)" onclick="navTo('/multiplayer')">Live</a>
     <a href="javascript:void(0)" onclick="navTo('/tournaments')">Tournaments</a>
     <a href="javascript:void(0)" onclick="navTo('/leaderboard')">Leaderboard</a>
+    <a href="javascript:void(0)" onclick="navTo('/puzzles')">Puzzles</a>
     <a href="javascript:void(0)" onclick="navTo('/history')">History</a>
     <a href="javascript:void(0)" onclick="navTo('/profile')">Profile</a>
     <a href="javascript:void(0)" id="nav-signin-btn" onclick="openAuth()" style="display:none;">Sign In</a>
@@ -800,6 +801,7 @@
   <a href="javascript:void(0)" onclick="navTo('/multiplayer')">Live</a>
   <a href="javascript:void(0)" onclick="navTo('/tournaments')">Tournaments</a>
   <a href="javascript:void(0)" onclick="navTo('/leaderboard')">Leaderboard</a>
+  <a href="javascript:void(0)" onclick="navTo('/puzzles')">Puzzles</a>
   <a href="javascript:void(0)" onclick="navTo('/history')">History</a>
   <a href="javascript:void(0)" onclick="navTo('/profile')">Profile</a>
   <a href="javascript:void(0)" id="mob-signin-btn" onclick="closeNav(); openAuth();" style="display:none;">Sign In</a>
@@ -1317,29 +1319,47 @@ async function signOut() {
   await sb.auth.signOut();
 }
 
+// Usernames that are blocked for regular users (case-insensitive prefix/exact match)
+const RESERVED_NAMES = [
+  'africhess', 'admin', 'administrator', 'moderator', 'mod',
+  'staff', 'support', 'official', 'senkabala', 'system',
+  'root', 'superuser', 'owner', 'operator', 'bot',
+];
+
+function isReservedUsername(val) {
+  const lower = val.toLowerCase().replace(/[_0-9]/g, '');  // strip underscores & digits for comparison
+  return RESERVED_NAMES.some(r => lower === r || lower.startsWith(r));
+}
+
 async function submitUsername() {
   const val = (document.getElementById('username-input').value || '').trim();
   const errEl = document.getElementById('username-error');
   errEl.textContent = '';
+
   if (!/^[a-zA-Z0-9_]{3,20}$/.test(val)) {
     errEl.textContent = '3–20 characters, letters/numbers/underscores only.'; return;
   }
+  if (isReservedUsername(val)) {
+    errEl.textContent = 'That username is reserved. Please choose a different name.'; return;
+  }
+
   const btn = document.getElementById('username-btn');
   btn.textContent = 'Saving…'; btn.disabled = true;
+
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { errEl.textContent = 'Not signed in.'; btn.disabled=false; btn.textContent='Set Username'; return; }
-  // Direct Supabase insert — same approach as the play page
-  const { error } = await sb.from('profiles').insert({
-    user_id:  session.user.id,
-    username: val,
-    elo:      1500,
-    elo_bullet: 1500,
-    elo_blitz:  1500,
-    elo_rapid:  1500,
+
+  // Route through server so reserved-name check can't be bypassed client-side
+  const r = await fetch('/api/set-username', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+    body: JSON.stringify({ username: val }),
   });
+  const result = await r.json().catch(() => ({}));
+
   btn.disabled=false; btn.textContent='Set Username';
-  if (error) {
-    errEl.textContent = error.code === '23505' ? 'That username is taken. Try another.' : error.message;
+  if (!r.ok) {
+    errEl.textContent = result.detail || 'Something went wrong. Try again.';
   } else {
     document.getElementById('username-overlay').classList.remove('active');
   }

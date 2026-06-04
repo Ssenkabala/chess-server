@@ -3,6 +3,7 @@ import chess
 import chess.engine
 import anthropic
 import os
+import re
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -2945,6 +2946,97 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
 
     return {"ok": True, "result": req.result}
 
+
+
+
+# ── Reserved usernames ────────────────────────────────────────────────────────
+_RESERVED_NAMES = {
+    'africhess', 'admin', 'administrator', 'moderator', 'mod',
+    'staff', 'support', 'official', 'senkabala', 'system',
+    'root', 'superuser', 'owner', 'operator', 'bot',
+}
+_ADMIN_USER_IDS: set[str] = set(filter(None, os.getenv("ADMIN_USER_IDS", "").split(",")))
+
+def _is_reserved(username: str) -> bool:
+    """
+    Returns True if the username is reserved for non-admin users.
+    Strips digits and underscores before checking so 'AfriChess1', 'africhess_'
+    etc. are all caught.
+    """
+    cleaned = re.sub(r'[_0-9]', '', username.lower())
+    return any(cleaned == r or cleaned.startswith(r) for r in _RESERVED_NAMES)
+
+
+@app.post("/api/set-username")
+async def set_username(request: Request, authorization: str = Header(None)):
+    """
+    Create a new profile row with the chosen username.
+    Validates format, reserved names, and uniqueness server-side
+    so the check cannot be bypassed by calling Supabase directly.
+    Admins (ADMIN_USER_IDS env var) may use reserved names.
+    """
+    user_id = await verify_jwt(authorization)  # raises 401 if invalid
+
+    body = await request.json()
+    username = (body.get("username") or "").strip()
+
+    # Format check
+    if not re.fullmatch(r'[a-zA-Z0-9_]{3,20}', username):
+        raise HTTPException(400, "3–20 characters, letters/numbers/underscores only.")
+
+    # Reserved name check (admins bypass)
+    is_admin = user_id in _ADMIN_USER_IDS
+    if not is_admin and _is_reserved(username):
+        raise HTTPException(400, "That username is reserved. Please choose a different name.")
+
+    async with httpx.AsyncClient() as client:
+        # Check uniqueness
+        check = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"username": f"eq.{username}", "select": "user_id"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        if check.json():
+            raise HTTPException(400, "That username is taken. Try another.")
+
+        # Check profile doesn't already exist for this user
+        existing = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{user_id}", "select": "username"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        if existing.json() and existing.json()[0].get("username"):
+            raise HTTPException(400, "Username already set.")
+
+        # Insert profile
+        r = await client.post(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            headers={
+                "apikey":        SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type":  "application/json",
+                "Prefer":        "return=minimal",
+            },
+            json={
+                "user_id":    user_id,
+                "username":   username,
+                "elo":        1500,
+                "elo_bullet": 1500,
+                "elo_blitz":  1500,
+                "elo_rapid":  1500,
+            }
+        )
+        if r.status_code not in (200, 201):
+            raise HTTPException(400, r.text or "Failed to create profile.")
+
+    # Award pioneer badge if eligible (fire-and-forget)
+    async with httpx.AsyncClient() as client:
+        asyncio.create_task(grant_pioneer_medal(user_id, client))
+
+    print(f"[profile] new user {user_id} → {username}", flush=True)
+    return {"ok": True}
 
 @app.post("/api/update-country")
 async def update_country(request: Request, authorization: str = Header(None)):

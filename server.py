@@ -61,12 +61,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Ensure .wasm files are served with the correct MIME type.
-# Without this, some browsers refuse to compile the WebAssembly module.
+# Serve WASM engine files — Railway runs FastAPI, not a static file server,
+# so these files need explicit routes.
 @app.get("/senkabala.wasm")
 async def serve_wasm():
     from fastapi.responses import FileResponse
     return FileResponse("senkabala.wasm", media_type="application/wasm")
+
+@app.get("/senkabala.js")
+async def serve_wasm_js():
+    from fastapi.responses import FileResponse
+    return FileResponse("senkabala.js", media_type="application/javascript")
+
+@app.get("/senkabala_wasm.js")
+async def serve_wasm_wrapper():
+    from fastapi.responses import FileResponse
+    return FileResponse("senkabala_wasm.js", media_type="application/javascript")
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse

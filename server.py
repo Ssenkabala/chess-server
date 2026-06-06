@@ -881,10 +881,17 @@ async def get_move(req: MoveRequest):
             7: 0.0,    # Expert
             8: 0.0,    # Master
         }
+        # Initialise these before the if/else so both paths always define them
+        score_cp   = 0
+        candidates = []
+        move       = None
+        move_uci   = None
+
         if random.random() < random_chance.get(req.difficulty, 0):
             # Random move — instant, no engine, no semaphore
             move = random.choice(list(game_board.legal_moves))
             move_uci = move.uci()
+            candidates = [{"move": move_uci, "eval_pawns": 0}]
         else:
             # Engine move — acquire bot semaphore to limit concurrent engine processes
             async with bot_semaphore:
@@ -959,9 +966,7 @@ async def get_move(req: MoveRequest):
                 # Convert UCI string to chess.Move for pushing
                 move = chess.Move.from_uci(move_uci)
 
-            # Candidates: just return the engine's chosen move — avoids spawning a
-            # second blocking engine instance which was causing game hangs.
-            score_cp   = 0   # eval is not critical for bot games
+            # Update candidates with engine's move
             candidates = [{"move": move_uci, "eval_pawns": 0}] if move_uci else []
 
         game_board.push(move)

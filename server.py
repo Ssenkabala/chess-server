@@ -239,43 +239,56 @@ async def award_medals(user_id: str, finish_pos: int, tournament_id: str,
     return new_medals
 
 
-async def grant_pioneer_medal(user_id: str, client) -> bool:
-    """Award '1st 100 Founder' badge to players who joined when total users <= 100."""
-    count_r = await client.get(
-        f"{SUPABASE_URL}/rest/v1/profiles",
-        params={"select": "count"},
-        headers={"apikey": SUPABASE_SERVICE_KEY,
-                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                 "Prefer": "count=exact", "Range": "0-0"}
-    )
-    total_users = int(count_r.headers.get("content-range", "0/0").split("/")[-1] or 9999)
-    if total_users > 100:
+async def grant_pioneer_medal(user_id: str, client=None) -> bool:
+    """
+    Award '1st 100 Founder' badge to players who joined when total users <= 100.
+    Always opens its own httpx client — safe to run as an asyncio.create_task()
+    because it never borrows a caller's client that may already be closed.
+    """
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=10) as c:
+            count_r = await c.get(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"select": "count"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Prefer": "count=exact", "Range": "0-0"}
+            )
+            total_users = int(count_r.headers.get("content-range", "0/0").split("/")[-1] or 9999)
+            if total_users > 100:
+                return False
+
+            profile_r = await c.get(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{user_id}", "select": "medals"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            rows = profile_r.json()
+            if not rows:
+                return False
+            current_medals = rows[0].get("medals") or []
+            if any(m.get("id") == "pioneer" for m in current_medals):
+                return False
+
+            now = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+            await c.patch(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{user_id}"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"},
+                json={"medals": current_medals + [{"id": "pioneer", "label": "1st 100 Founder",
+                      "img": "pioneer",
+                      "reason": f"Among the first {total_users} players to join AfriChess",
+                      "tag": "founder", "awarded_at": now}]}
+            )
+            print(f"[medals] pioneer badge awarded to {user_id} (user #{total_users})", flush=True)
+            return True
+    except Exception as e:
+        print(f"[medals] pioneer grant failed for {user_id}: {e}", flush=True)
         return False
-    profile_r = await client.get(
-        f"{SUPABASE_URL}/rest/v1/profiles",
-        params={"user_id": f"eq.{user_id}", "select": "medals"},
-        headers={"apikey": SUPABASE_SERVICE_KEY,
-                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-    )
-    rows = profile_r.json()
-    if not rows:
-        return False
-    current_medals = rows[0].get("medals") or []
-    if any(m.get("id") == "pioneer" for m in current_medals):
-        return False
-    now = __import__("datetime").datetime.utcnow().isoformat() + "Z"
-    await client.patch(
-        f"{SUPABASE_URL}/rest/v1/profiles",
-        params={"user_id": f"eq.{user_id}"},
-        headers={"apikey": SUPABASE_SERVICE_KEY,
-                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                 "Content-Type": "application/json", "Prefer": "return=minimal"},
-        json={"medals": current_medals + [{"id": "pioneer", "label": "1st 100 Founder",
-              "img": "pioneer", "reason": f"Among the first {total_users} players to join AfriChess",
-              "tag": "founder", "awarded_at": now}]}
-    )
-    print(f"[medals] pioneer badge awarded to {user_id} (user #{total_users})", flush=True)
-    return True
 
 # ── Page presence tracker ─────────────────────────────────────────────────────
 # Maps session_token → last_seen timestamp (float).
@@ -2623,7 +2636,7 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         games = r2.json()
 
         # Award pioneer badge lazily on profile load (idempotent)
-        asyncio.create_task(grant_pioneer_medal(user_id, client))
+        asyncio.create_task(grant_pioneer_medal(user_id))
 
     # Compute stats
     wins = sum(1 for g in games if g.get("result") == g.get("player_color"))
@@ -3305,7 +3318,7 @@ async def set_username(request: Request, authorization: str = Header(None)):
 
     # Award pioneer badge if eligible (fire-and-forget)
     async with httpx.AsyncClient() as client:
-        asyncio.create_task(grant_pioneer_medal(user_id, client))
+        asyncio.create_task(grant_pioneer_medal(user_id))
 
     print(f"[profile] new user {user_id} → {username}", flush=True)
     return {"ok": True}

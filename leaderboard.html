@@ -296,6 +296,7 @@
     <div class="filter-group">
       <button class="filter-btn active" onclick="setView('continental')" id="view-continental">Continental</button>
       <button class="filter-btn" onclick="setView('country')" id="view-country">By Country</button>
+      <button class="filter-btn" onclick="toggleFemaleFilter()" id="view-female">♀ Women</button>
       <button class="filter-btn" onclick="setView('all-tc')" id="view-all-tc">All TCs</button>
     </div>
     <select class="region-select" id="region-select" onchange="setRegion(this.value)">
@@ -351,6 +352,7 @@ function FLAG(code) {
 
 let allPlayers = [];
 let currentTc   = 'blitz';
+let femaleOnly  = false;
 let currentView = 'continental';
 let currentRegion = '';
 let currentUser = null;
@@ -424,6 +426,13 @@ function setView(v) {
   applyFilters();
 }
 
+function toggleFemaleFilter() {
+  femaleOnly = !femaleOnly;
+  const btn = document.getElementById('view-female');
+  if (btn) btn.classList.toggle('active', femaleOnly);
+  applyFilters();
+}
+
 function setRegion(r) {
   currentRegion = r;
   applyFilters();
@@ -436,8 +445,9 @@ function applyFilters() {
 
   // Filter
   let filtered = allPlayers.filter(p => {
-    if (!p[col] || p[col] < 100) return false; // skip default/untouched ELOs? No — show all rated
+    if (!p[col] || p[col] < 100) return false;
     if (regionSet && !regionSet.has(p.country)) return false;
+    if (femaleOnly && p.gender !== 'female') return false;
     if (q && !(p.username || '').toLowerCase().includes(q) &&
               !(COUNTRY_NAMES[p.country] || '').toLowerCase().includes(q)) return false;
     return true;
@@ -449,15 +459,15 @@ function applyFilters() {
   // Stats strip
   const countries = new Set(filtered.map(p => p.country).filter(Boolean));
   const topElo = filtered.length ? (filtered[0][col] || 0) : 0;
-  const countByCountry = {};
-  filtered.forEach(p => { if (p.country) countByCountry[p.country] = (countByCountry[p.country]||0)+1; });
-  const topCountry = Object.entries(countByCountry).sort((a,b)=>b[1]-a[1])[0];
+  // Leading country = country of the #1 ranked player for the current TC
+  // (not by player count, which always favours the same big country)
+  const leadingCountry = filtered.length ? filtered[0].country : null;
 
   document.getElementById('stat-players').textContent   = filtered.length;
   document.getElementById('stat-countries').textContent = countries.size;
   document.getElementById('stat-top-elo').textContent   = topElo || '—';
-  document.getElementById('stat-top-country').textContent = topCountry
-    ? (FLAG(topCountry[0]) + ' ' + (COUNTRY_NAMES[topCountry[0]] || topCountry[0]))
+  document.getElementById('stat-top-country').textContent = leadingCountry
+    ? (FLAG(leadingCountry) + ' ' + (COUNTRY_NAMES[leadingCountry] || leadingCountry))
     : '—';
   document.getElementById('stats-strip').style.display = '';
 

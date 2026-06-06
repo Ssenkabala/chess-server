@@ -31,6 +31,37 @@ async function initWithModule(wasmModule) {
                     successCallback(instance, wasmModule);
                 });
                 return {};
+            },
+            // Silence engine info lines (depth/score/pv) from flooding DevTools.
+            // Emscripten routes cout/cerr through these hooks.
+            print: function(text) {
+                // info lines from iterative deepening — parse and forward
+                if (text && text.startsWith('info ')) {
+                    var parts = text.split(' ');
+                    var di = parts.indexOf('depth'),
+                        si = parts.indexOf('cp'),
+                        ti = parts.indexOf('time'),
+                        pi = parts.indexOf('pv');
+                    if (di >= 0) {
+                        self.postMessage({
+                            type:  'info',
+                            depth: parseInt(parts[di+1]) || 0,
+                            score: si >= 0 ? parseInt(parts[si+1]) : 0,
+                            time:  ti >= 0 ? parseInt(parts[ti+1]) : 0,
+                            pv:    pi >= 0 ? parts[pi+1] : '',
+                        });
+                    }
+                    return;  // suppress from console
+                }
+                // bestmove line — suppress (we get the move from cwrap return value)
+                if (text && text.startsWith('bestmove')) return;
+                // anything else: log normally
+                console.log('[engine]', text);
+            },
+            printErr: function(text) {
+                // same as print — engine writes info lines to both streams
+                if (text && (text.startsWith('info ') || text.startsWith('bestmove'))) return;
+                console.warn('[engine]', text);
             }
         });
         _init     = _module.cwrap('engine_init',      null,     []);

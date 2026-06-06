@@ -3276,12 +3276,20 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                     bonus = 1 if (won and streak >= 2) else 0
                     pts = (1 + bonus) if won else (0.5 if drew else 0)
                     conns[uid]["score"] = conns[uid].get("score", 0) + pts
+                    # Include ELO change so tournament.html can display it
+                    # (the elo_update WS msg goes to the game socket which closes on redirect)
+                    tc_str = tc_rows[0].get("time_control") if tc_rows else None
+                    elo_col = elo_col_for_tc(tc_str)
+                    p_info  = conns[uid]
+                    old_elo = p_info.get(elo_col) or p_info.get("elo", 1500)
                     await arena_send(conns[uid]["ws"], {
                         "type":       "game_over",
                         "result":     req.result,
                         "my_score":   conns[uid]["score"],
                         "streak":     streak if won else 0,
                         "streak_bonus": bonus,
+                        "old_elo":    old_elo,
+                        "elo_col":    elo_col,
                     })
             asyncio.create_task(arena_pair_delayed(tid))
     except Exception as e:
@@ -3380,6 +3388,28 @@ async def set_username(request: Request, authorization: str = Header(None)):
 
     print(f"[profile] new user {user_id} → {username}", flush=True)
     return {"ok": True}
+
+@app.post("/api/update-gender")
+async def update_gender(req: Request, user=Depends(verify_key)):
+    """Update the authenticated user's gender (male/female/prefer_not_to_say)."""
+    body   = await req.json()
+    gender = body.get("gender", "")
+    allowed = {"male", "female", "prefer_not_to_say"}
+    if gender not in allowed:
+        raise HTTPException(status_code=400, detail=f"gender must be one of {allowed}")
+    uid = user.user.id
+    async with httpx.AsyncClient() as client:
+        await client.patch(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{uid}"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json",
+                     "Prefer": "return=minimal"},
+            json={"gender": gender}
+        )
+    return {"ok": True}
+
 
 @app.post("/api/update-country")
 async def update_country(request: Request, authorization: str = Header(None)):
@@ -3737,7 +3767,7 @@ async def get_leaderboard(region: str = ""):
     """Return all profiles with ELO data for the continental leaderboard.
     Optionally filtered by African region (east_africa, west_africa, etc.)."""
     params: dict = {
-        "select": "user_id,username,country,elo,elo_bullet,elo_blitz,elo_rapid,games_played",
+        "select": "user_id,username,country,elo,elo_bullet,elo_blitz,elo_rapid,games_played,gender",
         "order":  "elo_blitz.desc.nullslast",
     }
     if region and region in REGIONS:

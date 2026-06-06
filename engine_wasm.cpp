@@ -1885,6 +1885,9 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
             }
         }
         if (bestAdv >= 5)
+#ifdef __EMSCRIPTEN__
+            if (!wasmTimerPreset)
+#endif
             searchTimeMs = min((int)(searchTimeMs * 1.15), timeMs / pctCap);
     }
     int baseTime = searchTimeMs;  // save for instability extension
@@ -1961,14 +1964,22 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
             // spend more time searching, but cap tightly relative to base time only.
             // Old cap was timeMs/6 which allowed 100s on a 10-min game.
             if(depth > 4 && bestMove != NULL_MOVE) {
+#ifdef __EMSCRIPTEN__
+                // In WASM, never extend beyond the preset movetime.
+                // The caller (JS) controls timing — extensions cause unpredictable delays.
+                if (wasmTimerPreset) {
+                    searchTimeMs = baseTime;  // no extension
+                } else {
+#endif
                 int scoreDrop = bestScore - depthBestScore;
-                // Bullet: cap instability extension at +1500ms to avoid flagging.
-                // Blitz/rapid: allow up to +5000ms / +3000ms as before.
                 int extCap1 = isBullet ? baseTime + 1500 : baseTime + 5000;
                 int extCap2 = isBullet ? baseTime + 800  : baseTime + 3000;
                 if(scoreDrop > 30)       searchTimeMs = min(baseTime*3, extCap1);
                 else if(scoreDrop > 15)  searchTimeMs = min(baseTime*2, extCap2);
                 else                     searchTimeMs = baseTime;
+#ifdef __EMSCRIPTEN__
+                }
+#endif
             }
             bestMove  = depthBest;
             bestScore = depthBestScore;

@@ -569,6 +569,27 @@ function renderProfile(d) {
       </div>
     </div>
 
+    <!-- Gender -->
+    <div class="country-row" id="gender-row" style="margin-top:8px;">
+      ${d.gender
+        ? `<span style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;">
+             ${d.gender === 'male' ? '♂' : d.gender === 'female' ? '♀' : '·'} 
+             <span style="text-transform:capitalize;">${d.gender === 'prefer_not_to_say' ? 'Not disclosed' : d.gender}</span>
+             <span style="font-size:10px;color:#333;letter-spacing:0.1em;text-transform:uppercase;margin-left:4px;">🔒 locked</span>
+           </span>`
+        : `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+             <select class="country-select" id="gender-select" onchange="genderChanged()" style="width:auto;min-width:160px;">
+               <option value="">Select gender</option>
+               <option value="male">♂ Male</option>
+               <option value="female">♀ Female</option>
+               <option value="prefer_not_to_say">· Prefer not to say</option>
+             </select>
+             <button class="btn-save-country" id="btn-save-gender" onclick="saveGender()" style="display:none;">Save</button>
+             <span class="country-saved" id="gender-saved" style="display:none;">✓ Saved</span>
+           </div>`
+      }
+    </div>
+
     <!-- Stats -->
     <div class="stats-grid">
       <div class="stat-card">
@@ -808,6 +829,11 @@ const COUNTRY_NAMES = {
   TZ:'🇹🇿 Tanzania',TG:'🇹🇬 Togo',TN:'🇹🇳 Tunisia',UG:'🇺🇬 Uganda',ZM:'🇿🇲 Zambia',ZW:'🇿🇼 Zimbabwe'
 };
 
+function genderChanged() {
+  const btn = document.getElementById('btn-save-gender');
+  if (btn) btn.style.display = '';
+}
+
 function countryChanged() {
   const sel = document.getElementById('country-select');
   if (!sel) return;
@@ -815,6 +841,32 @@ function countryChanged() {
   const saved = document.getElementById('country-saved');
   if (saved) saved.style.display = 'none';
   if (btn) btn.style.display = sel.value ? '' : 'none';
+}
+
+
+async function saveGender() {
+  const sel = document.getElementById('gender-select');
+  if (!sel) return;
+  const val = sel.value;
+  if (!val) { alert('Please select a gender.'); return; }
+  const btn = document.getElementById('btn-save-gender');
+  if (btn) btn.disabled = true;
+  const { data: { session } } = await _supabase.auth.getSession();
+  if (!session) return;
+  const r = await fetch('/api/update-gender', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+    body: JSON.stringify({ gender: val })
+  });
+  if (r.ok) {
+    const saved = document.getElementById('gender-saved');
+    if (saved) { saved.style.display = ''; setTimeout(() => { saved.style.display = 'none'; }, 2500); }
+    // Reload profile to show locked state
+    setTimeout(() => loadProfile(), 1500);
+  } else {
+    alert('Failed to save gender.');
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function saveCountry() {
@@ -919,16 +971,11 @@ init();
   </div>
 </div>
 <script>
-// ── Presence ping (keeps "players online" counter accurate on landing page) ──
-(function() {
-  const tok = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-  function ping() {
-    fetch('/api/ping', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ token: tok }) }).catch(() => {});
-  }
-  ping();
-  setInterval(ping, 30000);
-})();
+const _presenceToken = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+async function pingPresence() {
+  try { await fetch('/api/ping', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token:_presenceToken}) }); } catch(e){}
+}
+pingPresence(); setInterval(pingPresence, 30000);
 </script>
 </body>
 </html>

@@ -1876,8 +1876,16 @@ function highlightLastMove(uci) {
 // ═══════════════════════════════════════════════════════════════
 //  CLOCKS
 // ═══════════════════════════════════════════════════════════════
+function parseClockBase(tc) {
+  // '5+0' → 300, '3+2' → 180, '10+5' → 600, '0+1' → 0 (increment only, rare)
+  if (!tc) return 300;
+  var parts = tc.split('+');
+  return (parseInt(parts[0]) || 0) * 60;
+}
+
 function resetClockDisplay() {
-  clocks = { white: 300, black: 300 };
+  var base = parseClockBase(window._timeControl);
+  clocks = { white: base, black: base };
   renderClocks();
 }
 

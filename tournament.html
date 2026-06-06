@@ -1434,15 +1434,27 @@ function connectTournamentWs(tid, tournament) {
         hideArenaCountdown();
         // Track real score from server for correct pairing
         if (typeof msg.my_score === 'number') _myArenaScore = msg.my_score;
-        if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN)
+        // Only send available if NOT paused — paused players stay out of pairings
+        if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN && !_arenaPaused)
           tournamentWs.send(JSON.stringify({ type: 'available', score: _myArenaScore }));
-        // Show streak bonus notification
-        let statusMsg = 'Game over. Waiting for next pairing…';
-        if (msg.streak_bonus && msg.streak_bonus > 0) {
-          statusMsg = '🔥 Streak bonus! +' + msg.streak_bonus + ' extra point (streak: ' + msg.streak + ' wins). Waiting for next pairing…';
+        // ELO change display
+        let eloStr = '';
+        if (typeof msg.old_elo === 'number') {
+          // New ELO will arrive via elo_update on the game WS; show pending for now
+          eloStr = ' · ELO updating…';
+        }
+        // Show correct status depending on pause state
+        let statusMsg;
+        if (_arenaPaused) {
+          statusMsg = '⏸ Game over' + eloStr + '. You are paused — press Resume to rejoin pairings.';
+          hideNotifyBar();
+        } else if (msg.streak_bonus && msg.streak_bonus > 0) {
+          statusMsg = '🔥 Streak bonus! +' + msg.streak_bonus + ' point (streak: ' + msg.streak + ' wins)' + eloStr + '. Waiting for next pairing…';
+        } else {
+          statusMsg = 'Game over' + eloStr + '. Waiting for next pairing…';
         }
         showArenaStatus(statusMsg);
-        showNotifyBar('⏳ Stand by — pairing players, get ready!');
+        if (!_arenaPaused) showNotifyBar('⏳ Stand by — pairing players, get ready!');
       } else if (msg.type === 'tournament_ended') {
         hideArenaCountdown();
         const reason = msg.reason || 'Tournament has ended.';

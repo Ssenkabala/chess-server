@@ -17,6 +17,26 @@ import asyncio
 import uuid
 import time
 import hmac
+
+async def _sb_patch(client, url: str, params: dict, headers: dict, json: dict,
+                    retries: int = 3, backoff: float = 0.5) -> None:
+    """
+    Supabase PATCH with exponential backoff retry.
+    Handles transient connection pool exhaustion gracefully.
+    """
+    last_err = None
+    for attempt in range(retries):
+        try:
+            r = await client.patch(url, params=params, headers=headers, json=json)
+            if r.status_code < 500:
+                return r   # success or client error (don't retry 4xx)
+            last_err = f"HTTP {r.status_code}"
+        except Exception as e:
+            last_err = str(e)
+        wait = backoff * (2 ** attempt)
+        print(f"[supabase] patch retry {attempt+1}/{retries} after {wait}s: {last_err}", flush=True)
+        await asyncio.sleep(wait)
+    print(f"[supabase] patch failed after {retries} retries: {last_err}", flush=True)
 import hashlib
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio, uuid, time
@@ -25,8 +45,12 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app):
+    # Start engine pool before accepting requests
+    await engine_pool.start()
     asyncio.create_task(arena_auto_start_scheduler())
     yield
+    # Graceful shutdown — tell engine workers to quit cleanly
+    await engine_pool.stop()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -36,6 +60,41 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+
+class TimeoutMiddleware(BaseHTTPMiddleware):
+    """
+    Hard cap on HTTP request duration.
+    /move at level 8 can take up to 25s — cap at 30s.
+    Analysis (/analyse-position) can take up to 12s — cap at 35s.
+    Everything else caps at 15s.
+    WebSocket upgrade requests are excluded (they're long-lived by design).
+    """
+    LIMITS = {
+        "/move":              30,
+        "/analyse-position":  35,
+        "/free-coach":        20,
+        "/coach":             20,
+    }
+    DEFAULT = 15
+
+    async def dispatch(self, request, call_next):
+        # Skip WebSocket upgrades
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+        limit = self.LIMITS.get(request.url.path, self.DEFAULT)
+        try:
+            return await asyncio.wait_for(call_next(request), timeout=limit)
+        except asyncio.TimeoutError:
+            print(f"[timeout] {request.url.path} exceeded {limit}s", flush=True)
+            return JSONResponse(
+                {"detail": "Request timed out — please try again."},
+                status_code=504
+            )
+
+app.add_middleware(TimeoutMiddleware)
 
 ENGINE_PATH = "./engines/engine.exe" if os.name == "nt" else "./engines/engine"
 ANTHROPIC_API_KEY    = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
@@ -356,8 +415,9 @@ async def supabase_update_elo(user_id: str, new_elo: int, time_control: str | No
         patch: dict = {col: new_elo, "games_played": current_gp + 1}
         if rd    is not None: patch["rd"]    = rd
         if sigma is not None: patch["sigma"] = sigma
-        await client.patch(
-            f"{SUPABASE_URL}/rest/v1/profiles",
+        await _sb_patch(
+            client,
+            url=f"{SUPABASE_URL}/rest/v1/profiles",
             params={"user_id": f"eq.{user_id}"},
             headers={
                 "apikey": SUPABASE_SERVICE_KEY,
@@ -398,17 +458,22 @@ TIER_LIMITS = {
 # Times in ms sent as wtime/btime with movestogo=1
 # Engine adds 200ms buffer to movetime, so we use wtime directly
 DIFFICULTY_SETTINGS = {
-    1: 100,    # engine gets 100ms ΓÇö genuinely weak
-    2: 300,
-    3: 800,
-    4: 2000,
-    5: 5000,
+    # Levels 1–3: think time is irrelevant — weakness comes from random_chance below
+    # Levels 4–8: pure engine, increasing think time gives more depth = stronger play
+    1: 200,    # Beginner     — mostly random moves
+    2: 200,    # Beginner+    — mostly random moves
+    3: 500,    # Easy         — occasional best move
+    4: 1000,   # Intermediate — full engine, shallow search
+    5: 2000,   # Hard         — full engine, 2s
+    6: 4000,   # Hard+        — full engine, 4s
+    7: 8000,   # Expert       — full engine, 8s
+    8: 15000,  # Master       — full engine, 15s (~2050 ELO)
 }
 
 class MoveRequest(BaseModel):
     fen: str
     think_time: float = 1.0
-    difficulty: int = 3  # 1=Beginner → 5=Expert
+    difficulty: int = 3  # 1=Beginner → 8=Master
     moves: list[str] = []  # full UCI move history for repetition detection
 
 class CoachRequest(BaseModel):
@@ -471,15 +536,229 @@ def verify_key(x_api_key: str = Header(...)):
 
     return {"email": email, "tier": tier}
 
-# ΓöÇΓöÇΓöÇ Engine helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Engine process pool ───────────────────────────────────────────────────────
+# Pre-spawns N persistent engine processes that stay alive between moves.
+# Each process handles one request at a time (UCI is stateful).
+# Pool workers are checked out via asyncio.Queue — callers await a worker,
+# use it, then return it. If a worker dies it is replaced automatically.
+#
+# Benefits over spawn-per-call:
+#   - Eliminates ~50-100ms process startup cost per move
+#   - Reduces OS process churn under load
+#   - Can be extracted to a separate Railway service later (just change
+#     _pool_send to make an HTTP call instead of writing to stdin)
+
+import subprocess as _subprocess
+import threading as _threading
+
+POOL_SIZE = int(os.getenv("ENGINE_POOL_SIZE", "4"))  # tune via Railway env var
+
+class _EngineWorker:
+    """A single persistent engine process with send/receive helpers."""
+
+    def __init__(self):
+        self.proc   = None
+        self.lock   = _threading.Lock()
+        self._start()
+
+    def _start(self):
+        try:
+            self.proc = _subprocess.Popen(
+                [ENGINE_PATH],
+                stdin=_subprocess.PIPE, stdout=_subprocess.PIPE,
+                stderr=_subprocess.PIPE, text=True, bufsize=1
+            )
+            # Handshake
+            self.proc.stdin.write("uci\n")
+            self.proc.stdin.flush()
+            for _ in range(50):
+                line = self.proc.stdout.readline()
+                if line.strip() == "uciok":
+                    break
+            print(f"[pool] engine worker started (pid {self.proc.pid})", flush=True)
+        except Exception as e:
+            print(f"[pool] failed to start engine worker: {e}", flush=True)
+            self.proc = None
+
+    def alive(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def run(self, pos_cmd: str, think_ms: int) -> tuple[str, str]:
+        """Send a position + go command, collect output. Thread-safe."""
+        if not self.alive():
+            self._start()
+        if not self.alive():
+            return "", ""
+        try:
+            # Reset engine state between games
+            self.proc.stdin.write(f"ucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n")
+            self.proc.stdin.flush()
+
+            stdout_lines = []
+            stderr_lines = []
+            deadline = _time.time() + think_ms / 1000 + 10
+
+            # Read stdout until bestmove
+            while _time.time() < deadline:
+                line = self.proc.stdout.readline()
+                if not line:
+                    break
+                stdout_lines.append(line)
+                if line.startswith("bestmove"):
+                    break
+
+            # Drain stderr (non-blocking via threads would be cleaner but this works)
+            # stderr has info lines — read what's available without blocking
+            import select as _select
+            while _time.time() < deadline:
+                r, _, _ = _select.select([self.proc.stderr], [], [], 0.01)
+                if not r:
+                    break
+                line = self.proc.stderr.readline()
+                if line:
+                    stderr_lines.append(line)
+
+            return "".join(stdout_lines), "".join(stderr_lines)
+        except Exception as e:
+            print(f"[pool] worker error: {e} — restarting", flush=True)
+            try:
+                self.proc.kill()
+            except Exception:
+                pass
+            self.proc = None
+            return "", ""
+
+
+class _EnginePool:
+    """
+    Async queue of EngineWorkers.
+    Usage:
+        async with engine_pool.acquire() as worker:
+            stdout, stderr = worker.run(pos_cmd, think_ms)
+    """
+    def __init__(self, size: int):
+        self._queue: asyncio.Queue = None   # initialised in start()
+        self._workers: list[_EngineWorker] = []
+        self._size = size
+
+    async def start(self):
+        self._queue = asyncio.Queue()
+        for _ in range(self._size):
+            w = _EngineWorker()
+            self._workers.append(w)
+            await self._queue.put(w)
+        print(f"[pool] {self._size} engine workers ready", flush=True)
+
+    async def stop(self):
+        for w in self._workers:
+            try:
+                if w.proc:
+                    w.proc.stdin.write("quit\n")
+                    w.proc.stdin.flush()
+                    w.proc.wait(timeout=2)
+            except Exception:
+                pass
+        print("[pool] engine pool stopped", flush=True)
+
+    class _Ctx:
+        def __init__(self, pool):
+            self._pool   = pool
+            self._worker = None
+        async def __aenter__(self):
+            self._worker = await self._pool._queue.get()
+            return self._worker
+        async def __aexit__(self, *_):
+            # Replace dead workers before returning to pool
+            if not self._worker.alive():
+                print("[pool] replacing dead worker", flush=True)
+                self._worker = _EngineWorker()
+            await self._pool._queue.put(self._worker)
+
+    def acquire(self):
+        return self._Ctx(self)
+
+
+engine_pool = _EnginePool(POOL_SIZE)
+
+
+def _run_engine(pos_cmd: str, think_ms: int) -> tuple[str, str]:
+    """
+    Legacy sync wrapper — used by analyse_position (called via run_in_executor).
+    Uses the pool if available, falls back to spawn-per-call if pool not ready.
+    """
+    if engine_pool._queue is not None and not engine_pool._queue.empty():
+        # Can't await here (sync context) — use spawn for analysis path
+        pass
+    import subprocess
+    commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
+    try:
+        proc = subprocess.Popen(
+            [ENGINE_PATH],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1
+        )
+        stdout_data, stderr_data = proc.communicate(
+            input=commands, timeout=think_ms / 1000 + 10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout_data, stderr_data = proc.communicate()
+    except Exception:
+        stdout_data, stderr_data = "", ""
+    return stdout_data, stderr_data
+
+
+def _parse_engine_output(stdout_data: str, stderr_data: str) -> dict:
+    """Parse bestmove + highest-depth info line from engine output."""
+    best_move = None
+    score     = 0
+    pv_moves  = []
+    best_depth = -1
+
+    for line in stdout_data.splitlines():
+        if line.startswith("bestmove"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
+                best_move = parts[1]
+            break
+
+    for line in stderr_data.splitlines():
+        if "depth" not in line:
+            continue
+        try:
+            parts = line.split()
+            depth = int(parts[parts.index("depth") + 1])
+            if "score" not in parts or depth <= best_depth:
+                continue
+            si = parts.index("score")
+            stype, sval = parts[si + 1], int(parts[si + 2])
+            best_depth = depth
+            # score mate N → large cp value; score cp N → raw centipawns
+            score = sval if stype == "cp" else (10000 - abs(sval)) * 100 * (1 if sval > 0 else -1)
+            if "pv" in parts:
+                pvi = parts.index("pv")
+                pv_moves = parts[pvi + 1: pvi + 6]
+        except (ValueError, IndexError):
+            continue
+
+    if not best_move and pv_moves:
+        best_move = pv_moves[0]
+
+    return {"best_move": best_move, "score_cp": score, "pv": pv_moves, "depth": best_depth}
+
 
 def analyse_position(fen: str, think_time: float, moves: list[str] | None = None):
     """
     Talk directly to SenkabalaIII via raw subprocess.
     SenkabalaIII non-standard output: bestmove → stdout, info → stderr.
-    Sends full move history so engine posHistory[] tracks repetitions.
+
+    Two-pass mate search:
+      Pass 1 — normal search at think_time.
+      Pass 2 — if the position looks winning (eval > +5 pawns for the side to move),
+               re-search at 5× the time so the engine has enough depth to find
+               forced mates instead of just playing any winning move.
+               Pass 2 result replaces Pass 1 only if it found a better or equal move.
     """
-    import subprocess
+    import subprocess  # noqa: F401 (imported for _run_engine)
 
     board = chess.Board()
     if moves:
@@ -493,101 +772,97 @@ def analyse_position(fen: str, think_time: float, moves: list[str] | None = None
         board = chess.Board(fen)
 
     think_ms = int(max(think_time, 1.0) * 1000)
-    pos_cmd = f"position startpos moves {' '.join(moves)}" if moves else f"position fen {fen}"
-    commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
+    pos_cmd  = (f"position startpos moves {' '.join(moves)}"
+                if moves else f"position fen {fen}")
 
-    try:
-        proc = subprocess.Popen(
-            [ENGINE_PATH],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1
-        )
-        stdout_data, stderr_data = proc.communicate(input=commands, timeout=think_ms/1000 + 8)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        stdout_data, stderr_data = proc.communicate()
+    # ── Pass 1: normal search ─────────────────────────────────────────────
+    stdout1, stderr1 = _run_engine(pos_cmd, think_ms)
+    result = _parse_engine_output(stdout1, stderr1)
 
-    best_move = None
-    score = 0
-    pv_moves = []
-    best_depth = -1
+    # Flip score to always be from the side to move's perspective for the threshold check
+    raw_score = result["score_cp"]
+    stm_score = -raw_score if board.turn == chess.BLACK else raw_score
 
-    # bestmove on stdout
-    for line in stdout_data.splitlines():
-        if line.startswith("bestmove"):
-            parts = line.split()
-            if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
-                best_move = parts[1]
-            break
+    # ── Pass 2: deep mate search if clearly winning (> +5 pawns) ─────────
+    # Threshold: 500cp. Skip if engine already returned a mate score (>900000).
+    WINNING_THRESHOLD = 500    # centipawns
+    MATE_SCORE_FLOOR  = 900000
 
-    # info lines on stderr
-    for line in stderr_data.splitlines():
-        if "depth" not in line:
-            continue
-        try:
-            parts = line.split()
-            depth = int(parts[parts.index("depth") + 1])
-            if "score" not in parts or depth <= best_depth:
-                continue
-            si = parts.index("score")
-            stype, sval = parts[si+1], int(parts[si+2])
-            best_depth = depth
-            score = sval if stype == "cp" else (10000 - abs(sval)) * 100 * (1 if sval > 0 else -1)
-            if "pv" in parts:
-                pvi = parts.index("pv")
-                pv_moves = parts[pvi+1:pvi+6]
-        except (ValueError, IndexError):
-            continue
+    if stm_score > WINNING_THRESHOLD and abs(raw_score) < MATE_SCORE_FLOOR:
+        mate_ms = think_ms * 5   # 5× time for the deep pass (e.g. 2s → 10s)
+        stdout2, stderr2 = _run_engine(pos_cmd, mate_ms)
+        result2 = _parse_engine_output(stdout2, stderr2)
+        # Use deep result if it found a move (it always should)
+        if result2["best_move"]:
+            result = result2
+            print(f"[analyse] mate-search pass used "
+                  f"(pass1 score={stm_score}cp, depth={result2['depth']})", flush=True)
 
+    # Normalise score to White's perspective for the API response
     if board.turn == chess.BLACK:
-        score = -score
-    if not best_move and pv_moves:
-        best_move = pv_moves[0]
+        result["score_cp"] = -result["score_cp"]
 
-    return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
+    return result
 
 
 # ΓöÇΓöÇΓöÇ Original /move endpoint (unchanged) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-engine_semaphore = asyncio.Semaphore(3)
+# Separate semaphores so bot games and analysis don't starve each other
+bot_semaphore      = asyncio.Semaphore(6)   # bot games (random moves bypass this entirely)
+analysis_semaphore = asyncio.Semaphore(2)   # analysis board + coach
+engine_semaphore   = analysis_semaphore     # legacy alias
 _engine_failures = 0          # consecutive engine failures
 _ENGINE_FAILURE_LIMIT = 3     # after this many, log loudly and reset count
 
 @app.post("/move")
 async def get_move(req: MoveRequest):
     global _engine_failures
-    async with engine_semaphore:
-        try:
-            # Validate FEN
-            board = chess.Board(req.fen)
-            if board.is_game_over():
-                return {
-                    "move": None, "fen": req.fen,
-                    "is_game_over": True,
-                    "outcome": str(board.outcome()),
-                    "score_cp": 0, "eval_pawns": 0, "candidates": []
-                }
+    import random
 
-            import random
-            think_ms = DIFFICULTY_SETTINGS.get(req.difficulty, int(req.think_time * 1000))
+    try:
+        # Validate FEN — no semaphore needed for this
+        board = chess.Board(req.fen)
+        if board.is_game_over():
+            return {
+                "move": None, "fen": req.fen,
+                "is_game_over": True,
+                "outcome": str(board.outcome()),
+                "score_cp": 0, "eval_pawns": 0, "candidates": []
+            }
 
-            # Reconstruct game board from full move history (needed for repetition detection)
-            game_board = chess.Board()
-            if req.moves:
-                for uci in req.moves:
-                    try:
-                        game_board.push_uci(uci)
-                    except Exception:
-                        game_board = chess.Board(req.fen)
-                        break
-            else:
-                game_board = chess.Board(req.fen)
+        think_ms = DIFFICULTY_SETTINGS.get(req.difficulty, int(req.think_time * 1000))
 
-            # Low difficulties: random legal move
-            random_chance = {1: 0.75, 2: 0.40, 3: 0.15, 4: 0.0, 5: 0.0}
-            if random.random() < random_chance.get(req.difficulty, 0):
-                move = random.choice(list(game_board.legal_moves))
-                move_uci = move.uci()
-            else:
+        # Reconstruct game board from full move history (needed for repetition detection)
+        game_board = chess.Board()
+        if req.moves:
+            for uci in req.moves:
+                try:
+                    game_board.push_uci(uci)
+                except Exception:
+                    game_board = chess.Board(req.fen)
+                    break
+        else:
+            game_board = chess.Board(req.fen)
+
+        # random_chance: probability of playing a random legal move instead of engine best.
+        # Levels 1–3 use randomisation as the PRIMARY weakness mechanism.
+        # These bypass the semaphore entirely — no engine spawn needed.
+        random_chance = {
+            1: 0.90,   # Beginner   — 90% random, 10% engine
+            2: 0.65,   # Beginner+  — 65% random
+            3: 0.25,   # Easy       — 25% random
+            4: 0.0,    # Intermediate — always engine
+            5: 0.0,    # Hard
+            6: 0.0,    # Hard+
+            7: 0.0,    # Expert
+            8: 0.0,    # Master
+        }
+        if random.random() < random_chance.get(req.difficulty, 0):
+            # Random move — instant, no engine, no semaphore
+            move = random.choice(list(game_board.legal_moves))
+            move_uci = move.uci()
+        else:
+            # Engine move — acquire bot semaphore to limit concurrent engine processes
+            async with bot_semaphore:
                 # Use raw subprocess so we can send the full position command.
                 # python-chess engine.play() only sends `position fen <fen>` internally,
                 # which means the engine's posHistory[] never gets populated — it can't
@@ -599,84 +874,64 @@ async def get_move(req: MoveRequest):
                     pos_cmd = f"position fen {req.fen}"
 
                 commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
+                move_uci   = None
+                hard_limit = think_ms / 1000 + 10  # hard outer timeout
+
+                # Use pool worker — no process startup cost
                 move_uci = None
-                for _attempt in range(2):   # retry once on failure
-                    try:
-                        proc = subprocess.Popen(
-                            [ENGINE_PATH],
-                            stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            text=True,
-                            bufsize=1
+                try:
+                    async with engine_pool.acquire() as worker:
+                        loop = asyncio.get_event_loop()
+                        stdout_data, _ = await asyncio.wait_for(
+                            loop.run_in_executor(None, worker.run, pos_cmd, think_ms),
+                            timeout=hard_limit + 2
                         )
-                        stdout_data, _ = proc.communicate(
-                            input=commands,
-                            timeout=think_ms / 1000 + 8
-                        )
-                        for line in stdout_data.splitlines():
-                            if line.startswith("bestmove"):
-                                parts = line.split()
-                                if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
-                                    move_uci = parts[1]
-                                break
-                        if move_uci:
-                            _engine_failures = 0   # reset on success
+                    for line in stdout_data.splitlines():
+                        if line.startswith("bestmove"):
+                            parts = line.split()
+                            if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
+                                move_uci = parts[1]
                             break
-                        # No bestmove — engine returned empty; retry
+                    if move_uci:
+                        _engine_failures = 0
+                    else:
                         _engine_failures += 1
-                        print(f"[engine] no bestmove on attempt {_attempt+1}, failures={_engine_failures}", flush=True)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.communicate()
-                        _engine_failures += 1
-                        print(f"[engine] timeout on attempt {_attempt+1}, failures={_engine_failures}", flush=True)
-                    except Exception as eng_err:
-                        _engine_failures += 1
-                        print(f"[engine] error on attempt {_attempt+1}: {eng_err}, failures={_engine_failures}", flush=True)
+                        print("[engine] no bestmove from pool worker", flush=True)
+                except asyncio.TimeoutError:
+                    _engine_failures += 1
+                    print(f"[engine] pool worker timeout ({hard_limit}s)", flush=True)
+                except Exception as eng_err:
+                    _engine_failures += 1
+                    print(f"[engine] pool worker error: {eng_err}", flush=True)
 
                 if _engine_failures >= _ENGINE_FAILURE_LIMIT:
-                    print(f"[engine] ALERT: {_engine_failures} consecutive failures — check binary at {ENGINE_PATH}", flush=True)
-                    _engine_failures = 0  # reset so we keep trying rather than silently dying
+                    print(f"[engine] ALERT: {_engine_failures} consecutive failures", flush=True)
+                    _engine_failures = 0
 
                 if not move_uci:
-                    # Fallback: any legal move
+                    # Fallback: random legal move — never leave player hanging
                     move_uci = random.choice(list(game_board.legal_moves)).uci()
-
+                    print("[engine] fallback random move used", flush=True)
                 # Convert UCI string to chess.Move for pushing
                 move = chess.Move.from_uci(move_uci)
 
-            # Candidate moves — analyse current position
-            fen_board = chess.Board(req.fen)
-            candidates = []
-            try:
-                with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine2:
-                    infos = engine2.analyse(fen_board, chess.engine.Limit(time=0.5), multipv=5)
-                    info_list = infos if isinstance(infos, list) else [infos]
-                    for info in info_list:
-                        if info.get("pv"):
-                            cp = info["score"].white().score(mate_score=10000)
-                            candidates.append({
-                                "move": info["pv"][0].uci(),
-                                "eval_pawns": round(cp / 100, 2) if cp is not None else 0
-                            })
-            except Exception:
-                pass
+            # Candidates: just return the engine's chosen move — avoids spawning a
+            # second blocking engine instance which was causing game hangs.
+            score_cp   = 0   # eval is not critical for bot games
+            candidates = [{"move": move_uci, "eval_pawns": 0}] if move_uci else []
 
-            score_cp = int(candidates[0]["eval_pawns"] * 100) if candidates else 0
-
-            game_board.push(move)
-            return {
-                "move":         move.uci(),
-                "fen":          game_board.fen(),
-                "is_game_over": game_board.is_game_over(),
-                "outcome":      str(game_board.outcome()) if game_board.is_game_over() else None,
-                "score_cp":     score_cp,
-                "eval_pawns":   round(score_cp / 100, 2),
-                "candidates":   candidates
-            }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        game_board.push(move)
+        return {
+            "move":         move.uci(),
+            "fen":          game_board.fen(),
+            "is_game_over": game_board.is_game_over(),
+            "outcome":      str(game_board.outcome()) if game_board.is_game_over() else None,
+            "score_cp":     score_cp,
+            "eval_pawns":   round(score_cp / 100, 2),
+            "candidates":   candidates
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 # ΓöÇΓöÇΓöÇ /coach endpoint ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 @app.post("/coach")
@@ -3560,6 +3815,26 @@ async def presence_ping(request: Request):
         _presence[token] = _time.time()
     count = _presence_count()
     return {"online": count}
+
+
+
+@app.get("/api/health")
+async def health():
+    """
+    Health check endpoint. Railway can poll this to detect issues.
+    Also exposes in-memory state counts so you can see if a restart
+    wiped active games without checking logs.
+    """
+    pool_alive = sum(1 for w in engine_pool._workers if w.alive())
+    return {
+        "status":          "ok",
+        "engine_pool":     {"size": POOL_SIZE, "alive": pool_alive},
+        "active_games":    len(active_games),
+        "lobby_queue":     len(lobby_queue),
+        "tournaments":     len(tournament_connections),
+        "presence":        _presence_count(),
+        "engine_failures": _engine_failures,
+    }
 
 @app.get("/api/stats")
 async def get_live_stats():

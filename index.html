@@ -1701,6 +1701,12 @@ function _ensureWasmEngine() {
   return _wasmEngine;
 }
 
+function _wasmReady() {
+  // Returns true only when the engine worker is fully initialised.
+  // Prevents mixing server+WASM paths within the same game.
+  return _wasmEngine && _wasmEngine._ready;
+}
+
 function getEngineMove() {
   var fen   = game.fen();
   var moves = uciHistory.slice();
@@ -1709,34 +1715,47 @@ function getEngineMove() {
 
   if (wasmEng) {
     // ── WASM path: engine runs in browser, no server call ──────────────────
-    // Show animated thinking indicator
     var thinkMs = WASM_DIFFICULTY_MS ? (WASM_DIFFICULTY_MS[diff] || 1000) : 1000;
-    if (thinkMs >= 1000) {
-      var dots = 0;
-      var thinkInterval = setInterval(function() {
-        dots = (dots + 1) % 4;
-        setStatus('Engine thinking' + '.'.repeat(dots));
-      }, 400);
-      setTimeout(function() { clearInterval(thinkInterval); }, thinkMs + 2000);
-    }
 
-    wasmGetMove({
-      fen:        fen,
-      moves:      moves,
-      difficulty: diff,
-      engine:     wasmEng,
-      chess:      game
-    }).then(function(uciMove) {
-      if (!uciMove) {
-        engineThinking = false;
-        if (game.game_over()) { showResult(); }
-        return;
+    // If engine is still loading, wait for it (prevents mixing WASM+server in same game)
+    var doSearch = function() {
+      if (thinkMs >= 1000) {
+        var dots = 0;
+        var thinkInterval = setInterval(function() {
+          dots = (dots + 1) % 4;
+          setStatus('Engine thinking' + '.'.repeat(dots));
+        }, 400);
+        setTimeout(function() { clearInterval(thinkInterval); }, thinkMs + 2000);
       }
-      _applyEngineMove(uciMove);
-    }).catch(function(err) {
-      console.warn('[bot] WASM error, falling back to server:', err);
-      _getEngineMoveFromServer(fen, moves, diff);
-    });
+
+      wasmGetMove({
+        fen:        fen,
+        moves:      moves,
+        difficulty: diff,
+        engine:     wasmEng,
+        chess:      game
+      }).then(function(uciMove) {
+        if (!uciMove) {
+          engineThinking = false;
+          if (game.game_over()) { showResult(); }
+          return;
+        }
+        _applyEngineMove(uciMove);
+      }).catch(function(err) {
+        console.warn('[bot] WASM error, falling back to server:', err);
+        _getEngineMoveFromServer(fen, moves, diff);
+      });
+    };
+
+    if (_wasmReady()) {
+      doSearch();
+    } else {
+      // Engine loading — show brief wait message then search
+      setStatus('Loading engine…');
+      wasmEng.ready().then(doSearch).catch(function() {
+        _getEngineMoveFromServer(fen, moves, diff);
+      });
+    }
   } else {
     // ── Server fallback: original /move API ─────────────────────────────────
     _getEngineMoveFromServer(fen, moves, diff);

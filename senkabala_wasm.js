@@ -76,7 +76,23 @@ class SenkabalaEngine {
 
   bestMove(fen, moves = [], movetime = 1000) {
     if (!this._worker) return Promise.reject(new Error('Worker not available'));
-    if (!this._ready)  return Promise.reject(new Error('Engine not ready'));
+
+    // If not ready yet, wait up to 30s for the engine to initialise
+    if (!this._ready) {
+      return new Promise((resolve, reject) => {
+        const deadline = Date.now() + 30000;
+        const poll = () => {
+          if (this._ready) {
+            this.bestMove(fen, moves, movetime).then(resolve).catch(reject);
+          } else if (Date.now() > deadline) {
+            reject(new Error('Engine timed out waiting for ready'));
+          } else {
+            setTimeout(poll, 100);
+          }
+        };
+        poll();
+      });
+    }
 
     const id = ++this._idSeq;
     return new Promise((resolve, reject) => {

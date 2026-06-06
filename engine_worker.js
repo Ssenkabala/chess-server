@@ -1,77 +1,53 @@
 /**
- * engine_worker.js — WebWorker wrapper for SenkabalaIII WASM
+ * engine_worker.js — WebWorker for SenkabalaIII WASM
  *
- * Runs the engine in a background thread so:
- *   1. The UI never freezes during long searches
- *   2. The browser watchdog timer never fires
- *   3. The main thread stays fully responsive
+ * Accepts a pre-compiled WebAssembly.Module from the main thread
+ * to avoid recompiling the WASM binary in the worker context.
  *
- * Messages IN  (main → worker):
- *   { type: 'init' }
+ * Messages IN:
+ *   { type: 'module', wasmModule }   ← send compiled module first
  *   { type: 'search', id, fen, moves, movetime_ms }
- *   { type: 'stop' }
  *
- * Messages OUT (worker → main):
+ * Messages OUT:
  *   { type: 'ready' }
  *   { type: 'result', id, move }
  *   { type: 'error',  id, message }
- *   { type: 'info',   depth, score, time, pv }  ← optional, for display
+ *   { type: 'info',   depth, score, time, pv }
  */
 
-// Suppress engine's info lines from flooding DevTools
-// Emscripten routes cerr to console.error — we intercept it
-const _origError = console.error.bind(console);
-console.error = function(...args) {
-    const msg = args[0];
-    if (typeof msg === 'string' && msg.startsWith('info ')) {
-        // Parse and forward as structured info message
-        const parts = msg.split(' ');
-        const depthIdx = parts.indexOf('depth');
-        const scoreIdx = parts.indexOf('cp');
-        const timeIdx  = parts.indexOf('time');
-        const pvIdx    = parts.indexOf('pv');
-        if (depthIdx >= 0) {
-            self.postMessage({
-                type:  'info',
-                depth: parseInt(parts[depthIdx + 1]) || 0,
-                score: scoreIdx >= 0 ? parseInt(parts[scoreIdx + 1]) : 0,
-                time:  timeIdx  >= 0 ? parseInt(parts[timeIdx  + 1]) : 0,
-                pv:    pvIdx    >= 0 ? parts[pvIdx + 1] : '',
-            });
-        }
-        return;  // don't log to console
-    }
-    _origError(...args);
-};
-
-// Load the Emscripten module
 importScripts('/senkabala.js');
 
-let _module  = null;
-let _init    = null;
+let _module   = null;
+let _init     = null;
 let _bestMove = null;
-let _ready   = false;
+let _ready    = false;
 
-async function loadEngine() {
+async function initWithModule(wasmModule) {
     try {
-        _module   = await SenkabalaModule();
+        // Instantiate from the pre-compiled module — fast, no recompilation
+        _module = await SenkabalaModule({
+            instantiateWasm: function(imports, successCallback) {
+                WebAssembly.instantiate(wasmModule, imports).then(function(instance) {
+                    successCallback(instance, wasmModule);
+                });
+                return {};
+            }
+        });
         _init     = _module.cwrap('engine_init',      null,     []);
         _bestMove = _module.cwrap('engine_best_move', 'string', ['string', 'string', 'number']);
         _init();
         _ready = true;
         self.postMessage({ type: 'ready' });
     } catch(e) {
-        self.postMessage({ type: 'error', id: null, message: String(e) });
+        self.postMessage({ type: 'error', id: null, message: 'Engine init failed: ' + String(e) });
     }
 }
-
-loadEngine();
 
 self.onmessage = function(e) {
     const msg = e.data;
 
-    if (msg.type === 'init') {
-        if (_ready) self.postMessage({ type: 'ready' });
+    if (msg.type === 'module') {
+        initWithModule(msg.wasmModule);
         return;
     }
 

@@ -1,42 +1,46 @@
 /**
- * senkabala_wasm.js — Main-thread interface to SenkabalaIII WASM engine
+ * senkabala_wasm.js
  *
- * Uses a WebWorker so the engine runs in a background thread:
- *   - UI never freezes during long searches
- *   - Browser watchdog never fires
- *   - Multiple searches can be queued
- *
- * Usage:
- *   const engine = new SenkabalaEngine();
- *   await engine.ready();
- *   const move = await engine.bestMove(fen, moves, movetime_ms);
+ * Compiles senkabala.wasm once on the main thread using streaming compilation
+ * (fastest possible — browser can compile while downloading), then transfers
+ * the compiled WebAssembly.Module to the worker. The worker only needs to
+ * instantiate it (milliseconds) rather than recompile (minutes).
  */
 
 class SenkabalaEngine {
   constructor() {
-    this._worker   = null;
-    this._ready    = false;
-    this._pending  = new Map();   // id → { resolve, reject }
-    this._idSeq    = 0;
+    this._worker  = null;
+    this._ready   = false;
+    this._pending = new Map();
+    this._idSeq   = 0;
     this._readyWaiters = [];
 
-    this._init();
+    this._start();
   }
 
-  _init() {
+  async _start() {
     try {
+      // Step 1: compile WASM on the main thread (streaming = fastest)
+      const wasmModule = await WebAssembly.compileStreaming(
+        fetch('/senkabala.wasm')
+      );
+
+      // Step 2: spin up the worker
       this._worker = new Worker('/engine_worker.js');
       this._worker.onmessage = (e) => this._onMessage(e.data);
-      this._worker.onerror   = (e) => {
-        console.error('[SenkabalaWASM] Worker error:', e.message);
-        // Reject all pending
-        for (const [id, { reject }] of this._pending) {
-          reject(new Error(e.message));
+      this._worker.onerror   = (err) => {
+        console.error('[SenkabalaWASM] Worker error:', err.message);
+        for (const { reject } of this._pending.values()) {
+          reject(new Error(err.message));
         }
         this._pending.clear();
       };
+
+      // Step 3: send the compiled module to the worker (transferable)
+      this._worker.postMessage({ type: 'module', wasmModule });
+
     } catch(e) {
-      console.warn('[SenkabalaWASM] WebWorker failed to start:', e);
+      console.warn('[SenkabalaWASM] Failed to start:', e);
       this._worker = null;
     }
   }
@@ -51,8 +55,8 @@ class SenkabalaEngine {
     }
 
     if (msg.type === 'info') {
-      // Optional: could display depth/score in UI
-      // console.log(`[engine] depth ${msg.depth} score ${msg.score} time ${msg.time} pv ${msg.pv}`);
+      // Uncomment to show search depth in console:
+      // console.log(`[engine] depth ${msg.depth} time ${msg.time}ms pv ${msg.pv}`);
       return;
     }
 
@@ -61,14 +65,13 @@ class SenkabalaEngine {
       if (!p) return;
       this._pending.delete(msg.id);
       if (msg.type === 'result') p.resolve(msg.move);
-      else                        p.reject(new Error(msg.message));
-      return;
+      else p.reject(new Error(msg.message));
     }
   }
 
   ready() {
     if (this._ready) return Promise.resolve();
-    if (!this._worker) return Promise.reject(new Error('Worker not available'));
+    if (!this._worker) return Promise.reject(new Error('Engine unavailable'));
     return new Promise((resolve) => {
       this._readyWaiters.push(resolve);
     });
@@ -77,58 +80,36 @@ class SenkabalaEngine {
   bestMove(fen, moves = [], movetime = 1000) {
     if (!this._worker) return Promise.reject(new Error('Worker not available'));
 
-    // If not ready yet, wait up to 30s for the engine to initialise
     if (!this._ready) {
-      return new Promise((resolve, reject) => {
-        const deadline = Date.now() + 30000;
-        const poll = () => {
-          if (this._ready) {
-            this.bestMove(fen, moves, movetime).then(resolve).catch(reject);
-          } else if (Date.now() > deadline) {
-            reject(new Error('Engine timed out waiting for ready'));
-          } else {
-            setTimeout(poll, 100);
-          }
-        };
-        poll();
-      });
+      // Wait for ready, then search
+      return this.ready().then(() => this.bestMove(fen, moves, movetime));
     }
 
     const id = ++this._idSeq;
     return new Promise((resolve, reject) => {
       this._pending.set(id, { resolve, reject });
-      this._worker.postMessage({
-        type:        'search',
-        id,
-        fen,
-        moves,
-        movetime_ms: movetime,
-      });
+      this._worker.postMessage({ type: 'search', id, fen, moves, movetime_ms: movetime });
     });
   }
 
   newGame() {
-    // TT is cleared on next init — reinitialise the worker for clean state
-    if (this._worker) {
-      this._worker.postMessage({ type: 'init' });
-    }
+    // TT persists across games in the worker — intentional (helps with opening book)
   }
 }
 
-// Difficulty → movetime mapping (mirrors server DIFFICULTY_SETTINGS)
 // Must exactly match server.py DIFFICULTY_SETTINGS
 const WASM_DIFFICULTY_MS = {
-  1:   200,   // Beginner     — mostly random (movetime irrelevant)
-  2:   200,   // Beginner+
-  3:   500,   // Easy
-  4:  1000,   // Intermediate
-  5:  2000,   // Hard
-  6:  4000,   // Hard+
-  7:  8000,   // Expert
-  8: 15000,   // Master
+  1:   200,
+  2:   200,
+  3:   500,
+  4:  1000,
+  5:  2000,
+  6:  4000,
+  7:  8000,
+  8: 15000,
 };
 
-// Random move chance per difficulty (mirrors server random_chance)
+// Must exactly match server.py random_chance
 const WASM_RANDOM_CHANCE = {
   1: 0.90,
   2: 0.65,
@@ -140,10 +121,6 @@ const WASM_RANDOM_CHANCE = {
   8: 0.00,
 };
 
-/**
- * Get engine move respecting difficulty.
- * Replaces the /move API call when WASM engine is available.
- */
 async function wasmGetMove({ fen, moves, difficulty, engine, chess }) {
   const randomChance = WASM_RANDOM_CHANCE[difficulty] ?? 0;
 

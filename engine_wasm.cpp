@@ -1299,7 +1299,7 @@ int evaluate(const Board& b) {
 enum TTFlag { TT_EXACT, TT_LOWER, TT_UPPER };
 struct TTEntry { U64 hash; int score, depth; Move bestMove; TTFlag flag; };
 #ifdef __EMSCRIPTEN__
-const int TT_SIZE = 1<<20;  // WASM: 1M entries ~20MB (browser memory limit)
+const int TT_SIZE = 1<<20;  // WASM: 1M entries ~20MB
 #else
 const int TT_SIZE = 1<<23;  // Native: 8M entries ~160MB
 #endif
@@ -1441,6 +1441,8 @@ Move counterMove[64][64];
 auto searchStart = chrono::steady_clock::now();
 int  searchTimeMs = 1000;
 atomic<bool> stopNow{false};
+// When true, search() skips time recalculation (set by WASM engine_best_move)
+bool wasmTimerPreset = false;
 atomic<bool> pondering{false};  // true while pondering (infinite search until "stop")
 Move ponderMove = NULL_MOVE;    // the expected opponent reply we're pondering on
 
@@ -1840,35 +1842,30 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
     searchStart=chrono::steady_clock::now();
     stopNow=false;
 
+    // Declare all time variables up front so they stay in scope
+    // throughout search() even when recalculation is skipped in WASM.
     int totalTime = (b.turn==WHITE) ? wtime : btime;
-    int timeMs  = max(0, totalTime - 200);  // subtract 200ms safety buffer
-    int inc     = (b.turn==WHITE) ? winc  : binc;
-
-    // ----------------------------------------------------------------
-    // TIME MANAGEMENT (v18 revision)
-    //
-    // Bullet (<=60s): assume 30 moves remaining — positions resolve
-    // faster, opponent moves quickly. Cap raised to 5% so the engine
-    // uses available think time per move without going short.
-    //
-    // Blitz (60-300s): assume 40 moves, 4% cap.
-    // Rapid+ (>300s):  assume 40 moves, 3% cap.
-    // ----------------------------------------------------------------
+    int timeMs    = max(0, totalTime - 200);
+    int inc       = (b.turn==WHITE) ? winc  : binc;
     bool isBullet = (totalTime <= 60000);
     bool isBlitz  = (totalTime > 60000 && totalTime <= 300000);
     bool isRapid  = (totalTime > 300000 && totalTime <= 600000);
-    int safetyMs  = isBullet ? 400 : 200;
-    timeMs        = max(0, totalTime - safetyMs);
-    int defaultMoves = isBullet ? 50 : 40;
-    int moves = (movestogo > 0) ? movestogo : defaultMoves;
-    searchTimeMs = max(10, timeMs / moves + (inc * 4) / 5);
-    int pctCap;
-    if      (isBullet) pctCap = 50;
-    else if (isBlitz)  pctCap = 25;
-    else if (isRapid)  pctCap = 33;
-    else               pctCap = 40;
-    searchTimeMs = min(searchTimeMs, timeMs / pctCap);
-    searchTimeMs = max(searchTimeMs, 10);
+    int pctCap    = isBullet ? 50 : isBlitz ? 25 : isRapid ? 33 : 40;
+
+#ifdef __EMSCRIPTEN__
+    if (!wasmTimerPreset)
+#endif
+    {
+        // TIME MANAGEMENT (v18 revision) — skipped in WASM when movetime preset
+        // Bullet (<=60s): pctCap=50. Blitz (60-300s): 25. Rapid+: 33/40.
+        int safetyMs     = isBullet ? 400 : 200;
+        timeMs           = max(0, totalTime - safetyMs);
+        int defaultMoves = isBullet ? 50 : 40;
+        int moves        = (movestogo > 0) ? movestogo : defaultMoves;
+        searchTimeMs     = max(10, timeMs / moves + (inc * 4) / 5);
+        searchTimeMs     = min(searchTimeMs, timeMs / pctCap);
+        searchTimeMs     = max(searchTimeMs, 10);
+    }
 
     // Advanced passed pawn: one-shot +15% extension, only for our pawns
     // on rank 6+ (truly about to promote). Does not compound.
@@ -2319,33 +2316,25 @@ int main(){
 // WASM / EMSCRIPTEN PORT
 // ============================================================
 // This block compiles ONLY when building with Emscripten.
-// The native UCI build (cl/g++/clang) is completely unaffected.
+// The native UCI build is completely unaffected.
 //
-// Two exported functions replace the stdin/stdout UCI loop:
-//   engine_init()                  — call once on load
-//   engine_best_move(fen, moves, movetime_ms) — returns UCI move string
-//
-// Threading is not used — search runs synchronously.
-// TT is reduced to 1<<20 entries (~20MB) to fit browser memory.
-//
-// Build:
-//   emcc engine.cpp -O3 -std=c++17 \
+// Build command:
+//   emcc engine_wasm.cpp -O3 -std=c++17 -fno-exceptions \
 //        -s WASM=1 \
-//        -s EXPORTED_FUNCTIONS='["_engine_init","_engine_best_move"]' \
-//        -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","allocate","intArrayFromString","ALLOC_NORMAL"]' \
+//        -s "EXPORTED_FUNCTIONS=['_engine_init','_engine_best_move']" \
+//        -s "EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString']" \
 //        -s ALLOW_MEMORY_GROWTH=1 \
-//        -s INITIAL_MEMORY=67108864 \
-//        -s MAXIMUM_MEMORY=268435456 \
+//        -s INITIAL_MEMORY=134217728 \
+//        -s MAXIMUM_MEMORY=536870912 \
+//        -s STACK_SIZE=4194304 \
 //        -s ENVIRONMENT=web \
 //        -s MODULARIZE=1 \
 //        -s EXPORT_NAME=SenkabalaModule \
-//        --pre-js wasm_pre.js \
+//        -s NO_EXIT_RUNTIME=1 \
 //        -o senkabala.js
 // ============================================================
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
-
-// TT_SIZE is set conditionally above — 1M for WASM, 8M for native
 
 static bool wasmInitDone = false;
 
@@ -2354,13 +2343,11 @@ extern "C" {
 EMSCRIPTEN_KEEPALIVE
 void engine_init() {
     if (wasmInitDone) return;
-
-    // TT allocated in main() init block — already sized correctly for WASM
-        initAttacks();
+    tt = new TTEntry[TT_SIZE]();
+    initAttacks();
     initZobrist();
     initLMR();
-    ttClear();  // uses TT_SIZE which is 1M for WASM
-
+    ttClear();
     wasmInitDone = true;
 }
 
@@ -2371,9 +2358,8 @@ const char* engine_best_move(const char* fen_str,
     if (!wasmInitDone) engine_init();
 
     static char result[8];
-    result[0] = '\0';  // default: empty (no move)
+    result[0] = '\0';
 
-    // Build board from FEN + move history
     Board board = parseFEN(std::string(fen_str));
     if (moves_str && moves_str[0] != '\0') {
         std::istringstream ss(moves_str);
@@ -2386,17 +2372,12 @@ const char* engine_best_move(const char* fen_str,
         }
     }
 
-    // Run search synchronously (no threads in WASM)
-    stopNow    = false;
-    ponderMove = NULL_MOVE;
-
-    // Bypass the engine's time management — set searchTimeMs directly.
-    // The pctCap logic in search() would crush our movetime to ~2% otherwise.
-    searchStart  = chrono::steady_clock::now();
-    searchTimeMs = std::max(10, movetime_ms);
-
-    // Pass large wt/bt so search() time calc doesn't override our preset.
+    stopNow         = false;
+    ponderMove      = NULL_MOVE;
+    searchTimeMs    = std::max(10, movetime_ms);
+    wasmTimerPreset = true;
     Move best = search(board, 9999999, 9999999, 1, 0, 0);
+    wasmTimerPreset = false;
 
     if (best != NULL_MOVE) {
         std::string ms = moveStr(best);

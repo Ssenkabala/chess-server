@@ -1709,6 +1709,17 @@ function getEngineMove() {
 
   if (wasmEng) {
     // ── WASM path: engine runs in browser, no server call ──────────────────
+    // Show animated thinking indicator
+    var thinkMs = WASM_DIFFICULTY_MS ? (WASM_DIFFICULTY_MS[diff] || 1000) : 1000;
+    if (thinkMs >= 1000) {
+      var dots = 0;
+      var thinkInterval = setInterval(function() {
+        dots = (dots + 1) % 4;
+        setStatus('Engine thinking' + '.'.repeat(dots));
+      }, 400);
+      setTimeout(function() { clearInterval(thinkInterval); }, thinkMs + 2000);
+    }
+
     wasmGetMove({
       fen:        fen,
       moves:      moves,

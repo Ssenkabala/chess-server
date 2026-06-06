@@ -78,6 +78,11 @@ async def serve_wasm_wrapper():
     from fastapi.responses import FileResponse
     return FileResponse("senkabala_wasm.js", media_type="application/javascript")
 
+@app.get("/engine_worker.js")
+async def serve_engine_worker():
+    from fastapi.responses import FileResponse
+    return FileResponse("engine_worker.js", media_type="application/javascript")
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -877,6 +882,13 @@ async def get_move(req: MoveRequest):
                     break
         else:
             game_board = chess.Board(req.fen)
+
+        # Initialise all result variables so both the random AND engine paths
+        # always define them — avoids NameError on random move path (the 500 bug)
+        score_cp   = 0
+        candidates = []
+        move       = None
+        move_uci   = None
 
         # random_chance: probability of playing a random legal move instead of engine best.
         # Levels 1–3 use randomisation as the PRIMARY weakness mechanism.

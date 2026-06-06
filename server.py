@@ -685,9 +685,14 @@ class _EnginePool:
             self._pool   = pool
             self._worker = None
         async def __aenter__(self):
-            self._worker = await self._pool._queue.get()
+            if self._pool._queue is None:
+                raise RuntimeError("Engine pool not started yet")
+            self._worker = await asyncio.wait_for(
+                self._pool._queue.get(), timeout=30)
             return self._worker
         async def __aexit__(self, *_):
+            if self._worker is None:
+                return
             # Replace dead workers before returning to pool
             if not self._worker.alive():
                 print("[pool] replacing dead worker", flush=True)
@@ -900,6 +905,8 @@ async def get_move(req: MoveRequest):
                 # Use pool worker — no process startup cost
                 move_uci = None
                 try:
+                    if engine_pool._queue is None:
+                        raise RuntimeError("pool not ready")
                     async with engine_pool.acquire() as worker:
                         loop = asyncio.get_event_loop()
                         stdout_data, _ = await asyncio.wait_for(
@@ -923,6 +930,23 @@ async def get_move(req: MoveRequest):
                 except Exception as eng_err:
                     _engine_failures += 1
                     print(f"[engine] pool worker error: {eng_err}", flush=True)
+                    # Spawn-per-call fallback if pool not ready
+                    if not move_uci:
+                        print("[engine] falling back to spawn-per-call", flush=True)
+                        import subprocess as _sp
+                        try:
+                            commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
+                            p = _sp.Popen([ENGINE_PATH], stdin=_sp.PIPE,
+                                          stdout=_sp.PIPE, stderr=_sp.PIPE, text=True)
+                            out, _ = p.communicate(input=commands, timeout=hard_limit)
+                            for line in out.splitlines():
+                                if line.startswith("bestmove"):
+                                    parts = line.split()
+                                    if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
+                                        move_uci = parts[1]
+                                    break
+                        except Exception as spawn_err:
+                            print(f"[engine] spawn fallback also failed: {spawn_err}", flush=True)
 
                 if _engine_failures >= _ENGINE_FAILURE_LIMIT:
                     print(f"[engine] ALERT: {_engine_failures} consecutive failures", flush=True)

@@ -2347,7 +2347,8 @@ function openAuth() {
 }
 
 function closeAuth() {
-  document.getElementById('auth-overlay').classList.remove('active');
+  var el = document.getElementById('auth-overlay');
+  if (el) el.classList.remove('active');
 }
 
 function toggleAuthMode() {

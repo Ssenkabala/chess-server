@@ -1171,6 +1171,34 @@ global.Chessground = Nr;
       }
     }
   </style>
+  <!-- SenkabalaIII WebAssembly engine (loads async, falls back to /move API) -->
+  <script>
+    // Feature-detect WASM support
+    window._wasmSupported = (function() {
+      try {
+        if (typeof WebAssembly === 'object' &&
+            typeof WebAssembly.instantiate === 'function') {
+          const module = new WebAssembly.Module(
+            Uint8Array.of(0x0, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00));
+          return module instanceof WebAssembly.Module;
+        }
+      } catch(e) {}
+      return false;
+    })();
+  </script>
+  <!-- Load WASM engine only if browser supports it -->
+  <script>
+    if (window._wasmSupported) {
+      var s1 = document.createElement('script');
+      s1.src = '/senkabala.js';
+      s1.onload = function() {
+        var s2 = document.createElement('script');
+        s2.src = '/senkabala_wasm.js';
+        document.head.appendChild(s2);
+      };
+      document.head.appendChild(s1);
+    }
+  </script>
 </head>
 <body>
 
@@ -1653,15 +1681,77 @@ function afterMove(source, target) {
 
 // onSquareClick removed — chessground handles tap-to-move natively
 
+// Singleton WASM engine instance (created on first bot game if WASM available)
+var _wasmEngine = null;
+
+function _ensureWasmEngine() {
+  if (!window._wasmSupported || typeof SenkabalaEngine === 'undefined') return null;
+  if (!_wasmEngine) {
+    _wasmEngine = new SenkabalaEngine();
+    console.log('[bot] WASM engine instantiated');
+  }
+  return _wasmEngine;
+}
+
 function getEngineMove() {
+  var fen   = game.fen();
+  var moves = uciHistory.slice();
+  var diff  = currentDifficulty;
+  var wasmEng = _ensureWasmEngine();
+
+  if (wasmEng) {
+    // ── WASM path: engine runs in browser, no server call ──────────────────
+    wasmGetMove({
+      fen:        fen,
+      moves:      moves,
+      difficulty: diff,
+      engine:     wasmEng,
+      chess:      game
+    }).then(function(uciMove) {
+      if (!uciMove) {
+        engineThinking = false;
+        if (game.game_over()) { showResult(); }
+        return;
+      }
+      _applyEngineMove(uciMove);
+    }).catch(function(err) {
+      console.warn('[bot] WASM error, falling back to server:', err);
+      _getEngineMoveFromServer(fen, moves, diff);
+    });
+  } else {
+    // ── Server fallback: original /move API ─────────────────────────────────
+    _getEngineMoveFromServer(fen, moves, diff);
+  }
+}
+
+function _applyEngineMove(uciMove) {
+  var tempGame = new Chess(game.fen());
+  var engineMove = tempGame.move({
+    from:      uciMove.slice(0, 2),
+    to:        uciMove.slice(2, 4),
+    promotion: uciMove[4] || 'q'
+  });
+  if (engineMove) {
+    moveHistory.push(engineMove.san);
+    uciHistory.push(uciMove);
+    game.move({ from: uciMove.slice(0,2), to: uciMove.slice(2,4), promotion: uciMove[4] || 'q' });
+    if (cg) cg.set({
+      fen:      game.fen(),
+      lastMove: [uciMove.slice(0,2), uciMove.slice(2,4)]
+    });
+  }
+  engineThinking = false;
+  refreshDests();
+  updateCapturedPieces();
+  if (game.game_over()) { showResult(); return; }
+  setStatus('Your move.');
+}
+
+function _getEngineMoveFromServer(fen, moves, diff) {
   fetch(API_BASE + '/move', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fen:        game.fen(),
-      difficulty: currentDifficulty,
-      moves:      uciHistory.slice()   // full history so engine detects repetitions
-    })
+    body: JSON.stringify({ fen: fen, difficulty: diff, moves: moves })
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
@@ -1675,7 +1765,7 @@ function getEngineMove() {
         });
         if (engineMove) {
           moveHistory.push(engineMove.san);
-          uciHistory.push(data.move);   // track engine UCI moves too
+          uciHistory.push(data.move);
         }
       }
       game.load(data.fen);
@@ -1694,7 +1784,7 @@ function getEngineMove() {
   })
   .catch(function() {
     engineThinking = false;
-    setStatus('Engine error — is the server running?');
+    setStatus('Engine error — please try again.');
   });
 }
 

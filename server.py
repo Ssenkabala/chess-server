@@ -61,6 +61,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Ensure .wasm files are served with the correct MIME type.
+# Without this, some browsers refuse to compile the WebAssembly module.
+@app.get("/senkabala.wasm")
+async def serve_wasm():
+    from fastapi.responses import FileResponse
+    return FileResponse("senkabala.wasm", media_type="application/wasm")
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 

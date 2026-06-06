@@ -2241,8 +2241,13 @@ int main(){
 
             if (searchThread.joinable()) { stopNow=true; searchThread.join(); stopNow=false; }
             searchThread = thread([boardCopy,wt_,bt_,mtg_,wi_,bi_]() mutable {
-                try { searchResult = search(boardCopy, wt_, bt_, mtg_, wi_, bi_); }
-                catch (...) {}
+                #ifndef __EMSCRIPTEN__
+                try {
+                #endif
+                    searchResult = search(boardCopy, wt_, bt_, mtg_, wi_, bi_);
+                #ifndef __EMSCRIPTEN__
+                } catch (...) {}
+                #endif
                 searchDone = true;
             });
 
@@ -2277,8 +2282,13 @@ int main(){
             int wt_=lastWt, bt_=lastBt, mtg_=lastMtg, wi_=lastWi, bi_=lastBi;
 
             searchThread = thread([boardCopy,wt_,bt_,mtg_,wi_,bi_]() mutable {
-                try { searchResult = search(boardCopy, wt_, bt_, mtg_, wi_, bi_); }
-                catch (...) {}
+                #ifndef __EMSCRIPTEN__
+                try {
+                #endif
+                    searchResult = search(boardCopy, wt_, bt_, mtg_, wi_, bi_);
+                #ifndef __EMSCRIPTEN__
+                } catch (...) {}
+                #endif
                 searchDone = true;
             });
             // Block until done, then output bestmove (same as normal go)
@@ -2360,6 +2370,9 @@ const char* engine_best_move(const char* fen_str,
                               int movetime_ms) {
     if (!wasmInitDone) engine_init();
 
+    static char result[8];
+    result[0] = '\0';  // default: empty (no move)
+
     // Build board from FEN + move history
     Board board = parseFEN(std::string(fen_str));
     if (moves_str && moves_str[0] != '\0') {
@@ -2377,21 +2390,19 @@ const char* engine_best_move(const char* fen_str,
     stopNow    = false;
     ponderMove = NULL_MOVE;
 
-    // Bypass the engine's complex time management by setting searchTimeMs and
-    // searchStart directly before calling search(). The search() function's
-    // time management would mangle our movetime due to pctCap calculations.
-    // By presetting these globals, timeUp() will return true at exactly movetime_ms.
+    // Bypass the engine's time management — set searchTimeMs directly.
+    // The pctCap logic in search() would crush our movetime to ~2% otherwise.
     searchStart  = chrono::steady_clock::now();
     searchTimeMs = std::max(10, movetime_ms);
 
-    // Pass large wt/bt so the engine's own time calc doesn't override ours.
-    // movestogo=1 means it uses the full budget for this move.
+    // Pass large wt/bt so search() time calc doesn't override our preset.
     Move best = search(board, 9999999, 9999999, 1, 0, 0);
 
-    static char result[8];
-    std::string ms = moveStr(best);
-    strncpy(result, ms.c_str(), 7);
-    result[7] = '\0';
+    if (best != NULL_MOVE) {
+        std::string ms = moveStr(best);
+        strncpy(result, ms.c_str(), 7);
+        result[7] = '\0';
+    }
     return result;
 }
 

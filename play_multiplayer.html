@@ -1916,6 +1916,11 @@ function onGameMessage(e) {
   if (msg.type === 'gameover') {
     gameOver = true;
     stopClockTick();
+    // Clear turn highlights so neither player appears active
+    const myNameEl  = document.getElementById('name-me');
+    const oppNameEl = document.getElementById('name-opponent');
+    if (myNameEl)  myNameEl.classList.remove('active-turn');
+    if (oppNameEl) oppNameEl.classList.remove('active-turn');
     showOverlay(msg.result, msg.reason);
   }
 
@@ -2171,6 +2176,7 @@ function stopClockTick() {
 //  UI HELPERS
 // ═══════════════════════════════════════════════════════════════
 function updateTurnIndicator() {
+  if (gameOver) return;  // don't overwrite game-over status
   const myNameEl  = document.getElementById('name-me');
   const oppNameEl = document.getElementById('name-opponent');
   if (myTurn) {

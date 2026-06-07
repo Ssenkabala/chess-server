@@ -410,6 +410,18 @@ global.Chessground = Nr;
       color: var(--muted);
       letter-spacing: 0.08em;
     }
+    #nav-links-desktop a.nav-link {
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      text-decoration: none;
+      padding: 4px 8px;
+      border-radius: 3px;
+      transition: color 0.2s;
+    }
+    #nav-links-desktop a.nav-link:hover { color: var(--green); }
+    #nav-links-desktop a.nav-link.active { color: var(--green); }
 
     /* ── Screens ── */
     .screen { display: none; flex-direction: column; align-items: center; gap: 20px; width: 100%; max-width: 520px; }
@@ -834,7 +846,10 @@ global.Chessground = Nr;
 <body>
 
   <div class="header">
-    <a class="logo" href="/">Afri<span style="color:#00ff9d">Chess</span></a>
+    <a class="logo" href="/" style="display:flex;align-items:center;gap:8px;">
+      <img src="/logo.png" height="28" alt="AfriChess" onerror="this.style.display='none'">
+      <span>Afri<span style="color:#00ff9d">Chess</span></span>
+    </a>
     <div id="nav-links-desktop" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <a href="/"             class="nav-link">Home</a>
       <a href="/play"         class="nav-link">vs Bot</a>
@@ -1463,22 +1478,21 @@ let challengeWs   = null;
 let _challengeCode = null;
 
 async function createChallenge() {
-  if (!currentUser) {
-    alert('Please sign in to create a challenge.');
-    return;
-  }
-  const tc = window._timeControl || '5+0';
+  const tc  = window._timeControl || '5+0';
   const btn = document.getElementById('btn-create-challenge');
   if (btn) btn.disabled = true;
 
-  const { data: { session } } = await _supabase.auth.getSession();
-  if (!session) { if (btn) btn.disabled = false; return; }
+  // Get auth token if logged in — guests can also challenge
+  let authHeader = {};
+  try {
+    const { data: { session } } = await _supabase.auth.getSession();
+    if (session) authHeader = { 'Authorization': `Bearer ${session.access_token}` };
+  } catch(e) {}
 
   try {
     const r = await fetch('/api/challenge', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json',
-                 'Authorization': `Bearer ${session.access_token}` },
+      headers: { 'Content-Type': 'application/json', ...authHeader },
       body: JSON.stringify({ time_control: tc })
     });
     const data = await r.json();

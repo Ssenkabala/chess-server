@@ -2069,30 +2069,42 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
 # ═══════════════════════════════════════════════════════════════
 
 @app.post("/api/challenge")
-async def create_challenge(req: Request, user=Depends(verify_key)):
+async def create_challenge(req: Request):
     """
-    Create a challenge invite link.
+    Create a challenge invite link. Works for guests and signed-in users.
     Body: { time_control: "5+0" }
-    Returns: { code: "abc123", url: "https://..." }
+    Returns: { code: "abc123", time_control: "5+0", creator: "username" }
     """
-    body        = await req.json()
-    tc          = body.get("time_control", "5+0")
-    uid         = user.user.id
+    body     = await req.json()
+    tc       = body.get("time_control", "5+0")
+    username = "Guest"
+    uid      = "guest_" + uuid.uuid4().hex[:8]
 
-    # Fetch username
-    username = uid[:8]
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(
-                f"{SUPABASE_URL}/rest/v1/profiles",
-                params={"user_id": f"eq.{uid}", "select": "username"},
-                headers={"apikey": SUPABASE_SERVICE_KEY,
-                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-            )
-            rows = r.json()
-            if rows: username = rows[0].get("username") or username
-    except Exception:
-        pass
+    # If user sends auth header, fetch their username
+    auth = req.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(
+                    f"{SUPABASE_URL}/auth/v1/user",
+                    headers={"apikey": SUPABASE_SERVICE_KEY,
+                             "Authorization": f"Bearer {token}"}
+                )
+                if r.status_code == 200:
+                    user_data = r.json()
+                    uid = user_data.get("id", uid)
+                    # Fetch username from profiles
+                    r2 = await client.get(
+                        f"{SUPABASE_URL}/rest/v1/profiles",
+                        params={"user_id": f"eq.{uid}", "select": "username"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY,
+                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    )
+                    rows = r2.json()
+                    if rows: username = rows[0].get("username") or username
+        except Exception:
+            pass
 
     # Generate short unique code
     import secrets, time as _time

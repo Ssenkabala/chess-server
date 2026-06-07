@@ -447,7 +447,7 @@ function applyFilters() {
 
   // Filter
   let filtered = allPlayers.filter(p => {
-    if (!p[col] || p[col] < 100) return false;
+    // Show ALL registered players — even those with default rating
     if (regionSet && !regionSet.has(p.country)) return false;
     if (femaleOnly && p.gender !== 'female') return false;
     if (q && !(p.username || '').toLowerCase().includes(q) &&
@@ -455,15 +455,23 @@ function applyFilters() {
     return true;
   });
 
-  // Sort by chosen TC elo desc
-  filtered.sort((a, b) => (b[col] || 0) - (a[col] || 0));
+  // Sort by chosen TC ELO desc — players with higher rating rank first
+  // Default 1500 players go to bottom since they have no games
+  filtered.sort((a, b) => {
+    const aHas = a.games_played > 0;
+    const bHas = b.games_played > 0;
+    if (aHas && !bHas) return -1;  // a played, b didn't → a first
+    if (!aHas && bHas) return 1;
+    return (b[col] || 0) - (a[col] || 0);
+  });
 
   // Stats strip
   const countries = new Set(filtered.map(p => p.country).filter(Boolean));
-  const topElo = filtered.length ? (filtered[0][col] || 0) : 0;
-  // Leading country = country of the #1 ranked player for the current TC
-  // (not by player count, which always favours the same big country)
-  const leadingCountry = filtered.length ? filtered[0].country : null;
+  // Top ELO = highest rated player who has actually played
+  const topEloPlayer = filtered.find(p => p.games_played > 0);
+  const topElo = topEloPlayer ? (topEloPlayer[col] || 0) : 0;
+  // Leading country = country of the #1 ranked player WITH games in this TC
+  const leadingCountry = topEloPlayer ? topEloPlayer.country : null;
 
   document.getElementById('stat-players').textContent   = filtered.length;
   document.getElementById('stat-countries').textContent = countries.size;
@@ -479,17 +487,19 @@ function applyFilters() {
       return (p.elo_bullet||1500) + (p.elo_blitz||1500) +
              (p.elo_rapid||1500)  + (p.elo_classical||1500);
     }
-    let allTcPlayers = allPlayers.filter(p => {
-      // Only include players with at least one non-default rating
-      return [p.elo_bullet, p.elo_blitz, p.elo_rapid, p.elo_classical]
-        .some(e => e && e !== 1500);
-    });
+    let allTcPlayers = allPlayers.slice(); // show everyone
     if (regionSet) allTcPlayers = allTcPlayers.filter(p => regionSet.has(p.country));
     if (femaleOnly) allTcPlayers = allTcPlayers.filter(p => p.gender === 'female');
     if (q) allTcPlayers = allTcPlayers.filter(p =>
       (p.username||'').toLowerCase().includes(q) ||
       (COUNTRY_NAMES[p.country]||'').toLowerCase().includes(q));
-    allTcPlayers.sort((a, b) => eloSum(b) - eloSum(a));
+    allTcPlayers.sort((a, b) => {
+      const aHas = a.games_played > 0;
+      const bHas = b.games_played > 0;
+      if (aHas && !bHas) return -1;
+      if (!aHas && bHas) return 1;
+      return eloSum(b) - eloSum(a);
+    });
     renderAllTc(allTcPlayers, eloSum);
   } else if (currentView === 'continental') {
     renderContinental(filtered, col);

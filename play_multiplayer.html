@@ -937,7 +937,27 @@ global.Chessground = Nr;
       </div>
 
       <button onclick="startSearch()" style="width:100%;padding:14px;background:#00ff9d;color:#000;border:none;border-radius:3px;font-size:14px;font-weight:700;letter-spacing:0.08em;cursor:pointer;">Find Game</button>
+      <button onclick="createChallenge()" id="btn-create-challenge" style="width:100%;padding:12px;background:transparent;color:var(--green);border:1px solid #333;border-radius:3px;font-size:13px;font-weight:600;letter-spacing:0.08em;cursor:pointer;margin-top:8px;">🔗 Challenge a Friend</button>
     </div>
+
+    <!-- Challenge: Share link (creator) -->
+    <div id="tc-challenge-share" style="display:none;text-align:center;padding:24px 16px;">
+      <div style="font-size:15px;color:var(--text);margin-bottom:8px;">🔗 Challenge created!</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:16px;">Share this link with your friend:</div>
+      <div id="challenge-link-box" onclick="copyChallenge()" title="Tap to copy" style="background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:10px 14px;font-size:11px;word-break:break-all;color:var(--green);margin-bottom:12px;cursor:pointer;"></div>
+      <button onclick="copyChallenge()" style="width:100%;padding:11px;background:transparent;color:var(--green);border:1px solid #333;border-radius:3px;font-size:13px;cursor:pointer;margin-bottom:6px;" id="btn-copy-challenge">📋 Copy Link</button>
+      <div style="font-size:12px;color:var(--muted);margin:8px 0;" id="challenge-wait-status">⏳ Waiting for friend to join…</div>
+      <button onclick="cancelChallenge()" style="width:100%;padding:10px;background:transparent;color:#888;border:1px solid #222;border-radius:3px;font-size:12px;cursor:pointer;margin-top:4px;">Cancel</button>
+    </div>
+
+    <!-- Challenge: Join (friend opens link) -->
+    <div id="tc-challenge-join" style="display:none;text-align:center;padding:24px 16px;">
+      <div id="challenge-join-status" style="font-size:15px;color:var(--text);margin-bottom:8px;">Loading challenge…</div>
+      <div id="challenge-join-info" style="font-size:13px;color:var(--muted);margin-bottom:20px;"></div>
+      <button id="btn-join-challenge" onclick="joinChallenge()" style="display:none;width:100%;padding:14px;background:#00ff9d;color:#000;border:none;border-radius:3px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px;">Join Game</button>
+      <button onclick="cancelChallenge()" style="width:100%;padding:10px;background:transparent;color:#888;border:1px solid #222;border-radius:3px;font-size:12px;cursor:pointer;">Cancel</button>
+    </div>
+
     <!-- Searching state — shown after clicking Find Game -->
     <div id="tc-searching" style="display:none;">
       <div class="lobby-box">
@@ -1369,6 +1389,15 @@ async function bootAuth() {
     return;
   }
 
+  // Challenge invite link: ?challenge=CODE
+  const challengeCode = params.get('challenge');
+  if (challengeCode) {
+    document.getElementById('tc-picker').style.display = 'none';
+    document.getElementById('tc-searching').style.display = 'none';
+    showChallengeJoin(challengeCode);
+    return;
+  }
+
   // Regular lobby — show the picker (don't auto-connect)
   // connectLobby() is called when player clicks "Find Game"
 }
@@ -1427,6 +1456,157 @@ function showScreen(id) {
 // ═══════════════════════════════════════════════════════════════
 //  LOBBY
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  CHALLENGE SYSTEM
+// ═══════════════════════════════════════════════════════════════
+let challengeWs   = null;
+let _challengeCode = null;
+
+async function createChallenge() {
+  if (!currentUser) {
+    alert('Please sign in to create a challenge.');
+    return;
+  }
+  const tc = window._timeControl || '5+0';
+  const btn = document.getElementById('btn-create-challenge');
+  if (btn) btn.disabled = true;
+
+  const { data: { session } } = await _supabase.auth.getSession();
+  if (!session) { if (btn) btn.disabled = false; return; }
+
+  try {
+    const r = await fetch('/api/challenge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json',
+                 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ time_control: tc })
+    });
+    const data = await r.json();
+    if (!data.code) throw new Error('No code returned');
+
+    _challengeCode = data.code;
+    const link = `${location.origin}/multiplayer?challenge=${data.code}`;
+
+    document.getElementById('tc-picker').style.display = 'none';
+    document.getElementById('tc-challenge-share').style.display = '';
+    document.getElementById('challenge-link-box').textContent = link;
+
+    // Connect to challenge WS to wait for friend
+    connectChallengeWs(data.code, true);
+  } catch(e) {
+    alert('Failed to create challenge. Please try again.');
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function showChallengeJoin(code) {
+  _challengeCode = code;
+  document.getElementById('tc-challenge-join').style.display = '';
+
+  try {
+    const r = await fetch(`/api/challenge/${code}`);
+    if (!r.ok) {
+      document.getElementById('challenge-join-status').textContent = '❌ Challenge not found or expired.';
+      return;
+    }
+    const data = await r.json();
+    window._timeControl = data.time_control;
+    document.getElementById('challenge-join-status').textContent =
+      `♟ ${data.creator} challenges you!`;
+    document.getElementById('challenge-join-info').textContent =
+      `Time control: ${data.time_control} · ${tcCategory(data.time_control)}`;
+    document.getElementById('btn-join-challenge').style.display = '';
+  } catch(e) {
+    document.getElementById('challenge-join-status').textContent = '❌ Challenge not found or expired.';
+  }
+}
+
+function joinChallenge() {
+  const btn = document.getElementById('btn-join-challenge');
+  if (btn) btn.disabled = true;
+  document.getElementById('challenge-join-status').textContent = 'Joining…';
+  connectChallengeWs(_challengeCode, false);
+}
+
+function connectChallengeWs(code, isCreator) {
+  challengeWs = new WebSocket(WS_BASE + '/ws/challenge/' + code);
+
+  challengeWs.onopen = () => {
+    // Joiner sends identity; creator just waits
+    if (!isCreator && currentUser) {
+      const name = myProfile ? myProfile.username : (currentUser.email || 'player');
+      challengeWs.send(JSON.stringify({
+        user_id:  currentUser.id,
+        username: name,
+      }));
+    }
+    // Keepalive ping
+    challengeWs._ping = setInterval(() => {
+      if (challengeWs && challengeWs.readyState === WebSocket.OPEN)
+        challengeWs.send(JSON.stringify({ type: 'ping' }));
+    }, 20000);
+  };
+
+  challengeWs.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === 'waiting') {
+      // Creator confirmed waiting
+    } else if (msg.type === 'matched') {
+      if (challengeWs._ping) clearInterval(challengeWs._ping);
+      gameId   = msg.game_id;
+      myColor  = msg.color;
+      if (msg.time_control) window._timeControl = msg.time_control;
+
+      // Hide challenge UIs
+      document.getElementById('tc-challenge-share').style.display = 'none';
+      document.getElementById('tc-challenge-join').style.display  = 'none';
+      document.getElementById('tc-searching').style.display = '';
+
+      setTimeout(() => startGame(), 400);
+    } else if (msg.type === 'error') {
+      alert(msg.detail || 'Challenge error.');
+      cancelChallenge();
+    }
+  };
+
+  challengeWs.onclose = () => {
+    if (challengeWs && challengeWs._ping) clearInterval(challengeWs._ping);
+    if (!gameId) {
+      const waitEl = document.getElementById('challenge-wait-status');
+      if (waitEl) waitEl.textContent = 'Connection lost. Please try again.';
+    }
+  };
+}
+
+function copyChallenge() {
+  const box = document.getElementById('challenge-link-box');
+  if (!box) return;
+  navigator.clipboard.writeText(box.textContent).then(() => {
+    const btn = document.getElementById('btn-copy-challenge');
+    if (btn) { btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = '📋 Copy Link'; }, 2000); }
+  }).catch(() => {
+    // Fallback for older browsers
+    const ta = document.createElement('textarea');
+    ta.value = box.textContent;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  });
+}
+
+function cancelChallenge() {
+  if (challengeWs) { challengeWs.close(); challengeWs = null; }
+  _challengeCode = null;
+  gameId = null;
+  document.getElementById('tc-challenge-share').style.display = 'none';
+  document.getElementById('tc-challenge-join').style.display  = 'none';
+  document.getElementById('tc-picker').style.display = '';
+  const btn = document.getElementById('btn-create-challenge');
+  if (btn) btn.disabled = false;
+}
+
 function connectLobby() {
   showScreen('lobby');
   setLobbyStatus('Connecting...');

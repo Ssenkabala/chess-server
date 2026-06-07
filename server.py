@@ -1096,6 +1096,13 @@ active_games: dict = {}         # game_id ΓåÆ game state dict
 
 CLOCK_SECONDS = 300             # 5 minutes each side
 
+# ── Challenge (invite link) state ────────────────────────────────
+# pending_challenges[code] = {
+#   "code": str, "creator_id": str, "creator_name": str,
+#   "time_control": str, "ws": WebSocket | None, "created_at": float
+# }
+pending_challenges: dict = {}
+
 # ── Arena tournament state ──────────────────────────────────────
 # tournament_connections[tid][user_id] = {ws, username, elo, score, available}
 tournament_connections: dict = {}
@@ -2054,6 +2061,185 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
             # Keep paused flag — if they reconnect they're still paused until they resume
             del conns[user_id]
         print(f"[arena] {username} left {tournament_id}", flush=True)
+
+
+
+# ═══════════════════════════════════════════════════════════════
+#  CHALLENGE / INVITE LINK
+# ═══════════════════════════════════════════════════════════════
+
+@app.post("/api/challenge")
+async def create_challenge(req: Request, user=Depends(verify_key)):
+    """
+    Create a challenge invite link.
+    Body: { time_control: "5+0" }
+    Returns: { code: "abc123", url: "https://..." }
+    """
+    body        = await req.json()
+    tc          = body.get("time_control", "5+0")
+    uid         = user.user.id
+
+    # Fetch username
+    username = uid[:8]
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{uid}", "select": "username"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            rows = r.json()
+            if rows: username = rows[0].get("username") or username
+    except Exception:
+        pass
+
+    # Generate short unique code
+    import secrets, time as _time
+    code = secrets.token_urlsafe(4)[:6].replace("-", "x").replace("_", "y")
+
+    # Clean up expired challenges (>15 min old)
+    now = _time.time()
+    expired = [k for k, v in pending_challenges.items()
+               if now - v.get("created_at", now) > 900]
+    for k in expired:
+        pending_challenges.pop(k, None)
+
+    pending_challenges[code] = {
+        "code":         code,
+        "creator_id":   uid,
+        "creator_name": username,
+        "time_control": tc,
+        "ws":           None,
+        "created_at":   now,
+    }
+    print(f"[challenge] {username} created {code} ({tc})", flush=True)
+    return {"code": code, "time_control": tc, "creator": username}
+
+
+@app.get("/api/challenge/{code}")
+async def get_challenge(code: str):
+    """Return challenge info for the join page."""
+    ch = pending_challenges.get(code)
+    if not ch:
+        raise HTTPException(404, "Challenge not found or expired")
+    return {
+        "code":         ch["code"],
+        "creator":      ch["creator_name"],
+        "time_control": ch["time_control"],
+    }
+
+
+@app.websocket("/ws/challenge/{code}")
+async def challenge_ws(ws: WebSocket, code: str):
+    """
+    Both the creator and the joiner connect here.
+    Creator connects first and waits.
+    When the joiner connects, the game starts immediately.
+    """
+    await ws.accept()
+
+    ch = pending_challenges.get(code)
+    if not ch:
+        await ws.send_json({"type": "error", "detail": "Challenge not found or expired."})
+        await ws.close()
+        return
+
+    import time as _time
+
+    # ── Creator is connecting ─────────────────────────────────────
+    if ch["ws"] is None:
+        ch["ws"] = ws
+        await ws.send_json({
+            "type":         "waiting",
+            "code":         code,
+            "time_control": ch["time_control"],
+            "message":      "Waiting for your friend to join…",
+        })
+        print(f"[challenge] creator connected: {code}", flush=True)
+
+        # Keep alive until matched or disconnected
+        try:
+            while True:
+                try:
+                    data = await asyncio.wait_for(ws.receive_json(), timeout=5)
+                    if isinstance(data, dict) and data.get("type") == "ping":
+                        pass
+                except asyncio.TimeoutError:
+                    pass
+                # Check if we've been matched (ws replaced by None to signal completion)
+                if ch.get("matched"):
+                    break
+        except Exception:
+            pass
+        finally:
+            # If creator disconnects before anyone joins, clean up
+            if not ch.get("matched"):
+                pending_challenges.pop(code, None)
+        return
+
+    # ── Joiner is connecting ──────────────────────────────────────
+    creator_ws = ch["ws"]
+    tc         = ch["time_control"]
+
+    # Get joiner identity
+    joiner_id   = "guest_" + uuid.uuid4().hex[:8]
+    creator_id  = ch["creator_id"]
+    creator_name = ch["creator_name"]
+
+    # Read ident from joiner (optional — they may send user_id + username)
+    joiner_name = joiner_id
+    try:
+        ident = await asyncio.wait_for(ws.receive_json(), timeout=3)
+        if ident.get("user_id"):   joiner_id   = ident["user_id"]
+        if ident.get("username"):  joiner_name = ident["username"]
+    except Exception:
+        pass
+
+    # Assign colours randomly
+    import random as _random
+    if _random.random() < 0.5:
+        white_ws, white_id, white_name = creator_ws, creator_id, creator_name
+        black_ws, black_id,  black_name  = ws,         joiner_id,  joiner_name
+    else:
+        white_ws, white_id, white_name = ws,         joiner_id,  joiner_name
+        black_ws, black_id,  black_name  = creator_ws, creator_id, creator_name
+
+    game_id = uuid.uuid4().hex[:12]
+    game    = new_game(game_id, white_ws, black_ws, white_id, black_id, tc)
+    active_games[game_id] = game
+
+    ch["matched"] = True
+    pending_challenges.pop(code, None)
+
+    await send(white_ws, {
+        "type":         "matched",
+        "game_id":      game_id,
+        "color":        "white",
+        "opponent":     black_name,
+        "time_control": tc,
+    })
+    await send(black_ws, {
+        "type":         "matched",
+        "game_id":      game_id,
+        "color":        "black",
+        "opponent":     white_name,
+        "time_control": tc,
+    })
+
+    asyncio.create_task(clock_loop(game_id))
+    asyncio.create_task(first_move_timeout_loop(game_id))
+    print(f"[challenge] {code} matched: {white_name} vs {black_name}", flush=True)
+
+    # Keep joiner WS alive until game WS takes over
+    try:
+        while True:
+            try:
+                await asyncio.wait_for(ws.receive_json(), timeout=30)
+            except asyncio.TimeoutError:
+                break
+    except Exception:
+        pass
 
 
 @app.websocket("/ws/lobby")

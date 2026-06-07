@@ -1307,6 +1307,7 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
         "time_control":         time_control,
         "white_profile":        None,
         "black_profile":        None,
+        "spectators":           [],   # list of WebSocket connections watching this game
     }
 
 
@@ -1398,6 +1399,16 @@ async def broadcast(game: dict, msg: dict):
         await send(w_ws, msg)
     if b_ws:
         await send(b_ws, msg)
+    # Also broadcast to spectators (read-only watchers)
+    dead = []
+    for spec_ws in game.get("spectators", []):
+        try:
+            await spec_ws.send_json(msg)
+        except Exception:
+            dead.append(spec_ws)
+    for d in dead:
+        try: game["spectators"].remove(d)
+        except ValueError: pass
 
 
 def deduct_clock(game: dict) -> float:
@@ -2265,6 +2276,115 @@ async def challenge_ws(ws: WebSocket, code: str):
                 break
     except Exception:
         pass
+
+
+
+# ═══════════════════════════════════════════════════════════════
+#  SPECTATOR / LIVE GAMES
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/games/live")
+async def list_live_games():
+    """Return currently active games for the watch page."""
+    games = []
+    for gid, g in active_games.items():
+        if g.get("over"):
+            continue
+        wp = g.get("white_profile") or {}
+        bp = g.get("black_profile") or {}
+        games.append({
+            "id":           gid,
+            "white":        wp.get("username", "Player"),
+            "black":        bp.get("username", "Player"),
+            "white_elo":    wp.get("elo", 1500),
+            "black_elo":    bp.get("elo", 1500),
+            "time_control": g.get("time_control", "?"),
+            "moves":        g.get("moves_made", 0),
+            "fen":          g["board"].fen(),
+            "clock":        g.get("clock", {"w": 0, "b": 0}),
+            "spectators":   len(g.get("spectators", [])),
+        })
+    # Sort by most spectators first, then by most moves (most interesting games first)
+    games.sort(key=lambda x: (-x["spectators"], -x["moves"]))
+    return games
+
+
+@app.get("/watch")
+async def watch_page():
+    """Serve the spectator/live games page."""
+    return FileResponse("watch.html")
+
+
+@app.websocket("/ws/watch/{game_id}")
+async def watch_ws(ws: WebSocket, game_id: str):
+    """
+    Spectator WebSocket. Connects to a live game and receives all moves
+    and game events in real time. Read-only — no input accepted.
+    """
+    await ws.accept()
+
+    game = active_games.get(game_id)
+    if not game or game.get("over"):
+        await ws.send_json({"type": "error", "detail": "Game not found or already finished."})
+        await ws.close()
+        return
+
+    # Register spectator
+    if "spectators" not in game:
+        game["spectators"] = []
+    game["spectators"].append(ws)
+
+    # Send current game state so spectator can render the board immediately
+    wp = game.get("white_profile") or {}
+    bp = game.get("black_profile") or {}
+    await ws.send_json({
+        "type":         "game_state",
+        "fen":          game["board"].fen(),
+        "clock":        game["clock"],
+        "turn":         "white" if game["board"].turn else "black",
+        "moves":        game.get("moves_made", 0),
+        "time_control": game.get("time_control", "?"),
+        "white":        wp.get("username", "Player"),
+        "black":        bp.get("username", "Player"),
+        "white_elo":    wp.get("elo", 1500),
+        "black_elo":    bp.get("elo", 1500),
+    })
+
+    print(f"[watch] spectator joined game {game_id} "
+          f"({len(game['spectators'])} watching)", flush=True)
+
+    # Keep connection alive until spectator disconnects or game ends
+    try:
+        while True:
+            try:
+                # Accept pings, ignore everything else (read-only)
+                await asyncio.wait_for(ws.receive_text(), timeout=30)
+            except asyncio.TimeoutError:
+                # Send a keepalive ping
+                try:
+                    await ws.send_json({"type": "ping"})
+                except Exception:
+                    break
+            except Exception:
+                break
+            # Check if game ended
+            game = active_games.get(game_id)
+            if not game or game.get("over"):
+                try:
+                    await ws.send_json({"type": "game_ended"})
+                except Exception:
+                    pass
+                break
+    finally:
+        # Remove from spectators list
+        game = active_games.get(game_id)
+        if game and "spectators" in game:
+            try:
+                game["spectators"].remove(ws)
+                print(f"[watch] spectator left game {game_id} "
+                      f"({len(game['spectators'])} watching)", flush=True)
+            except ValueError:
+                pass
 
 
 @app.websocket("/ws/lobby")

@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AfriChess · Watch Live</title>
+  <link rel="icon" href="/favicon.ico">
+
+  <!-- Chessground -->
+  <link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.base.css">
+  <link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.brown.css">
+  <link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.1.1/assets/chessground.cburnett.css">
+  <script src="https://cdn.jsdelivr.net/npm/chessground@9.1.1/dist/chessground.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+  <style>
+    :root {
+      --bg:     #0a0a0a;
+      --text:   #e8e8e8;
+      --muted:  #555;
+      --green:  #00ff9d;
+      --border: #1a1a1a;
+      --card:   #111;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif;
+           min-height: 100vh; }
+
+    /* ── Nav ── */
+    .top-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 20px; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--bg); z-index: 10;
+    }
+    .top-logo {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none; color: var(--text);
+      font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .nav-links { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+    .nav-links a {
+      color: var(--muted); font-size: 11px; letter-spacing: 0.15em;
+      text-transform: uppercase; text-decoration: none; cursor: pointer;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover, .nav-links a.active { color: var(--green); }
+    .hamburger {
+      display: none; flex-direction: column; gap: 5px;
+      background: none; border: none; cursor: pointer; padding: 6px;
+    }
+    .hamburger span { display: block; width: 22px; height: 2px; background: #888; }
+    .mobile-drawer {
+      position: fixed; top: 0; right: -260px; width: 240px; height: 100vh;
+      background: #0d0d0d; border-left: 1px solid #1a1a1a;
+      display: flex; flex-direction: column;
+      padding: 72px 24px 32px; gap: 20px; z-index: 500;
+      transition: right 0.28s ease;
+    }
+    .mobile-drawer a {
+      color: #555; text-decoration: none; font-size: 13px;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      padding: 8px 0; border-bottom: 1px solid #1a1a1a;
+    }
+    .mobile-drawer a.active { color: var(--green); }
+    .drawer-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55); z-index: 499;
+    }
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+      .hamburger { display: flex; }
+    }
+
+    /* ── Layout ── */
+    .page { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+    h1 { font-size: 18px; letter-spacing: 0.12em; text-transform: uppercase;
+         color: var(--green); margin-bottom: 6px; }
+    .subtitle { font-size: 12px; color: var(--muted); margin-bottom: 24px; }
+
+    /* ── Games List ── */
+    #games-list { display: flex; flex-direction: column; gap: 12px; }
+    .game-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 6px; padding: 16px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+      cursor: pointer; transition: border-color 0.2s;
+      gap: 12px; flex-wrap: wrap;
+    }
+    .game-card:hover { border-color: var(--green); }
+    .game-players { font-size: 14px; font-weight: 600; }
+    .game-players .vs { color: var(--muted); margin: 0 8px; font-weight: 400; }
+    .game-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .watch-btn {
+      background: transparent; border: 1px solid var(--green);
+      color: var(--green); padding: 8px 18px; border-radius: 3px;
+      font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+      cursor: pointer; transition: background 0.2s, color 0.2s; white-space: nowrap;
+    }
+    .watch-btn:hover { background: var(--green); color: #000; }
+    .spectator-count { font-size: 11px; color: var(--muted); }
+    .no-games {
+      text-align: center; padding: 48px 20px;
+      color: var(--muted); font-size: 13px; letter-spacing: 0.05em;
+    }
+    .live-dot {
+      display: inline-block; width: 8px; height: 8px;
+      background: #ff4444; border-radius: 50%;
+      animation: pulse 1.4s ease infinite; margin-right: 6px;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    /* ── Board view ── */
+    #watch-view { display: none; }
+    .watch-header {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .back-btn {
+      background: transparent; border: 1px solid #333;
+      color: var(--muted); padding: 7px 14px; border-radius: 3px;
+      font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+      cursor: pointer; transition: color 0.2s, border-color 0.2s;
+    }
+    .back-btn:hover { color: var(--green); border-color: var(--green); }
+    .watch-title { font-size: 14px; font-weight: 600; }
+    .watch-tc { font-size: 11px; color: var(--muted); }
+
+    .watch-layout {
+      display: grid;
+      grid-template-columns: auto 280px;
+      gap: 20px;
+      align-items: start;
+    }
+    @media (max-width: 720px) {
+      .watch-layout { grid-template-columns: 1fr; }
+    }
+
+    .board-wrap {
+      position: relative;
+      width: min(500px, calc(100vw - 32px));
+      max-width: 500px;
+    }
+
+    .cg-wrap {
+      width: 100%; padding-bottom: 100%; position: relative;
+    }
+    cg-board { position: absolute; inset: 0; }
+
+    .player-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px; background: var(--card);
+      border: 1px solid var(--border); border-radius: 4px; margin: 4px 0;
+    }
+    .player-name { font-size: 13px; font-weight: 600; }
+    .player-elo { font-size: 11px; color: var(--muted); }
+    .player-clock {
+      font-size: 18px; font-weight: 700; font-family: monospace;
+      color: var(--text);
+    }
+    .player-clock.low { color: #ff4444; }
+    .active-player { border-color: var(--green); }
+
+    .watch-panel { display: flex; flex-direction: column; gap: 12px; }
+    .move-list-box {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 6px; padding: 16px;
+      max-height: 340px; overflow-y: auto;
+    }
+    .move-list-title {
+      font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 12px;
+    }
+    .move-list { display: flex; flex-wrap: wrap; gap: 4px; }
+    .move-pair { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+    .move-num { color: var(--muted); font-size: 11px; min-width: 22px; }
+    .move-san {
+      padding: 2px 6px; border-radius: 3px;
+      background: #1a1a1a; cursor: pointer; transition: background 0.15s;
+    }
+    .move-san:hover { background: #252525; }
+    .move-san.current { background: var(--green); color: #000; font-weight: 700; }
+
+    .status-box {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 6px; padding: 14px 16px;
+      font-size: 12px; color: var(--muted); text-align: center;
+    }
+    .spectator-info {
+      font-size: 11px; color: var(--muted); text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <div class="top-bar">
+    <a class="top-logo" href="/">
+      <img src="/logo.png" height="28" alt="AfriChess" onerror="this.style.display='none'">
+      <span>Afri<span style="color:#00ff9d">Chess</span></span>
+    </a>
+    <div class="nav-links">
+      <a href="/">Home</a>
+      <a href="/play">vs Bot</a>
+      <a href="/multiplayer">Live</a>
+      <a href="/tournaments">Tournaments</a>
+      <a href="/leaderboard">Leaderboard</a>
+      <a href="/watch" class="active">Watch</a>
+      <a href="/history">History</a>
+      <a href="/profile">Profile</a>
+    </div>
+    <button class="hamburger" onclick="toggleDrawer()">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+  <div class="drawer-overlay" id="drawer-overlay" onclick="toggleDrawer()"></div>
+  <div class="mobile-drawer" id="mobile-drawer">
+    <a href="/">Home</a>
+    <a href="/play">vs Bot</a>
+    <a href="/multiplayer">Live</a>
+    <a href="/tournaments">Tournaments</a>
+    <a href="/leaderboard">Leaderboard</a>
+    <a href="/watch" class="active">Watch</a>
+    <a href="/history">History</a>
+    <a href="/profile">Profile</a>
+  </div>
+
+  <div class="page">
+
+    <!-- Games list -->
+    <div id="list-view">
+      <h1><span class="live-dot"></span>Live Games</h1>
+      <p class="subtitle">Watch ongoing games in real time.</p>
+      <div id="games-list">
+        <div class="no-games">Loading live games…</div>
+      </div>
+    </div>
+
+    <!-- Watch board -->
+    <div id="watch-view">
+      <div class="watch-header">
+        <button class="back-btn" onclick="backToList()">← Back</button>
+        <div>
+          <div class="watch-title" id="watch-title">Loading…</div>
+          <div class="watch-tc" id="watch-tc"></div>
+        </div>
+        <div class="spectator-info" id="spectator-count"></div>
+      </div>
+
+      <div class="watch-layout">
+        <!-- Board column -->
+        <div class="board-wrap">
+          <div class="player-bar" id="bar-top">
+            <div>
+              <div class="player-name" id="name-top">—</div>
+              <div class="player-elo" id="elo-top"></div>
+            </div>
+            <div class="player-clock" id="clock-top">—</div>
+          </div>
+
+          <div class="cg-wrap" id="cg-container"></div>
+
+          <div class="player-bar" id="bar-bottom">
+            <div>
+              <div class="player-name" id="name-bottom">—</div>
+              <div class="player-elo" id="elo-bottom"></div>
+            </div>
+            <div class="player-clock" id="clock-bottom">—</div>
+          </div>
+        </div>
+
+        <!-- Side panel -->
+        <div class="watch-panel">
+          <div class="status-box" id="watch-status">Connecting…</div>
+
+          <div class="move-list-box">
+            <div class="move-list-title">Moves</div>
+            <div class="move-list" id="move-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /page -->
+
+  <script>
+  // ── Config ────────────────────────────────────────────────────────────────
+  const WS_BASE  = location.protocol === 'https:' ? 'wss://' + location.host : 'ws://' + location.host;
+
+  // ── Nav drawer ───────────────────────────────────────────────────────────
+  function toggleDrawer() {
+    const d = document.getElementById('mobile-drawer');
+    const o = document.getElementById('drawer-overlay');
+    const open = d.style.right === '0px';
+    d.style.right  = open ? '-260px' : '0px';
+    o.style.display = open ? 'none'   : 'block';
+  }
+
+  // ── State ────────────────────────────────────────────────────────────────
+  let cg          = null;
+  let watchWs     = null;
+  let chess       = null;
+  let sanHistory  = [];
+  let clockW      = 0;
+  let clockB      = 0;
+  let watchOrientation = 'white';
+  let clockTick   = null;
+  let lastTurn    = 'white';
+  let tickStart   = null;
+
+  // ── List view ─────────────────────────────────────────────────────────────
+  async function loadGames() {
+    try {
+      const r = await fetch('/api/games/live');
+      const games = await r.json();
+      renderGamesList(games);
+    } catch(e) {
+      document.getElementById('games-list').innerHTML =
+        '<div class="no-games">Failed to load games. Please refresh.</div>';
+    }
+  }
+
+  function renderGamesList(games) {
+    const el = document.getElementById('games-list');
+    if (!games.length) {
+      el.innerHTML = '<div class="no-games">No live games right now.<br>Check back soon or <a href="/multiplayer" style="color:var(--green)">start a game</a>.</div>';
+      return;
+    }
+    el.innerHTML = games.map(g => `
+      <div class="game-card" onclick="watchGame('${g.id}', '${escHtml(g.white)}', '${escHtml(g.black)}', '${g.white_elo}', '${g.black_elo}', '${g.time_control}')">
+        <div>
+          <div class="game-players">
+            ${escHtml(g.white)} <span class="vs">vs</span> ${escHtml(g.black)}
+          </div>
+          <div class="game-meta">
+            ${g.time_control} · ${g.moves} move${g.moves !== 1 ? 's' : ''}
+            ${g.spectators > 0 ? `· 👁 ${g.spectators} watching` : ''}
+          </div>
+        </div>
+        <button class="watch-btn">Watch</button>
+      </div>
+    `).join('');
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Watch a game ──────────────────────────────────────────────────────────
+  function watchGame(gameId, white, black, whiteElo, blackElo, tc) {
+    document.getElementById('list-view').style.display  = 'none';
+    document.getElementById('watch-view').style.display = '';
+
+    document.getElementById('watch-title').textContent = `${white} vs ${black}`;
+    document.getElementById('watch-tc').textContent    = tc;
+
+    // Init board (view-only)
+    if (cg) { cg.destroy(); cg = null; }
+    const el = document.getElementById('cg-container');
+    el.innerHTML = '';
+    cg = Chessground(el, {
+      viewOnly:    true,
+      orientation: 'white',
+      animation:   { enabled: true, duration: 150 },
+      highlight:   { lastMove: true, check: true },
+    });
+
+    chess      = new Chess();
+    sanHistory = [];
+    renderMoveList();
+    setStatus('Connecting…');
+
+    // Player labels
+    document.getElementById('name-top').textContent    = black;
+    document.getElementById('elo-top').textContent     = `ELO ${blackElo}`;
+    document.getElementById('name-bottom').textContent = white;
+    document.getElementById('elo-bottom').textContent  = `ELO ${whiteElo}`;
+
+    // Connect WS
+    if (watchWs) { watchWs.close(); watchWs = null; }
+    watchWs = new WebSocket(`${WS_BASE}/ws/watch/${gameId}`);
+
+    watchWs.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'ping') return;
+
+      if (msg.type === 'game_state') {
+        // Initial state — set board position
+        chess = new Chess(msg.fen);
+        cg.set({ fen: msg.fen });
+        clockW = msg.clock?.w ?? 0;
+        clockB = msg.clock?.b ?? 0;
+        lastTurn = msg.turn || 'white';
+        updateClocks();
+        startClockTick(msg.turn);
+        setStatus(msg.turn === 'white' ? `${white} to move` : `${black} to move`);
+        document.getElementById('watch-title').textContent =
+          `${msg.white || white} vs ${msg.black || black}`;
+        const specs = msg.spectators;
+        if (specs !== undefined)
+          document.getElementById('spectator-count').textContent = `👁 ${specs + 1} watching`;
+      }
+
+      if (msg.type === 'move') {
+        // Apply move to chess.js for SAN
+        const chessMove = chess.move({ from: msg.move.slice(0,2), to: msg.move.slice(2,4),
+                                        promotion: msg.move[4] || 'q' });
+        if (chessMove) {
+          sanHistory.push(chessMove.san);
+          renderMoveList();
+        }
+        // Update board
+        const from = msg.move.slice(0,2), to = msg.move.slice(2,4);
+        cg.set({ fen: msg.fen, lastMove: [from, to] });
+
+        // Update clocks
+        clockW = msg.clock?.w ?? clockW;
+        clockB = msg.clock?.b ?? clockB;
+        lastTurn = msg.turn || (msg.move ? (chess.turn() === 'w' ? 'white' : 'black') : lastTurn);
+        updateClocks();
+        startClockTick(lastTurn);
+
+        // Highlight active player
+        updateActiveBars(lastTurn);
+        const mover = lastTurn === 'white' ? white : black;
+        setStatus(`${mover} to move`);
+      }
+
+      if (msg.type === 'gameover') {
+        stopClockTick();
+        const resultText = msg.result === 'draw'
+          ? 'Game drawn'
+          : `${msg.result === 'white' ? white : black} wins`;
+        setStatus(`${resultText} · ${msg.reason || ''}`);
+        document.getElementById('bar-top').classList.remove('active-player');
+        document.getElementById('bar-bottom').classList.remove('active-player');
+      }
+
+      if (msg.type === 'game_ended') {
+        stopClockTick();
+        setStatus('Game finished.');
+      }
+    };
+
+    watchWs.onerror = () => setStatus('Connection error.');
+    watchWs.onclose = () => { stopClockTick(); };
+  }
+
+  function backToList() {
+    if (watchWs) { watchWs.close(); watchWs = null; }
+    stopClockTick();
+    document.getElementById('watch-view').style.display = 'none';
+    document.getElementById('list-view').style.display  = '';
+    loadGames(); // refresh list
+  }
+
+  // ── Clock ─────────────────────────────────────────────────────────────────
+  function fmtClock(secs) {
+    if (secs <= 0) return '0:00';
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  function updateClocks() {
+    const topEl    = document.getElementById('clock-top');
+    const bottomEl = document.getElementById('clock-bottom');
+    topEl.textContent    = fmtClock(clockB);
+    bottomEl.textContent = fmtClock(clockW);
+    topEl.classList.toggle('low',    clockB < 30);
+    bottomEl.classList.toggle('low', clockW < 30);
+  }
+
+  function startClockTick(turn) {
+    stopClockTick();
+    tickStart = Date.now();
+    clockTick = setInterval(() => {
+      const elapsed = (Date.now() - tickStart) / 1000;
+      tickStart = Date.now();
+      if (turn === 'white') clockW = Math.max(0, clockW - elapsed);
+      else                  clockB = Math.max(0, clockB - elapsed);
+      updateClocks();
+    }, 200);
+  }
+
+  function stopClockTick() {
+    if (clockTick) { clearInterval(clockTick); clockTick = null; }
+  }
+
+  function updateActiveBars(turn) {
+    document.getElementById('bar-top').classList.toggle('active-player',    turn === 'black');
+    document.getElementById('bar-bottom').classList.toggle('active-player', turn === 'white');
+  }
+
+  // ── Move list ─────────────────────────────────────────────────────────────
+  function renderMoveList() {
+    const el = document.getElementById('move-list');
+    el.innerHTML = '';
+    for (let i = 0; i < sanHistory.length; i += 2) {
+      const pair = document.createElement('div');
+      pair.className = 'move-pair';
+      const num = document.createElement('span');
+      num.className = 'move-num';
+      num.textContent = `${Math.floor(i/2) + 1}.`;
+      pair.appendChild(num);
+
+      [0, 1].forEach(j => {
+        if (sanHistory[i + j] !== undefined) {
+          const m = document.createElement('span');
+          m.className = 'move-san' + (i + j === sanHistory.length - 1 ? ' current' : '');
+          m.textContent = sanHistory[i + j];
+          pair.appendChild(m);
+        }
+      });
+      el.appendChild(pair);
+    }
+    // Auto-scroll to bottom
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function setStatus(msg) {
+    document.getElementById('watch-status').textContent = msg;
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  // Direct link from tournament: /watch?game=GAME_ID
+  const _directGame = new URLSearchParams(location.search).get('game');
+  if (_directGame) {
+    // Load game info from live games list then jump to board
+    fetch('/api/games/live')
+      .then(r => r.json())
+      .then(games => {
+        const g = games.find(x => x.id === _directGame);
+        if (g) {
+          watchGame(g.id, g.white, g.black, g.white_elo, g.black_elo, g.time_control);
+        } else {
+          // Game not found in live list — show list with message
+          document.getElementById('games-list').innerHTML =
+            '<div class="no-games">That game has already finished or could not be found.<br>' +
+            'Here are the current live games:</div>';
+          loadGames();
+        }
+      })
+      .catch(() => loadGames());
+  } else {
+    loadGames();
+  }
+  // Refresh list every 15 seconds when on list view
+  setInterval(() => {
+    if (document.getElementById('list-view').style.display !== 'none') {
+      loadGames();
+    }
+  }, 15000);
+
+  // Presence ping
+  const _pt = Math.random().toString(36).slice(2);
+  async function pingPresence() {
+    try { await fetch('/api/ping', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({token: _pt}) }); } catch(e) {}
+  }
+  pingPresence(); setInterval(pingPresence, 30000);
+  </script>
+</body>
+</html>

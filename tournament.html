@@ -1034,11 +1034,18 @@ async function viewTournament(id) {
           if (g.result === 'white') resultHTML = `<span class="pairing-result white-win">1 – 0</span>`;
           else if (g.result === 'black') resultHTML = `<span class="pairing-result black-win">0 – 1</span>`;
           else if (g.result === 'draw') resultHTML = `<span class="pairing-result draw">½ – ½</span>`;
+          const watchBtn = (!g.result && g.game_id)
+            ? `<a href="/watch?game=${g.game_id}" target="_blank"
+                  style="font-size:10px;padding:3px 8px;border:1px solid #333;border-radius:3px;
+                         color:#00ff9d;text-decoration:none;white-space:nowrap;letter-spacing:0.08em;"
+                  onclick="event.stopPropagation()">👁 Watch</a>`
+            : '';
           return `<div class="pairing-row">
             <div class="pairing-player">${g.white_username || '?'}</div>
             <div class="pairing-vs">vs</div>
             <div class="pairing-player" style="text-align:right">${g.black_username || '?'}</div>
             ${resultHTML}
+            ${watchBtn}
           </div>`;
         }).join('') + '</div></div>';
     }
@@ -1057,11 +1064,18 @@ async function viewTournament(id) {
           if (g.result === 'white') resultHTML = `<span class="pairing-result white-win">1 – 0</span>`;
           else if (g.result === 'black') resultHTML = `<span class="pairing-result black-win">0 – 1</span>`;
           else if (g.result === 'draw') resultHTML = `<span class="pairing-result draw">½ – ½</span>`;
+          const watchBtn = (!g.result && g.game_id)
+            ? `<a href="/watch?game=${g.game_id}" target="_blank"
+                  style="font-size:10px;padding:3px 8px;border:1px solid #333;border-radius:3px;
+                         color:#00ff9d;text-decoration:none;white-space:nowrap;letter-spacing:0.08em;"
+                  onclick="event.stopPropagation()">👁 Watch</a>`
+            : '';
           return `<div class="pairing-row">
             <div class="pairing-player">${g.white_username || '?'}</div>
             <div class="pairing-vs">vs</div>
             <div class="pairing-player" style="text-align:right">${g.black_username || '?'}</div>
             ${resultHTML}
+            ${watchBtn}
           </div>`;
         }).join('') + '</div></div>';
     });

@@ -409,6 +409,8 @@ async function loadLeaderboard() {
 
 function setTc(tc) {
   currentTc = tc;
+  const hdr = document.getElementById('rating-header');
+  if (hdr) hdr.textContent = (tc === 'all') ? 'Total ELO' : 'Rating';
   ['blitz','bullet','rapid','classical'].forEach(t => {
     document.getElementById('tc-' + t).classList.toggle('active', t === tc);
   });
@@ -472,15 +474,23 @@ function applyFilters() {
   document.getElementById('stats-strip').style.display = '';
 
   if (currentView === 'all-tc') {
-    // All-TC view: sort by blitz by default, show all 4 columns
-    // Include players who have ANY rated game (any TC > 1500 or games_played > 0)
-    let allTcPlayers = allPlayers.slice();
+    // All-TC view: sort by sum of all 4 TC ratings (highest total ELO = best overall)
+    function eloSum(p) {
+      return (p.elo_bullet||1500) + (p.elo_blitz||1500) +
+             (p.elo_rapid||1500)  + (p.elo_classical||1500);
+    }
+    let allTcPlayers = allPlayers.filter(p => {
+      // Only include players with at least one non-default rating
+      return [p.elo_bullet, p.elo_blitz, p.elo_rapid, p.elo_classical]
+        .some(e => e && e !== 1500);
+    });
     if (regionSet) allTcPlayers = allTcPlayers.filter(p => regionSet.has(p.country));
+    if (femaleOnly) allTcPlayers = allTcPlayers.filter(p => p.gender === 'female');
     if (q) allTcPlayers = allTcPlayers.filter(p =>
       (p.username||'').toLowerCase().includes(q) ||
       (COUNTRY_NAMES[p.country]||'').toLowerCase().includes(q));
-    allTcPlayers.sort((a, b) => (b.elo_blitz||0) - (a.elo_blitz||0));
-    renderAllTc(allTcPlayers);
+    allTcPlayers.sort((a, b) => eloSum(b) - eloSum(a));
+    renderAllTc(allTcPlayers, eloSum);
   } else if (currentView === 'continental') {
     renderContinental(filtered, col);
   } else {
@@ -604,7 +614,10 @@ function renderByCountry(players, col) {
   el.innerHTML = html;
 }
 
-function renderAllTc(players) {
+function renderAllTc(players, eloSumFn) {
+  eloSumFn = eloSumFn || function(p) {
+    return (p.elo_bullet||1500)+(p.elo_blitz||1500)+(p.elo_rapid||1500)+(p.elo_classical||1500);
+  };
   const el = document.getElementById('lb-content');
   if (!players.length) {
     el.innerHTML = '<div class="empty">No players found for these filters.</div>';
@@ -634,6 +647,8 @@ function renderAllTc(players) {
            + (v > 0 ? v : '—') + '</td>';
     }).join('');
 
+    const total = eloSumFn(p);
+
     return '<tr class="' + (isMe ? 'is-me' : '') + '">'
       + '<td class="td-rank ' + rc + '">' + medal + '</td>'
       + '<td><div class="td-player">'
@@ -644,18 +659,19 @@ function renderAllTc(players) {
           + '</div>'
         + '</div></td>'
       + tcCells
+      + '<td class="td-elo" style="color:var(--green);font-weight:700;">' + total + '</td>'
       + '<td class="td-games">' + (p.games_played || 0) + ' games</td>'
       + '</tr>';
   }).join('');
 
   const headers = TC_DEFS.map(tc =>
     '<th class="num" style="font-size:10px;">' + tc.label + '</th>'
-  ).join('');
+  ).join('') + '<th class="num" style="font-size:10px;color:var(--green);">∑ Total</th>';
 
   el.innerHTML =
     '<div class="section-hdr">'
       + '<span>All Time Controls</span>'
-      + '<span>' + players.length + ' players · Sorted by Blitz · <span style="color:#d4af37;">Gold</span> = highest rated TC per player</span>'
+      + '<span>' + players.length + ' players · Sorted by Total ELO · <span style="color:#d4af37;">Gold</span> = best TC per player</span>'
     + '</div>'
     + '<div style="overflow-x:auto;">'
     + '<table class="lb-table">'

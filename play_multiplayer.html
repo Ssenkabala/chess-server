@@ -389,39 +389,58 @@ global.Chessground = Nr;
       gap: 0;
     }
 
-    /* ── Header ── */
-    .header {
+    /* ── Nav (matches site-wide style) ── */
+    .top-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 20px; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--bg); z-index: 10;
       width: 100%;
-      max-width: 520px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 20px;
     }
-    .logo {
-      font-size: 18px;
-      letter-spacing: 0.2em;
-      color: var(--green);
-      text-transform: uppercase;
-      text-decoration: none;
+    .top-logo {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none; color: var(--text);
+      font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase;
     }
-    .header-right {
-      font-size: 12px;
-      color: var(--muted);
-      letter-spacing: 0.08em;
-    }
-    #nav-links-desktop a.nav-link {
-      color: var(--muted);
-      font-size: 11px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      text-decoration: none;
-      padding: 4px 8px;
-      border-radius: 3px;
+    .nav-links { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+    .nav-links a {
+      color: var(--muted); font-size: 11px; letter-spacing: 0.15em;
+      text-transform: uppercase; text-decoration: none; cursor: pointer;
       transition: color 0.2s;
     }
-    #nav-links-desktop a.nav-link:hover { color: var(--green); }
-    #nav-links-desktop a.nav-link.active { color: var(--green); }
+    .nav-links a:hover, .nav-links a.active { color: var(--green); }
+    .hamburger {
+      display: none; flex-direction: column; gap: 5px;
+      background: none; border: none; cursor: pointer; padding: 6px;
+    }
+    .hamburger span { display: block; width: 22px; height: 2px; background: #888; }
+    .mobile-drawer {
+      position: fixed; top: 0; right: -260px; width: 240px; height: 100vh;
+      background: #0d0d0d; border-left: 1px solid #1a1a1a;
+      display: flex; flex-direction: column;
+      padding: 72px 24px 32px; gap: 20px; z-index: 500;
+      transition: right 0.28s ease;
+    }
+    .mobile-drawer a {
+      color: #555; text-decoration: none; font-size: 13px;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      padding: 8px 0; border-bottom: 1px solid #1a1a1a;
+    }
+    .mobile-drawer a.active { color: var(--green); }
+    .drawer-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55); z-index: 499;
+    }
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+      .hamburger { display: flex; }
+    }
+
+    /* ── Page content wrapper ── */
+    .page-content {
+      width: 100%; max-width: 520px;
+      margin: 0 auto; padding: 24px 16px;
+      display: flex; flex-direction: column; align-items: center; gap: 20px;
+    }
 
     /* ── Screens ── */
     .screen { display: none; flex-direction: column; align-items: center; gap: 20px; width: 100%; max-width: 520px; }
@@ -845,29 +864,28 @@ global.Chessground = Nr;
 </head>
 <body>
 
-  <div class="header">
-    <a class="logo" href="/" style="display:flex;align-items:center;gap:8px;">
+  <div class="top-bar">
+    <a class="top-logo" href="/">
       <img src="/logo.png" height="28" alt="AfriChess" onerror="this.style.display='none'">
       <span>Afri<span style="color:#00ff9d">Chess</span></span>
     </a>
-    <div id="nav-links-desktop" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-      <a href="/"             class="nav-link">Home</a>
-      <a href="/play"         class="nav-link">vs Bot</a>
-      <a href="/tournaments"  class="nav-link">Tournaments</a>
-      <a href="/leaderboard"  class="nav-link">Leaderboard</a>
-      <a href="/history"      class="nav-link">History</a>
-      <a href="/profile"      class="nav-link">Profile</a>
-      <a id="nav-signin-mp"  class="nav-link" onclick="openAuth()" style="display:none;cursor:pointer;">Sign In</a>
-      <a id="nav-signout-mp" class="nav-link" onclick="signOutUser()" style="display:none;cursor:pointer;">Sign Out</a>
-      <span class="header-right" id="tc-label">5+0 · Blitz</span>
+    <div class="nav-links">
+      <a href="/">Home</a>
+      <a href="/play">vs Bot</a>
+      <a href="/multiplayer" class="active">Live</a>
+      <a href="/tournaments">Tournaments</a>
+      <a href="/leaderboard">Leaderboard</a>
+      <a href="/history">History</a>
+      <a href="/profile">Profile</a>
+      <a id="nav-signin-mp" onclick="openAuth()" style="display:none;cursor:pointer;">Sign In</a>
+      <a id="nav-signout-mp" onclick="signOutUser()" style="display:none;cursor:pointer;">Sign Out</a>
+      <span style="color:var(--muted);font-size:11px;" id="tc-label">5+0 · Blitz</span>
     </div>
-    <button id="hamburger" onclick="toggleMobileNav()" style="display:none;flex-direction:column;gap:5px;background:none;border:none;cursor:pointer;padding:6px;">
-      <span style="display:block;width:22px;height:2px;background:#888;pointer-events:none;"></span>
-      <span style="display:block;width:22px;height:2px;background:#888;pointer-events:none;"></span>
-      <span style="display:block;width:22px;height:2px;background:#888;pointer-events:none;"></span>
+    <button class="hamburger" id="hamburger" onclick="toggleMobileNav()">
+      <span></span><span></span><span></span>
     </button>
   </div>
-  <div id="mobile-drawer" style="position:fixed;top:0;right:-260px;width:240px;height:100vh;background:#0d0d0d;border-left:1px solid #1a1a1a;display:flex;flex-direction:column;padding:72px 24px 32px;gap:20px;z-index:500;transition:right 0.28s ease;">
+  <div class="mobile-drawer" id="mobile-drawer">
     <a href="/" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Home</a>
     <a href="/play" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">vs Bot</a>
     <a href="/multiplayer" style="color:var(--green);text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Live</a>
@@ -880,10 +898,10 @@ global.Chessground = Nr;
   </div>
   <div id="drawer-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:499;" onclick="toggleMobileNav()"></div>
   <style>
-  @media (max-width:640px) { #nav-links-desktop { display:none !important; } #hamburger { display:flex !important; } }
   </style>
 
   <!-- ══ LOBBY SCREEN ══ -->
+  <div class="page-content">
   <div id="screen-lobby" class="screen active">
     <!-- Time control picker — shown before searching -->
     <div id="tc-picker" style="margin-bottom:20px;">
@@ -1348,16 +1366,35 @@ function updateSessionScore(result) {
 // ═══════════════════════════════════════════════════════════════
 async function bootAuth() {
   if (!sb) {
-    // Supabase failed to load — show error, don't allow play
     document.getElementById('screen-lobby').innerHTML =
       '<div style="text-align:center;padding:60px 20px;color:#555;font-size:13px;letter-spacing:0.08em;">' +
       'Connection error. Please refresh the page.</div>';
     return;
   }
 
+  // Challenge invite links work without login — check before requiring auth
+  const _earlyParams = new URLSearchParams(window.location.search);
+  const _earlyChallenge = _earlyParams.get('challenge');
+  if (_earlyChallenge) {
+    document.getElementById('tc-picker').style.display = 'none';
+    document.getElementById('tc-searching').style.display = 'none';
+    showChallengeJoin(_earlyChallenge);
+    // Try auth in background for identity (non-blocking)
+    sb.auth.getSession().then(({ data }) => {
+      if (data && data.session) {
+        currentUser = data.session.user;
+        setNavSignedIn();
+        sb.from('profiles').select('username,elo').eq('user_id', currentUser.id).single()
+          .then(({ data: profile }) => { if (profile) myProfile = profile; });
+      } else {
+        setNavSignedOut();
+      }
+    });
+    return;
+  }
+
   const { data } = await sb.auth.getSession();
   if (!data.session) {
-    // Show sign-in modal instead of redirecting
     setNavSignedOut();
     openAuth();
     return;
@@ -1401,15 +1438,6 @@ async function bootAuth() {
     document.getElementById('tc-picker').style.display = 'none';
     document.getElementById('tc-searching').style.display = '';
     startGame();
-    return;
-  }
-
-  // Challenge invite link: ?challenge=CODE
-  const challengeCode = params.get('challenge');
-  if (challengeCode) {
-    document.getElementById('tc-picker').style.display = 'none';
-    document.getElementById('tc-searching').style.display = 'none';
-    showChallengeJoin(challengeCode);
     return;
   }
 
@@ -1535,10 +1563,22 @@ async function showChallengeJoin(code) {
   }
 }
 
-function joinChallenge() {
+async function joinChallenge() {
   const btn = document.getElementById('btn-join-challenge');
   if (btn) btn.disabled = true;
   document.getElementById('challenge-join-status').textContent = 'Joining…';
+  // Try to get identity before connecting
+  if (!currentUser) {
+    try {
+      const { data } = await _supabase.auth.getSession();
+      if (data.session) {
+        currentUser = data.session.user;
+        const { data: profile } = await _supabase
+          .from('profiles').select('username,elo').eq('user_id', currentUser.id).single();
+        if (profile) myProfile = profile;
+      }
+    } catch(e) {}
+  }
   connectChallengeWs(_challengeCode, false);
 }
 
@@ -2393,6 +2433,7 @@ bootAuth();
   setInterval(ping, 30000);
 })();
 </script>
+  </div><!-- /page-content -->
 </body>
 </html>
 

@@ -1497,12 +1497,25 @@ async def update_elos(game: dict, result: str):
     """
     Calculate and persist ELO changes for both players using Glicko-2
     and the correct per-time-control column.
+    Only runs when BOTH players are registered (non-guest) accounts.
+    Guest IDs start with "guest_" — playing a guest never affects ELO.
     """
     wp = game.get("white_profile")
     bp = game.get("black_profile")
     if not wp or not bp:
         return
-    if not wp.get("user_id") or not bp.get("user_id"):
+
+    def _is_registered(uid: str | None) -> bool:
+        """True only for real Supabase UUIDs (36 chars with hyphens)."""
+        if not uid:
+            return False
+        if uid.startswith("guest_"):
+            return False
+        # Supabase UUIDs: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        return len(uid) == 36 and uid.count("-") == 4
+
+    if not _is_registered(wp.get("user_id")) or not _is_registered(bp.get("user_id")):
+        print(f"[elo] skipping — guest player in game {game.get('id', '?')}", flush=True)
         return
 
     tc  = game.get("time_control")

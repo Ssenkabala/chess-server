@@ -81,14 +81,32 @@ class SenkabalaEngine {
     if (!this._worker) return Promise.reject(new Error('Worker not available'));
 
     if (!this._ready) {
-      // Wait for ready, then search
       return this.ready().then(() => this.bestMove(fen, moves, movetime));
     }
 
     const id = ++this._idSeq;
+    // Timeout = movetime + 8s grace. If worker doesn't respond in time,
+    // reject so the caller can fall back to the server.
+    const timeoutMs = movetime + 8000;
+
     return new Promise((resolve, reject) => {
       this._pending.set(id, { resolve, reject });
       this._worker.postMessage({ type: 'search', id, fen, moves, movetime_ms: movetime });
+
+      const timer = setTimeout(() => {
+        if (this._pending.has(id)) {
+          this._pending.delete(id);
+          console.warn(`[WASM] move timeout after ${timeoutMs}ms — falling back to server`);
+          reject(new Error('WASM timeout'));
+        }
+      }, timeoutMs);
+
+      // Clear timer if resolved/rejected normally
+      const orig = this._pending.get(id);
+      this._pending.set(id, {
+        resolve: (v) => { clearTimeout(timer); orig.resolve(v); },
+        reject:  (e) => { clearTimeout(timer); orig.reject(e);  },
+      });
     });
   }
 

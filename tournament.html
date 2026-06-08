@@ -403,7 +403,16 @@
 
   <!-- Detail view -->
   <div class="detail" id="detail-view">
-    <button class="detail-back" onclick="showList()">← Back to tournaments</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <button class="detail-back" onclick="showList()" style="margin-bottom:0;">← Back</button>
+      <button id="btn-share-tournament"
+        onclick="shareTournamentLink(currentDetailId)"
+        style="display:none;background:transparent;border:1px solid #333;color:var(--green);
+               padding:7px 14px;border-radius:3px;font-size:12px;letter-spacing:0.08em;
+               text-transform:uppercase;cursor:pointer;">
+        🔗 Share
+      </button>
+    </div>
 
     <!-- Timer: survives detail-content re-renders -->
     <div id="arena-timer-bar" style="display:none;margin-bottom:12px;padding:10px 16px;
@@ -998,6 +1007,9 @@ async function viewTournament(id) {
   const detail = document.getElementById('detail-view');
   const content = document.getElementById('detail-content');
   detail.classList.add('active');
+  // Show share button
+  const shareBtn = document.getElementById('btn-share-tournament');
+  if (shareBtn) shareBtn.style.display = '';
 
   // Only show full spinner on first load, not on poll refreshes
   if (!content.dataset.loaded) {
@@ -1276,6 +1288,26 @@ function startDetailPoll(id) {
   }, 10000);
 }
 
+function shareTournamentLink(id) {
+  const url = `${location.origin}/tournaments#${id}`;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById(`btn-share-${id}`);
+    if (btn) {
+      btn.textContent = '✓ Copied!';
+      setTimeout(() => { btn.textContent = '🔗 Share'; }, 2000);
+    }
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    const btn = document.getElementById(`btn-share-${id}`);
+    if (btn) { btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = '🔗 Share'; }, 2000); }
+  });
+}
+
 function showList() {
   stopDetailPoll();
   stopListPoll();
@@ -1291,6 +1323,8 @@ function showList() {
   hideNotifyBar();
   document.getElementById('list-view').classList.remove('hidden');
   document.getElementById('detail-view').classList.remove('active');
+  const shareBtn = document.getElementById('btn-share-tournament');
+  if (shareBtn) shareBtn.style.display = 'none';
   loadTournaments();
   if (currentTab === 'active') startListPoll();
 }

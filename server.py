@@ -48,9 +48,20 @@ async def lifespan(app):
     # Start engine pool before accepting requests
     await engine_pool.start()
     asyncio.create_task(arena_auto_start_scheduler())
+    # Pre-warm stats cache so landing page shows real numbers on first visit
+    asyncio.create_task(_warm_stats_cache())
     yield
     # Graceful shutdown — tell engine workers to quit cleanly
     await engine_pool.stop()
+
+async def _warm_stats_cache():
+    """Fetch DB totals at startup so the first landing page visit shows real numbers."""
+    try:
+        await asyncio.sleep(3)   # wait for DB connections to settle
+        await get_live_stats()
+        print("[startup] stats cache warmed", flush=True)
+    except Exception as e:
+        print(f"[startup] stats warm failed: {e}", flush=True)
 
 app = FastAPI(lifespan=lifespan)
 

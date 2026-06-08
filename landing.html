@@ -842,6 +842,10 @@
         <div style="font-size:22px;font-family:Georgia,serif;color:var(--green);letter-spacing:0.02em;" id="stat-total-games">—</div>
         <div style="font-size:9px;color:#444;letter-spacing:0.18em;text-transform:uppercase;margin-top:2px;">Total games played</div>
       </div>
+      <div style="text-align:center;">
+        <div style="font-size:22px;font-family:Georgia,serif;color:var(--green);letter-spacing:0.02em;" id="stat-total-players">—</div>
+        <div style="font-size:9px;color:#444;letter-spacing:0.18em;text-transform:uppercase;margin-top:2px;">Registered players</div>
+      </div>
     </div>
     <div class="elo-badge">
       <span class="elo-num">2050</span>
@@ -859,6 +863,7 @@
     <div class="stat"><span class="stat-num">2050</span><span class="stat-label">Peak ELO</span></div>
     <div class="stat"><span class="stat-num">∞</span><span class="stat-label">Positions Analysed</span></div>
     <div class="stat"><span class="stat-num">3</span><span class="stat-label">Coach Tiers</span></div>
+    <div class="stat"><span class="stat-num" id="stat-countries-hero">2+</span><span class="stat-label">Countries</span></div>
     <div class="stat"><span class="stat-num">$5</span><span class="stat-label">Per Month</span></div>
   </div>
 </section>
@@ -1009,6 +1014,29 @@
   </div>
 </section>
 
+<!-- FOUNDER STORY -->
+<section style="max-width:680px;margin:0 auto 72px;padding:0 20px;">
+  <div style="border-left:2px solid var(--green);padding-left:24px;">
+    <p style="font-size:11px;color:#555;letter-spacing:0.18em;text-transform:uppercase;margin-bottom:14px;">Why AfriChess exists</p>
+    <p style="font-size:15px;line-height:1.8;color:#bbb;margin-bottom:14px;">
+      I'm a Speech-Language Therapist based in Rwanda. I've played chess competitively for years
+      and got tired of platforms that treat Africa as an afterthought — slow on mobile, foreign timezones,
+      no continental community.
+    </p>
+    <p style="font-size:15px;line-height:1.8;color:#bbb;margin-bottom:14px;">
+      So I built AfriChess from scratch. The chess engine — SenkabalaIII — is written in C++
+      and compiles to WebAssembly so it runs entirely in your browser.
+      It plays at ~2050 ELO. The whole platform uses 80% less data than any other chess site
+      because bandwidth costs money here.
+    </p>
+    <p style="font-size:15px;line-height:1.8;color:#bbb;">
+      No investors. No ads. No paywalls on anything that matters.
+      Just chess — built by an African developer, for African players.
+    </p>
+    <p style="font-size:13px;color:var(--green);margin-top:20px;letter-spacing:0.05em;">— Isa, Founder &amp; Developer · Ugandan, based in Kigali</p>
+  </div>
+</section>
+
 <!-- API -->
 <section id="api">
   <div class="api-section reveal">
@@ -1041,11 +1069,15 @@
 <!-- FOOTER -->
 <footer>
   <div class="footer-logo">Afri<span>Chess</span></div>
-  <p>© 2026 AfriChess. Built on a 2050 ELO engine.</p>
+  <p>© 2026 AfriChess · Built by a Ugandan developer in Kigali, Rwanda</p>
   <div class="footer-links">
     <a href="/play">Play</a>
     <a href="#pricing">Pricing</a>
     <a href="#api">API Docs</a>
+    <a href="https://twitter.com/africhess" target="_blank" rel="noopener">X / Twitter</a>
+    <a href="https://facebook.com/africhess" target="_blank" rel="noopener">Facebook</a>
+    <a href="https://linkedin.com/company/africhess" target="_blank" rel="noopener">LinkedIn</a>
+    <a href="mailto:issenkabala@gmail.com">Contact</a>
   </div>
 </footer>
 
@@ -1103,7 +1135,7 @@ function navTo(dest) {
 </script>
 
 <!-- FEEDBACK BUTTON -->
-<button id="feedback-btn" onclick="openFeedback()">💬 Feedback</button>
+<button style="display:none;" id="feedback-btn" onclick="openFeedback()">💬 Feedback</button>
 
 <!-- FEEDBACK MODAL -->
 <div id="feedback-overlay" onclick="if(event.target===this)closeFeedback()">
@@ -1392,9 +1424,18 @@ async function fetchStats() {
     if (!r.ok) return;
     const d = await r.json();
 
-    animateCount(document.getElementById('stat-live-games'),   d.live_games     || 0);
-    animateCount(document.getElementById('stat-connected'),    d.live_connected  || 0);
-    animateCount(document.getElementById('stat-total-games'),  d.total_games     || 0);
+    animateCount(document.getElementById('stat-live-games'),    d.live_games      || 0);
+    animateCount(document.getElementById('stat-connected'),     d.live_connected  || 0);
+    animateCount(document.getElementById('stat-total-games'),   d.total_games     || 0);
+    animateCount(document.getElementById('stat-total-players'), d.total_players   || 0);
+    if (d.total_players > 0) {
+      // Update countries stat from leaderboard if available
+      fetch('/api/leaderboard?tc=blitz').then(r=>r.json()).then(players => {
+        const countries = new Set(players.map(p=>p.country).filter(Boolean));
+        const el = document.getElementById('stat-countries-hero');
+        if (el && countries.size > 0) el.textContent = countries.size + '+';
+      }).catch(()=>{});
+    }
   } catch(e) { /* silently fail — counters stay at last value */ }
 }
 

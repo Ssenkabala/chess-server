@@ -457,22 +457,15 @@ function applyFilters() {
     return true;
   });
 
-  // Sort by chosen TC ELO desc — players with higher rating rank first
-  // Default 1500 players go to bottom since they have no games
-  filtered.sort((a, b) => {
-    const aHas = a.games_played > 0;
-    const bHas = b.games_played > 0;
-    if (aHas && !bHas) return -1;  // a played, b didn't → a first
-    if (!aHas && bHas) return 1;
-    return (b[col] || 0) - (a[col] || 0);
-  });
+  // Sort by chosen TC ELO desc — all players shown, sorted purely by rating
+  filtered.sort((a, b) => (b[col] || 1500) - (a[col] || 1500));
 
   // Stats strip
   const countries = new Set(filtered.map(p => p.country).filter(Boolean));
-  // Top ELO = highest rated player who has actually played
+  // Top ELO = highest rated player
   const topEloPlayer = filtered.find(p => p.games_played > 0);
   const topElo = topEloPlayer ? (topEloPlayer[col] || 0) : 0;
-  // Leading country = country of the #1 ranked player WITH games in this TC
+  // Leading country = country of the #1 ranked player who played THIS TC
   const leadingCountry = topEloPlayer ? topEloPlayer.country : null;
 
   document.getElementById('stat-players').textContent   = filtered.length;
@@ -539,7 +532,7 @@ function renderContinental(players, col) {
         </div>
       </td>
       <td class="td-elo">${p[col] || '—'}</td>
-      <td class="td-games">${p.games_played || 0} games</td>
+      <td class="td-games">${(p[col] || 1500) !== 1500 ? (p.games_played || 0) + ' games' : '—'}</td>
     </tr>`;
   }).join('');
 

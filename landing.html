@@ -495,7 +495,7 @@
     /* ── Testimonials / stats ── */
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 1px;
       background: #1a1a1a;
       border: 1px solid #1a1a1a;
@@ -782,7 +782,8 @@
     <a href="javascript:void(0)" onclick="navTo('/leaderboard')">Leaderboard</a>
     <a href="javascript:void(0)" onclick="navTo('/history')">History</a>
   <a href="/watch">Watch</a>
-    <a href="/watch">Watch</a>
+    <a href="/#about">About</a>
+  <a href="/#about">About</a>
     <a href="javascript:void(0)" onclick="navTo('/profile')">Profile</a>
     <a href="javascript:void(0)" id="nav-signin-btn" onclick="openAuth()" style="display:none;">Sign In</a>
     <a href="javascript:void(0)" id="nav-signout-btn" onclick="signOut()" style="display:none;">Sign Out</a>
@@ -842,7 +843,7 @@
         <div style="font-size:22px;font-family:Georgia,serif;color:var(--green);letter-spacing:0.02em;" id="stat-total-games">—</div>
         <div style="font-size:9px;color:#444;letter-spacing:0.18em;text-transform:uppercase;margin-top:2px;">Total games played</div>
       </div>
-      <div style="text-align:center;">
+      <div style="flex:1;padding:12px 16px;background:#0d0d0d;text-align:center;">
         <div style="font-size:22px;font-family:Georgia,serif;color:var(--green);letter-spacing:0.02em;" id="stat-total-players">—</div>
         <div style="font-size:9px;color:#444;letter-spacing:0.18em;text-transform:uppercase;margin-top:2px;">Registered players</div>
       </div>
@@ -865,6 +866,11 @@
     <div class="stat"><span class="stat-num">3</span><span class="stat-label">Coach Tiers</span></div>
     <div class="stat"><span class="stat-num" id="stat-countries-hero">2+</span><span class="stat-label">Countries</span></div>
     <div class="stat"><span class="stat-num">$5</span><span class="stat-label">Per Month</span></div>
+    <div class="stat" id="stat-top-country-hero">
+      <span class="stat-num" id="stat-top-country-flag" style="font-size:32px;line-height:1;">—</span>
+      <span class="stat-label" id="stat-top-country-label">Top Country</span>
+      <span style="font-size:11px;color:#555;margin-top:4px;display:block;" id="stat-top-country-players"></span>
+    </div>
   </div>
 </section>
 
@@ -887,7 +893,7 @@
     <div class="feature-card">
       <span class="feature-icon">🏆</span>
       <div class="feature-title">Live Arenas</div>
-      <p class="feature-desc">Join daily and weekend tournaments. Match up against regional club players, university champions, and masters in real-time Swiss and Arena structures.</p>
+      <p class="feature-desc">Join weekly tournaments and live arenas. Match up against regional club players, university champions, and masters in real-time Swiss and Arena structures.</p>
     </div>
     <div class="feature-card">
       <span class="feature-icon">🤖</span>
@@ -1015,7 +1021,7 @@
 </section>
 
 <!-- FOUNDER STORY -->
-<section style="max-width:680px;margin:0 auto 72px;padding:0 20px;">
+<section id="about" style="max-width:680px;margin:0 auto 72px;padding:0 20px;">
   <div style="border-left:2px solid var(--green);padding-left:24px;">
     <p style="font-size:11px;color:#555;letter-spacing:0.18em;text-transform:uppercase;margin-bottom:14px;">Why AfriChess exists</p>
     <p style="font-size:15px;line-height:1.8;color:#bbb;margin-bottom:14px;">
@@ -1428,14 +1434,53 @@ async function fetchStats() {
     animateCount(document.getElementById('stat-connected'),     d.live_connected  || 0);
     animateCount(document.getElementById('stat-total-games'),   d.total_games     || 0);
     animateCount(document.getElementById('stat-total-players'), d.total_players   || 0);
-    if (d.total_players > 0) {
-      // Update countries stat from leaderboard if available
-      fetch('/api/leaderboard?tc=blitz').then(r=>r.json()).then(players => {
-        const countries = new Set(players.map(p=>p.country).filter(Boolean));
-        const el = document.getElementById('stat-countries-hero');
-        if (el && countries.size > 0) el.textContent = countries.size + '+';
-      }).catch(()=>{});
-    }
+    // Fetch leaderboard for countries count + top country
+    fetch('/api/leaderboard?tc=blitz').then(r=>r.json()).then(players => {
+      // Countries count
+      const countries = new Set(players.map(p=>p.country).filter(Boolean));
+      const cEl = document.getElementById('stat-countries-hero');
+      if (cEl && countries.size > 0) cEl.textContent = countries.size + '+';
+
+      // Top country — country of the #1 ranked player with games
+      const topPlayer = players.find(p => p.games_played > 0 && p.country);
+      if (topPlayer) {
+        // Count players from that country
+        const countryPlayers = players.filter(p => p.country === topPlayer.country).length;
+        const flagEl    = document.getElementById('stat-top-country-flag');
+        const labelEl   = document.getElementById('stat-top-country-label');
+        const playersEl = document.getElementById('stat-top-country-players');
+        const COUNTRY_NAMES = {
+          NG:'Nigeria',UG:'Uganda',RW:'Rwanda',KE:'Kenya',GH:'Ghana',
+          ZA:'South Africa',TZ:'Tanzania',ET:'Ethiopia',EG:'Egypt',
+          CM:'Cameroon',CI:"Côte d'Ivoire",SN:'Senegal',MA:'Morocco',
+          ZW:'Zimbabwe',ZM:'Zambia',MW:'Malawi',MZ:'Mozambique',
+          TN:'Tunisia',DZ:'Algeria',LY:'Libya',SD:'Sudan',
+          AO:'Angola',NA:'Namibia',BW:'Botswana',LS:'Lesotho',
+          SZ:'Eswatini',MG:'Madagascar',MU:'Mauritius',SC:'Seychelles',
+          BI:'Burundi',DJ:'Djibouti',ER:'Eritrea',SO:'Somalia',
+          SS:'South Sudan',TD:'Chad',CF:'Central African Republic',
+          CG:'Congo',CD:'DR Congo',GA:'Gabon',GQ:'Equatorial Guinea',
+          ST:'São Tomé and Príncipe',CV:'Cape Verde',GM:'Gambia',
+          GW:'Guinea-Bissau',GN:'Guinea',SL:'Sierra Leone',LR:'Liberia',
+          ML:'Mali',BF:'Burkina Faso',NE:'Niger',MR:'Mauritania',
+          LY:'Libya',BJ:'Benin',TG:'Togo'
+        };
+        function FLAG(code) {
+          if (!code || code.length !== 2) return '🌍';
+          return String.fromCodePoint(...[...code.toUpperCase()].map(c=>c.charCodeAt(0)+127397));
+        }
+        if (flagEl)   flagEl.textContent   = FLAG(topPlayer.country);
+        if (labelEl)  labelEl.textContent  = COUNTRY_NAMES[topPlayer.country] || topPlayer.country;
+        if (playersEl) playersEl.textContent = countryPlayers + ' player' + (countryPlayers !== 1 ? 's' : '');
+      } else {
+        // No ranked player yet — hide the cell so it doesn't show a dangling dash
+        const cell = document.getElementById('stat-top-country-hero');
+        if (cell) cell.style.display = 'none';
+      }
+    }).catch(()=>{
+      const cell = document.getElementById('stat-top-country-hero');
+      if (cell) cell.style.display = 'none';
+    });
   } catch(e) { /* silently fail — counters stay at last value */ }
 }
 

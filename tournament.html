@@ -391,9 +391,9 @@
     </div>
 
     <div class="tabs">
-      <button class="tab" onclick="switchTab('upcoming')">Upcoming</button>
-      <button class="tab active" onclick="switchTab('active')">Live</button>
-      <button class="tab" onclick="switchTab('completed')">Completed</button>
+      <button class="tab" data-tab="upcoming" onclick="switchTab('upcoming')">Upcoming</button>
+      <button class="tab active" data-tab="active" onclick="switchTab('active')">Live</button>
+      <button class="tab" data-tab="completed" onclick="switchTab('completed')">Completed</button>
     </div>
 
     <div class="t-grid" id="t-grid">
@@ -883,8 +883,8 @@ async function init() {
 
 function switchTab(tab) {
   currentTab = tab;
-  document.querySelectorAll('.tab').forEach((t, i) => {
-    t.classList.toggle('active', ['upcoming','active','completed'][i] === tab);
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === tab);
   });
   stopListPoll();
   loadTournaments();
@@ -967,6 +967,7 @@ async function loadTournaments() {
             <span class="t-meta-dot">·</span>
             <span>${dur}</span>
             ${scope ? `<span class="t-meta-dot">·</span><span>${scope}</span>` : ''}
+            ${t.prize_pool > 0 ? `<span class="t-meta-dot">·</span><span style="color:#d4af37;">💰 $${t.prize_pool}</span>` : ''}
           </div>
         </div>
         <div class="t-right">
@@ -1101,11 +1102,11 @@ async function viewTournament(id) {
     if (t.status === 'upcoming') {
       if (isCreator && (players||[]).length >= 2) {
         actionBtn = `<div style="display:flex;gap:8px;flex-wrap:wrap;">
-          ${isRegistered ? `<button class="btn btn-outline btn-sm" onclick="leaveTournament('${id}')">Leave</button>` : ''}
+          ${isRegistered ? `<button class="btn btn-outline btn-sm" id="btn-leave-${id}" onclick="leaveTournament('${id}')">Leave</button>` : ''}
           <button class="btn btn-sm" onclick="startTournament('${id}')">▶ Start Now</button>
         </div>`;
       } else if (isRegistered) {
-        actionBtn = `<button class="btn btn-outline btn-sm" onclick="leaveTournament('${id}')">Leave</button>`;
+        actionBtn = `<button class="btn btn-outline btn-sm" id="btn-leave-${id}" onclick="leaveTournament('${id}')">Leave</button>`;
       } else if (!isFull) {
         const userCountry = currentProfile ? currentProfile.country : null;
         const allowedCountry = !t.country || userCountry === t.country;
@@ -1118,7 +1119,7 @@ async function viewTournament(id) {
         };
         const allowedRegion = !t.region || (userCountry && (REGION_COUNTRIES[t.region]||[]).includes(userCountry));
         if (allowedCountry && allowedRegion) {
-          actionBtn = `<button class="btn btn-sm" onclick="joinTournament('${id}')">Join</button>`;
+          actionBtn = `<button class="btn btn-sm" id="btn-join-${id}" onclick="joinTournament('${id}')">Join</button>`;
         } else if (!allowedCountry) {
           actionBtn = `<span style="font-size:11px;color:var(--muted)">Restricted to ${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country}</span>`;
         } else {
@@ -1165,6 +1166,8 @@ async function viewTournament(id) {
           ${t.format === 'arena'
             ? (t.duration_minutes ? `<span class="tag">${t.duration_minutes} min</span>` : '')
             : (t.rounds ? `<span class="tag">${t.rounds} rounds</span>` : '')}
+          ${t.prize_pool > 0 ? `<span class="tag" style="color:#d4af37;border-color:#d4af37;">💰 $${t.prize_pool} Prize Pool</span>` : ''}
+          ${t.prize_pool > 0 ? `<span class="tag" style="color:#ff9ecc;border-color:#ff9ecc;">♀ Top Female Prize</span>` : ''}
           ${t.country
             ? `<span class="tag">${FLAG(t.country)} ${COUNTRY_NAMES[t.country]}</span>`
             : t.region
@@ -1290,21 +1293,18 @@ function startDetailPoll(id) {
 
 function shareTournamentLink(id) {
   const url = `${location.origin}/tournaments#${id}`;
-  navigator.clipboard.writeText(url).then(() => {
-    const btn = document.getElementById(`btn-share-${id}`);
-    if (btn) {
-      btn.textContent = '✓ Copied!';
-      setTimeout(() => { btn.textContent = '🔗 Share'; }, 2000);
-    }
-  }).catch(() => {
+  const btn = document.getElementById('btn-share-tournament');
+  function showCopied() {
+    if (btn) { btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = '🔗 Share'; }, 2000); }
+  }
+  navigator.clipboard.writeText(url).then(showCopied).catch(() => {
     const ta = document.createElement('textarea');
     ta.value = url;
     document.body.appendChild(ta);
     ta.select();
     document.execCommand('copy');
     document.body.removeChild(ta);
-    const btn = document.getElementById(`btn-share-${id}`);
-    if (btn) { btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = '🔗 Share'; }, 2000); }
+    showCopied();
   });
 }
 
@@ -1330,9 +1330,12 @@ function showList() {
 }
 
 async function joinTournament(id) {
-  if (!currentUser) { openAuth(); return; }
+  const btn = document.getElementById(`btn-join-${id}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
+  const restore = () => { if (btn) { btn.disabled = false; btn.textContent = 'Join'; } };
+  if (!currentUser) { restore(); openAuth(); return; }
   const headers = await getAuthHeader();
-  if (!headers) return;
+  if (!headers) { restore(); return; }
   try {
     const r = await fetch('/api/join-tournament', {
       method: 'POST',
@@ -1340,17 +1343,20 @@ async function joinTournament(id) {
       body: JSON.stringify({ tournament_id: id })
     });
     const data = await r.json();
-    if (!r.ok) { alert(data.detail || 'Could not join'); return; }
+    if (!r.ok) { restore(); alert(data.detail || 'Could not join'); return; }
     viewTournament(id);
   } catch (err) {
-    alert('Could not join: ' + err.message);
+    restore(); alert('Could not join: ' + err.message);
   }
 }
 
 async function leaveTournament(id) {
-  if (!currentUser) return;
+  const btn = document.getElementById(`btn-leave-${id}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Leaving…'; }
+  const restore = () => { if (btn) { btn.disabled = false; btn.textContent = 'Leave'; } };
+  if (!currentUser) { restore(); return; }
   const headers = await getAuthHeader();
-  if (!headers) return;
+  if (!headers) { restore(); return; }
   try {
     const r = await fetch('/api/leave-tournament', {
       method: 'DELETE',
@@ -1358,8 +1364,9 @@ async function leaveTournament(id) {
       body: JSON.stringify({ tournament_id: id })
     });
     if (r.ok) viewTournament(id);
+    else restore();
   } catch (err) {
-    alert('Could not leave: ' + err.message);
+    restore(); alert('Could not leave: ' + err.message);
   }
 }
 
@@ -1442,6 +1449,8 @@ function toggleArenaPause() {
   } else {
     tournamentWs.send(JSON.stringify({ type: 'pause' }));
   }
+  // Safety fallback — re-enable if WS response never arrives
+  setTimeout(() => { if (btn && btn.disabled) btn.disabled = false; }, 5000);
 }
 
 function connectTournamentWs(tid, tournament) {
@@ -1671,7 +1680,7 @@ async function nextRound(id) {
   });
   const data = await r.json();
   if (!r.ok) { alert(data.detail || 'Could not advance round'); return; }
-  if (data.completed) { alert('Tournament completed! Final standings are above.'); }
+  if (data.completed) { showArenaStatus('🏁 Tournament completed! Final standings are above.'); }
   viewTournament(id);
 }
 

@@ -4313,10 +4313,11 @@ async def get_live_stats():
                 # Total registered players (profiles with username)
                 pr = await client.get(
                     f"{SUPABASE_URL}/rest/v1/profiles",
-                    params={"select": "count", "username": "not.is.null"},
+                    params={"select": "count", "username": "not.is.null",
+                            "head": "true"},
                     headers={"apikey": SUPABASE_SERVICE_KEY,
                              "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                             "Prefer": "count=exact", "Range": "0-0"}
+                             "Prefer": "count=exact"}
                 )
                 players = int(pr.headers.get("content-range", "0/0").split("/")[-1] or 0)
 

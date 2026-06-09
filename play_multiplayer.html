@@ -747,13 +747,15 @@ global.Chessground = Nr;
     }
     .promo-pieces { display: flex; gap: 8px; }
     .promo-piece {
+      min-width: 64px;
+      text-align: center;
       width: 64px; height: 64px; background: #1a1a1a;
       border: 1px solid #333; border-radius: 3px; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
       transition: border-color 0.15s, background 0.15s;
     }
     .promo-piece:hover { border-color: #00ff9d; background: #0d1f17; }
-    .promo-piece img { width: 48px; height: 48px; }
+    .promo-piece img { width: 48px; height: 48px; } /* legacy — now uses Unicode */
 
     /* Highlight */
     .highlight-move { background: rgba(0,255,157,0.22) !important; }
@@ -1062,7 +1064,7 @@ global.Chessground = Nr;
   <div class="overlay" id="overlay">
     <div class="result-card" style="position:relative;">
       <!-- Close button -->
-      <button onclick="document.getElementById('overlay').classList.remove('active')"
+      <button onclick="forceCloseOverlay()"
         style="position:absolute;top:8px;right:10px;background:none;border:none;color:#555;
                font-size:18px;cursor:pointer;line-height:1;padding:2px 6px;"
         title="Close">✕</button>
@@ -1515,7 +1517,7 @@ async function createChallenge() {
   // Get auth token if logged in — guests can also challenge
   let authHeader = {};
   try {
-    const { data: { session } } = await _supabase.auth.getSession();
+    const { data: { session } } = await sb.auth.getSession();
     if (session) authHeader = { 'Authorization': `Bearer ${session.access_token}` };
   } catch(e) {}
 
@@ -1572,10 +1574,10 @@ async function joinChallenge() {
   // Try to get identity before connecting
   if (!currentUser) {
     try {
-      const { data } = await _supabase.auth.getSession();
+      const { data } = await sb.auth.getSession();
       if (data.session) {
         currentUser = data.session.user;
-        const { data: profile } = await _supabase
+        const { data: profile } = await sb
           .from('profiles').select('username,elo').eq('user_id', currentUser.id).single();
         if (profile) myProfile = profile;
       }
@@ -1819,6 +1821,10 @@ function startGame() {
         type:         'profile',
         username:     myProfile.username,
         elo:          myProfile.elo,
+        elo_bullet:   myProfile.elo_bullet   || null,
+        elo_blitz:    myProfile.elo_blitz    || null,
+        elo_rapid:    myProfile.elo_rapid    || null,
+        elo_classical:myProfile.elo_classical || null,
         user_id:      currentUser.id,
         time_control: window._timeControl || null,
       }));
@@ -2056,19 +2062,27 @@ function isPromotion(source, target) {
 }
 
 function showPromotion(source, target, callback) {
-  const color = myColor === 'white' ? 'w' : 'b';
-  const pieces = ['q','r','b','n'];
-  const labels = { q:'Queen', r:'Rook', b:'Bishop', n:'Knight' };
+  // Unicode chess symbols — no image files needed
+  const whiteSymbols = { q:'♛', r:'♜', b:'♝', n:'♞' };
+  const blackSymbols = { q:'♕', r:'♖', b:'♗', n:'♘' };
+  const symbols = myColor === 'white' ? whiteSymbols : blackSymbols;
+  const labels   = { q:'Queen', r:'Rook', b:'Bishop', n:'Knight' };
+  const pieces   = ['q','r','b','n'];
   const container = document.getElementById('promo-pieces');
   container.innerHTML = '';
   pieces.forEach(p => {
     const div = document.createElement('div');
     div.className = 'promo-piece';
     div.title = labels[p];
-    const img = document.createElement('img');
-    img.src = 'img/chesspieces/wikipedia/' + color + p.toUpperCase() + '.png';
-    img.alt = labels[p];
-    div.appendChild(img);
+    // Symbol rendered as large text — no image files required
+    const span = document.createElement('span');
+    span.textContent = symbols[p];
+    span.style.cssText = 'font-size:42px;line-height:1;display:block;color:#e8e8e8;text-shadow:0 1px 3px rgba(0,0,0,0.8);';
+    const label = document.createElement('span');
+    label.textContent = labels[p];
+    label.style.cssText = 'font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:#888;display:block;margin-top:2px;';
+    div.appendChild(span);
+    div.appendChild(label);
     div.onclick = () => {
       document.getElementById('promo-overlay').classList.remove('active');
       callback(p);
@@ -2328,7 +2342,7 @@ function showOverlay(result, reason) {
     }
   } else {
     // Restore regular rematch buttons in case we're reusing the overlay
-    const regularBtns = document.getElementById('btn-rematch').closest('.controls');
+    const regularBtns = document.getElementById('rematch-area');
     if (regularBtns) regularBtns.style.display = 'flex';
     const tourneyBtns = document.getElementById('tournament-overlay-btns');
     if (tourneyBtns) tourneyBtns.style.display = 'none';

@@ -1650,19 +1650,25 @@ function isPromotion(source, target) {
 }
 
 function showPromotion(source, target, callback) {
-  var color = game.turn() === 'w' ? 'w' : 'b';
-  var pieces = ['q', 'r', 'b', 'n'];
-  var labels = { q:'Queen', r:'Rook', b:'Bishop', n:'Knight' };
+  var whiteSymbols = { q:'♛', r:'♜', b:'♝', n:'♞' };
+  var blackSymbols = { q:'♕', r:'♖', b:'♗', n:'♘' };
+  var symbols = game.turn() === 'w' ? whiteSymbols : blackSymbols;
+  var labels  = { q:'Queen', r:'Rook', b:'Bishop', n:'Knight' };
+  var pieces  = ['q', 'r', 'b', 'n'];
   var container = document.getElementById('promo-pieces');
   container.innerHTML = '';
   pieces.forEach(function(p) {
     var div = document.createElement('div');
     div.className = 'promo-piece';
     div.title = labels[p];
-    var img = document.createElement('img');
-    img.src = 'img/chesspieces/wikipedia/' + color + p.toUpperCase() + '.png';
-    img.alt = labels[p];
-    div.appendChild(img);
+    var span = document.createElement('span');
+    span.textContent = symbols[p];
+    span.style.cssText = 'font-size:42px;line-height:1;display:block;color:#e8e8e8;text-shadow:0 1px 3px rgba(0,0,0,0.8);';
+    var lbl = document.createElement('span');
+    lbl.textContent = labels[p];
+    lbl.style.cssText = 'font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:#888;display:block;margin-top:2px;';
+    div.appendChild(span);
+    div.appendChild(lbl);
     div.onclick = function() {
       document.getElementById('promo-overlay').classList.remove('active');
       callback(p);
@@ -1676,7 +1682,7 @@ function executePlayerMove(source, target, promotion) {
   var move = game.move({ from: source, to: target, promotion: promotion });
   if (move === null) { cg.set({ fen: game.fen() }); return; }
   moveHistory.push(move.san);
-  uciHistory.push(source + target + (promotion && promotion !== 'q' ? promotion : ''));
+  uciHistory.push(source + target + (promotion || 'q'));
   if (cg) cg.set({ fen: game.fen(), lastMove: [source, target] });
   refreshDests();
   updateCapturedPieces();
@@ -2398,21 +2404,21 @@ async function submitUsername() {
   btn.disabled = true;
   btn.textContent = 'Saving...';
 
-  const { error } = await sb.from('profiles').insert({
-    user_id:  currentUser.id,
-    username: val,
-    elo:      1500
+  // Route through /api/set-username — enforces reserved-name check server-side
+  const { data: { session } } = await sb.auth.getSession();
+  const resp = await fetch('/api/set-username', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json',
+               'Authorization': `Bearer ${session.access_token}` },
+    body: JSON.stringify({ username: val })
   });
 
   btn.disabled = false;
   btn.textContent = 'Set Username';
 
-  if (error) {
-    if (error.code === '23505') {
-      errEl.textContent = 'That username is taken. Try another.';
-    } else {
-      errEl.textContent = 'Error: ' + error.message;
-    }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    errEl.textContent = body.detail || 'Could not save username. Try again.';
     return;
   }
 

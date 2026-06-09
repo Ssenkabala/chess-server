@@ -85,28 +85,27 @@ class SenkabalaEngine {
     }
 
     const id = ++this._idSeq;
-    // Timeout = movetime + 8s grace. If worker doesn't respond in time,
-    // reject so the caller can fall back to the server.
-    const timeoutMs = movetime + 8000;
+    // Grace = 3s for WASM (runs locally, no network round-trip).
+    // If worker doesn't respond, reject so caller can fall back to server.
+    const timeoutMs = movetime + 3000;
 
     return new Promise((resolve, reject) => {
-      this._pending.set(id, { resolve, reject });
+      // Build timer-aware handlers BEFORE registering in _pending
+      // so there is no window where the worker can resolve with the wrong handler.
+      let timer;
+      const wrappedResolve = (v) => { clearTimeout(timer); resolve(v); };
+      const wrappedReject  = (e) => { clearTimeout(timer); reject(e);  };
+
+      this._pending.set(id, { resolve: wrappedResolve, reject: wrappedReject });
       this._worker.postMessage({ type: 'search', id, fen, moves, movetime_ms: movetime });
 
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         if (this._pending.has(id)) {
           this._pending.delete(id);
           console.warn(`[WASM] move timeout after ${timeoutMs}ms — falling back to server`);
           reject(new Error('WASM timeout'));
         }
       }, timeoutMs);
-
-      // Clear timer if resolved/rejected normally
-      const orig = this._pending.get(id);
-      this._pending.set(id, {
-        resolve: (v) => { clearTimeout(timer); orig.resolve(v); },
-        reject:  (e) => { clearTimeout(timer); orig.reject(e);  },
-      });
     });
   }
 

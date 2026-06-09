@@ -2356,6 +2356,7 @@ void engine_init() {
     if (wasmInitDone) return;
     tt = new TTEntry[TT_SIZE]();
     initAttacks();
+    initMasks();   // required for pawn structure eval, rook open-file bonuses
     initZobrist();
     initLMR();
     ttClear();
@@ -2370,6 +2371,11 @@ const char* engine_best_move(const char* fen_str,
 
     static char result[8];
     result[0] = '\0';
+
+    // Reset per-game state — prevents ghost repetitions and biased history
+    // from leaking across separate games or calls
+    memset(posHistory, 0, sizeof(posHistory));
+    memset(history,    0, sizeof(history));
 
     Board board = parseFEN(std::string(fen_str));
     if (moves_str && moves_str[0] != '\0') {

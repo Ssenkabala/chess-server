@@ -966,7 +966,9 @@ async def get_move(req: MoveRequest):
 
                 commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
                 move_uci   = None
-                hard_limit = think_ms / 1000 + 10  # hard outer timeout
+                # Give the engine generous grace: think time + 18s
+                # (server engine can extend search via instability heuristic)
+                hard_limit = think_ms / 1000 + 18
 
                 # Use pool worker — no process startup cost
                 move_uci = None
@@ -975,9 +977,10 @@ async def get_move(req: MoveRequest):
                         raise RuntimeError("pool not ready")
                     async with engine_pool.acquire() as worker:
                         loop = asyncio.get_event_loop()
+                        # Cap at hard_limit; worker.run already sends `stop` internally
                         stdout_data, _ = await asyncio.wait_for(
                             loop.run_in_executor(None, worker.run, pos_cmd, think_ms),
-                            timeout=hard_limit + 2
+                            timeout=hard_limit
                         )
                     for line in stdout_data.splitlines():
                         if line.startswith("bestmove"):
@@ -992,7 +995,8 @@ async def get_move(req: MoveRequest):
                         print("[engine] no bestmove from pool worker", flush=True)
                 except asyncio.TimeoutError:
                     _engine_failures += 1
-                    print(f"[engine] pool worker timeout ({hard_limit}s)", flush=True)
+                    print(f"[engine] pool worker timeout after {hard_limit}s — "
+                          f"difficulty={req.difficulty} think_ms={think_ms}", flush=True)
                 except Exception as eng_err:
                     _engine_failures += 1
                     print(f"[engine] pool worker error: {eng_err}", flush=True)
@@ -1058,14 +1062,23 @@ def coach(req: CoachRequest, user=Depends(verify_key)):
     board = chess.Board(req.fen)
     turn = "White" if board.turn == chess.WHITE else "Black"
 
+    pv_san_list = analysis.get("pv_san", [])
+    continuation = ' '.join(pv_san_list[:5]) if pv_san_list else ' '.join(pv[:5])
+    mate_in = analysis.get("mate_in")
+    eval_display = (f"Mate in {abs(mate_in)}" if mate_in else
+                    f"{'+' if score_pawns >= 0 else ''}{score_pawns} pawns (White's perspective)")
+
     prompt = f"""You are Senkabala, an expert chess coach powered by a 2050 ELO engine.
 Analyze this position and give coaching advice to a club-level player.
 
 Position (FEN): {req.fen}
 Side to move: {turn}
-Engine evaluation: {'+' if score_pawns >= 0 else ''}{score_pawns} pawns (from White's perspective)
+Engine evaluation: {eval_display}
 Engine best move: {best_move}
-Suggested continuation: {' '.join(pv)}
+Engine continuation (5 moves): {continuation}
+
+These are the EXACT engine-calculated moves. Base your explanation on this line only.
+Do not invent moves or variations not listed above.
 """
 
     if req.played_move and req.played_move != best_move:
@@ -1086,6 +1099,7 @@ This is not the engine's top choice. Briefly explain why {best_move} is better.
 Respond in this exact format:
 ASSESSMENT: (1 sentence on who stands better and why)
 BEST MOVE: (explain the engine's best move in plain English)
+CONTINUATION: (walk through the next 4-5 moves from the engine continuation, one short phrase per move)
 PLAN: (2-3 sentences on the strategic plan going forward)
 TIP: (one practical chess principle this position illustrates)
 """

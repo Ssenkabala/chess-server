@@ -1797,12 +1797,25 @@ function _applyEngineMove(uciMove) {
 }
 
 function _getEngineMoveFromServer(fen, moves, diff) {
+  // Client-side timeout: think_ms[diff] + 22s grace so we never hang forever
+  var thinkMs = {1:200,2:200,3:500,4:1000,5:2000,6:4000,7:8000,8:15000};
+  var clientTimeout = (thinkMs[diff] || 15000) + 22000;
+  var abortCtrl = new AbortController();
+  var abortTimer = setTimeout(function() {
+    abortCtrl.abort();
+    console.warn('[bot] server move request timed out after ' + clientTimeout + 'ms');
+    // Show error and re-enable board
+    setStatus('Engine timed out. Please try again.');
+    engineThinking = false;
+  }, clientTimeout);
+
   fetch(API_BASE + '/move', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fen: fen, difficulty: diff, moves: moves })
+    body: JSON.stringify({ fen: fen, difficulty: diff, moves: moves }),
+    signal: abortCtrl.signal
   })
-  .then(function(r) { return r.json(); })
+  .then(function(r) { clearTimeout(abortTimer); return r.json(); })
   .then(function(data) {
     if (data.fen) {
       if (data.move) {
@@ -1831,7 +1844,9 @@ function _getEngineMoveFromServer(fen, moves, diff) {
     if (data.is_game_over) { showResult(); return; }
     setStatus('Your move.');
   })
-  .catch(function() {
+  .catch(function(err) {
+    clearTimeout(abortTimer);
+    if (err && err.name === 'AbortError') return; // already handled by abortTimer
     engineThinking = false;
     setStatus('Engine error — please try again.');
   });

@@ -1345,6 +1345,11 @@ global.Chessground = Nr;
     </div>
     <div class="eval-label" id="eval-label">—</div>
 
+    <!-- Continuation / mate line -->
+    <div id="a-pv-line" style="display:none;font-size:11px;color:#888;letter-spacing:0.04em;
+         padding:6px 10px;background:#0d0d0d;border-radius:4px;margin:4px 0 8px;
+         font-family:monospace;line-height:1.6;word-break:break-all;"></div>
+
     <!-- Candidate moves -->
     <div class="candidates-wrap" id="candidates-wrap">
       <div class="candidates-label">Candidate Moves</div>
@@ -1368,6 +1373,10 @@ global.Chessground = Nr;
       <div class="coach-section">
         <span class="coach-label">Best Move</span>
         <span class="coach-text" id="c-bestmove">—</span>
+      </div>
+      <div class="coach-section" id="c-continuation-row" style="display:none;">
+        <span class="coach-label" style="color:#aaa;">Continuation</span>
+        <span class="coach-text" id="c-continuation" style="font-family:monospace;font-size:12px;color:#aaa;">—</span>
       </div>
       <div class="coach-section">
         <span class="coach-label">Plan</span>
@@ -2137,7 +2146,30 @@ function analysePosition() {
       evalStr = '?';
     }
     updateEvalBar(data.eval_pawns || 0);
+    // Show mate_in if available (more accurate than eval_pawns >= 99 check)
+    if (data.mate_in !== null && data.mate_in !== undefined) {
+      evalStr = '#' + Math.abs(data.mate_in);
+    }
     setAnalysisStatus('Best move: ' + (data.best_move || '?') + '  |  Eval: ' + evalStr + '  |  Use Coach Me for explanation.');
+
+    // PV / mate line display
+    var pvEl = document.getElementById('a-pv-line');
+    if (pvEl && data.pv_san && data.pv_san.length > 0) {
+      var pvParts = [];
+      for (var i = 0; i < data.pv_san.length; i++) {
+        if (i % 2 === 0) pvParts.push((Math.floor(i/2) + 1) + '.');
+        pvParts.push(data.pv_san[i]);
+      }
+      var lineLabel = (data.mate_in !== null && data.mate_in !== undefined)
+        ? 'Mate in ' + Math.abs(data.mate_in) + ': '
+        : 'Continuation: ';
+      pvEl.textContent  = lineLabel + pvParts.join(' ');
+      pvEl.style.color  = (data.mate_in !== null && data.mate_in !== undefined) ? '#d4af37' : '#666';
+      pvEl.style.display = '';
+    } else if (pvEl) {
+      pvEl.style.display = 'none';
+    }
+
     document.getElementById('btn-coach').disabled = false;
   })
   .catch(() => {
@@ -2196,15 +2228,17 @@ function parseAndRenderCoaching(text, bestMove, evalPawns) {
   // Extract sections from formatted coach response
   var sections = { assessment: '', bestmove: '', plan: '', tip: '' };
 
-  var assessMatch = text.match(/ASSESSMENT:\s*(.+?)(?=BEST MOVE:|PLAN:|TIP:|$)/si);
-  var bestMatch   = text.match(/BEST MOVE:\s*(.+?)(?=PLAN:|TIP:|$)/si);
+  var assessMatch = text.match(/ASSESSMENT:\s*(.+?)(?=BEST MOVE:|CONTINUATION:|PLAN:|TIP:|$)/si);
+  var bestMatch   = text.match(/BEST MOVE:\s*(.+?)(?=CONTINUATION:|PLAN:|TIP:|$)/si);
+  var contMatch   = text.match(/CONTINUATION:\s*(.+?)(?=PLAN:|TIP:|$)/si);
   var planMatch   = text.match(/PLAN:\s*(.+?)(?=TIP:|$)/si);
   var tipMatch    = text.match(/TIP:\s*(.+?)$/si);
 
-  if (assessMatch) sections.assessment = assessMatch[1].trim();
-  if (bestMatch)   sections.bestmove   = bestMatch[1].trim();
-  if (planMatch)   sections.plan       = planMatch[1].trim();
-  if (tipMatch)    sections.tip        = tipMatch[1].trim();
+  if (assessMatch) sections.assessment    = assessMatch[1].trim();
+  if (bestMatch)   sections.bestmove      = bestMatch[1].trim();
+  if (contMatch)   sections.continuation  = contMatch[1].trim();
+  if (planMatch)   sections.plan          = planMatch[1].trim();
+  if (tipMatch)    sections.tip           = tipMatch[1].trim();
 
   // Fallback: show raw text if parsing failed
   if (!sections.assessment && !sections.bestmove) {
@@ -2220,6 +2254,15 @@ function parseAndRenderCoaching(text, bestMove, evalPawns) {
 
   document.getElementById('c-assessment').textContent = sections.assessment || '—';
   document.getElementById('c-bestmove').textContent   = sections.bestmove   || (bestMove || '—');
+  // Continuation — show if present
+  var contEl  = document.getElementById('c-continuation');
+  var contRow = document.getElementById('c-continuation-row');
+  if (contEl && sections.continuation) {
+    contEl.textContent  = sections.continuation;
+    if (contRow) contRow.style.display = '';
+  } else if (contRow) {
+    contRow.style.display = 'none';
+  }
   document.getElementById('c-plan').textContent       = sections.plan       || '—';
   document.getElementById('c-tip').textContent        = sections.tip        || '—';
 
@@ -2247,10 +2290,12 @@ function clearBestMoveHighlight() {
 
 function resetCoachCard() {
   document.getElementById('coach-card').classList.remove('visible');
-  ['c-assessment','c-bestmove','c-plan','c-tip'].forEach(function(id) {
+  ['c-assessment','c-bestmove','c-continuation','c-plan','c-tip'].forEach(function(id) {
     document.getElementById(id).textContent = '—';
   });
   document.getElementById('eval-label').textContent = '—';
+  var pvElR = document.getElementById('a-pv-line');
+  if (pvElR) pvElR.style.display = 'none';
   document.getElementById('eval-bar').style.width = '50%';
 }
 

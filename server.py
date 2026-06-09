@@ -787,7 +787,7 @@ def _parse_engine_output(stdout_data: str, stderr_data: str) -> dict:
             score = sval if stype == "cp" else (10000 - abs(sval)) * 100 * (1 if sval > 0 else -1)
             if "pv" in parts:
                 pvi = parts.index("pv")
-                pv_moves = parts[pvi + 1: pvi + 6]
+                pv_moves = parts[pvi + 1: pvi + 7]   # 6 moves for full continuation
         except (ValueError, IndexError):
             continue
 
@@ -852,6 +852,29 @@ def analyse_position(fen: str, think_time: float, moves: list[str] | None = None
     # Normalise score to White's perspective for the API response
     if board.turn == chess.BLACK:
         result["score_cp"] = -result["score_cp"]
+
+    # Convert PV from UCI to SAN for display and coaching
+    pv_san = []
+    try:
+        pv_board = board.copy()
+        for uci in result.get("pv", []):
+            move = chess.Move.from_uci(uci)
+            if move in pv_board.legal_moves:
+                pv_san.append(pv_board.san(move))
+                pv_board.push(move)
+            else:
+                break
+    except Exception:
+        pass
+    result["pv_san"] = pv_san
+
+    # Build mate score string e.g. "#2"
+    score_cp = result["score_cp"]
+    if abs(score_cp) >= 900000:
+        mate_in = (10000 - abs(score_cp) // 100)
+        result["mate_in"] = mate_in * (1 if score_cp > 0 else -1)
+    else:
+        result["mate_in"] = None
 
     return result
 
@@ -2951,9 +2974,10 @@ White pieces: {', '.join(white_pieces) if white_pieces else 'none'}
 Black pieces: {', '.join(black_pieces) if black_pieces else 'none'}
 
 Engine best move: {best_move_desc}
-Suggested continuation (UCI): {' '.join(analysis['pv'][:3])}
+Engine continuation: {' '.join(analysis.get('pv_san', analysis['pv'])[:5])}
 
-Base your entire response on the piece positions listed above. Do not invent pieces or squares not listed.
+These are the EXACT engine-calculated moves. Base your explanation on this specific line.
+Do not invent moves or variations not in this list. Do not guess — use only the continuation above.
 """
     if req.played_move:
         played_desc = ""
@@ -2976,8 +3000,9 @@ Base your entire response on the piece positions listed above. Do not invent pie
 
     prompt += """
 Respond in this exact format:
-ASSESSMENT: (1 sentence on who stands better and why, based on the piece positions above)
-BEST MOVE: (explain the engine best move in plain English using the piece description provided)
+ASSESSMENT: (1 sentence on who stands better and why)
+BEST MOVE: (explain the engine best move in plain English)
+CONTINUATION: (walk through the next 4-5 moves from the engine continuation provided, explaining the idea behind each move in one short phrase)
 PLAN: (2-3 sentences on the strategic plan going forward)
 TIP: (one practical chess principle this position illustrates)
 """
@@ -2998,6 +3023,8 @@ TIP: (one practical chess principle this position illustrates)
     return {
         "best_move": analysis["best_move"],
         "eval_pawns": score_pawns,
+        "pv_san":     analysis.get("pv_san", []),
+        "mate_in":    analysis.get("mate_in"),
         "pv": analysis["pv"],
         "coaching": explanation,
         "uses_today": uses_today + 1,
@@ -3108,6 +3135,8 @@ async def analyse_pos(req: AnalyseRequest):
             "eval_pawns": round(analysis["score_cp"] / 100, 2),
             "score_cp":   analysis["score_cp"],
             "pv":         analysis["pv"],
+            "pv_san":     analysis.get("pv_san", []),
+            "mate_in":    analysis.get("mate_in"),
         }
     except Exception as e:
         import traceback
@@ -4311,10 +4340,10 @@ async def get_live_stats():
         try:
             async with httpx.AsyncClient() as client:
                 # Total registered players (profiles with username)
-                pr = await client.get(
+                # HEAD request = no body, just headers — correct for count=exact
+                pr = await client.head(
                     f"{SUPABASE_URL}/rest/v1/profiles",
-                    params={"select": "count", "username": "not.is.null",
-                            "head": "true"},
+                    params={"select": "count", "username": "not.is.null"},
                     headers={"apikey": SUPABASE_SERVICE_KEY,
                              "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                              "Prefer": "count=exact"}

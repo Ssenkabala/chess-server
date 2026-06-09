@@ -868,10 +868,13 @@ def analyse_position(fen: str, think_time: float, moves: list[str] | None = None
         pass
     result["pv_san"] = pv_san
 
-    # Build mate score string e.g. "#2"
+    # Build mate score — SenkabalaIII uses raw cp, not UCI "score mate N"
+    # MATE constant = 999000. Mate in N at ply (2N-1): score = 999000 - (2N-1)
+    # So N = (999000 - abs(score) + 1) // 2
     score_cp = result["score_cp"]
+    SENKABALA_MATE = 999000
     if abs(score_cp) >= 900000:
-        mate_in = (10000 - abs(score_cp) // 100)
+        mate_in = (SENKABALA_MATE - abs(score_cp) + 1) // 2
         result["mate_in"] = mate_in * (1 if score_cp > 0 else -1)
     else:
         result["mate_in"] = None

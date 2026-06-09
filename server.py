@@ -1641,8 +1641,11 @@ async def arena_send(ws, msg: dict):
         pass
 
 
-async def _grant_tournament_medals(tournament_id: str, client):
-    """Fetch final standings and award podium medals to top 3."""
+async def _grant_tournament_medals(tournament_id: str, client=None):
+    """Award medals after a tournament ends. Opens its own client if none provided."""
+    _own_client = client is None
+    if _own_client:
+        client = httpx.AsyncClient(timeout=15)
     try:
         # Get tournament info (name, scope)
         t_r = await client.get(
@@ -1688,6 +1691,9 @@ async def _grant_tournament_medals(tournament_id: str, client):
                     )
     except Exception as e:
         print(f"[medals] _grant_tournament_medals error {tournament_id}: {e}", flush=True)
+    finally:
+        if _own_client:
+            await client.aclose()
 
 
 async def arena_auto_start_scheduler():
@@ -1743,7 +1749,7 @@ async def arena_auto_start_scheduler():
                             )
                             print(f"[arena] auto-ended {tid}", flush=True)
                             # Award podium medals
-                            asyncio.create_task(_grant_tournament_medals(tid, client))
+                            asyncio.create_task(_grant_tournament_medals(tid))  # opens own client
                             # Broadcast tournament_ended to all connected players
                             conns = tournament_connections.get(tid, {})
                             ended_msg = {"type": "tournament_ended"}
@@ -3480,7 +3486,7 @@ async def next_round(req: TournamentStartRequest, authorization: str = Header(No
                              "Content-Type": "application/json"},
                     json={"status": "completed"}
                 )
-                asyncio.create_task(_grant_tournament_medals(req.tournament_id, client))
+                asyncio.create_task(_grant_tournament_medals(req.tournament_id))  # opens own client
                 return {"ok": True, "completed": True}
 
             current_games = [g for g in all_games if g["round"] == current_round]

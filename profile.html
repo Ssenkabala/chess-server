@@ -853,7 +853,7 @@ async function saveGender() {
   if (!val) { alert('Please select a gender.'); return; }
   const btn = document.getElementById('btn-save-gender');
   if (btn) btn.disabled = true;
-  const { data: { session } } = await _supabase.auth.getSession();
+  const { data: { session } } = await sb.auth.getSession();
   if (!session) return;
   const r = await fetch('/api/update-gender', {
     method: 'POST',

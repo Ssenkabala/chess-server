@@ -555,18 +555,6 @@ global.Chessground = Nr;
     }
 
     /* Eval bar */
-    /* MultiPV lines */
-    .mpv-line { display:flex;align-items:baseline;gap:6px;padding:5px 8px;
-      border-radius:3px;margin-bottom:2px;background:#0d0d0d;cursor:pointer;
-      border-left:2px solid transparent;transition:border-color 0.15s;
-      font-size:11px;font-family:monospace; }
-    .mpv-line:hover { border-left-color:#00ff9d; }
-    .mpv-line.mpv-best { border-left-color:#00ff9d; }
-    .mpv-eval { min-width:52px;font-weight:600;color:#00ff9d; }
-    .mpv-eval.mpv-neg  { color:#ff6b6b; }
-    .mpv-eval.mpv-mate { color:#d4af37; }
-    .mpv-move { color:#e8e8e8;font-weight:600;margin-right:2px; }
-    .mpv-pv   { color:#555;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
     .eval-bar-wrap {
       width: 100%;
       max-width: 480px;
@@ -1249,7 +1237,6 @@ global.Chessground = Nr;
 
 <!-- Mobile menu drawer -->
 <div class="mobile-menu" id="mobile-menu">
-  <a onclick="navTo('/profile')">Profile</a>
   <a onclick="navTo('/')">Home</a>
   <a onclick="navTo('/play')">vs Bot</a>
   <a onclick="navTo('/multiplayer')">Live</a>
@@ -1257,7 +1244,7 @@ global.Chessground = Nr;
   <a onclick="navTo('/leaderboard')">Leaderboard</a>
   <a onclick="navTo('/history')">My Games</a>
   <a onclick="navTo('/watch')">Watch</a>
-  
+  <a onclick="navTo('/profile')">Profile</a>
   <a id="mob-signin-idx" onclick="closeMenuThenAuth()" style="display:none;">Sign In</a>
   <a id="mob-signout-idx" onclick="signOut()" style="display:none;">Sign Out</a>
 </div>
@@ -1358,10 +1345,10 @@ global.Chessground = Nr;
     </div>
     <div class="eval-label" id="eval-label">—</div>
 
-    <!-- MultiPV lines (top 3 moves like Lichess) -->
-    <div id="a-multipv" style="display:none;margin:4px 0 8px;">
-      <!-- Lines injected by JS -->
-    </div>
+    <!-- Continuation / mate line -->
+    <div id="a-pv-line" style="display:none;font-size:11px;color:#888;letter-spacing:0.04em;
+         padding:6px 10px;background:#0d0d0d;border-radius:4px;margin:4px 0 8px;
+         font-family:monospace;line-height:1.6;word-break:break-all;"></div>
 
     <!-- Candidate moves -->
     <div class="candidates-wrap" id="candidates-wrap">
@@ -1970,39 +1957,59 @@ function startGame(color) {
   document.getElementById('btn-resign').style.display = '';
   document.getElementById('btn-replay').style.display = 'none';
 
-  if (cg) { cg.destroy(); }
-  cg = Chessground(document.getElementById('board'), {
-    orientation: color,
-    turnColor: 'white',
-    fen: 'start',
-    movable: {
-      color: color === 'white' ? 'white' : 'black',
-      free: false,
-      dests: toDests(),
-      events: { after: function(orig, dest) {
-        if (isPromotion(orig, dest)) {
-          showPromotion(orig, dest, function(promo) { executePlayerMove(orig, dest, promo); });
-        } else {
-          executePlayerMove(orig, dest, 'q');
-        }
-      }}
-    },
-    draggable: { enabled: true },
-    selectable: { enabled: true },
-    animation: { enabled: true, duration: 120 },
-    highlight: { lastMove: true, check: true },
-    coordinates: true,
-  });
-  makeBoardResizable('board-wrap', function() { return cg; });
-  if (playerColor === 'b') {
-    setStatus('Engine thinking...');
-    engineThinking = true;
-    updateCapturedPieces();
-    setTimeout(getEngineMove, 500);
-  } else {
-    updateCapturedPieces();
-    setStatus('Your move.');
+  if (cg) { cg.destroy(); cg = null; }
+
+  var boardEl = document.getElementById('board');
+
+  // Defer Chessground init until the board element has real dimensions.
+  // On first visit, fonts + layout may not have painted yet — calling
+  // Chessground on a zero-width element causes pieces to stack on a2,
+  // producing phantom extra pawns for the opponent (reported by users).
+  // Double-rAF ensures the browser commits the pregame-setup hide before
+  // we start polling, then we keep polling until width >= 10px.
+  function initWhenReady() {
+    var rect = boardEl.getBoundingClientRect();
+    if (rect.width < 10) {
+      requestAnimationFrame(initWhenReady);
+      return;
+    }
+    cg = Chessground(boardEl, {
+      orientation: color,
+      turnColor: 'white',
+      fen: 'start',
+      movable: {
+        color: color === 'white' ? 'white' : 'black',
+        free: false,
+        dests: toDests(),
+        events: { after: function(orig, dest) {
+          if (isPromotion(orig, dest)) {
+            showPromotion(orig, dest, function(promo) { executePlayerMove(orig, dest, promo); });
+          } else {
+            executePlayerMove(orig, dest, 'q');
+          }
+        }}
+      },
+      draggable:   { enabled: true },
+      selectable:  { enabled: true },
+      animation:   { enabled: true, duration: 120 },
+      highlight:   { lastMove: true, check: true },
+      coordinates: true,
+    });
+    makeBoardResizable('board-wrap', function() { return cg; });
+    if (playerColor === 'b') {
+      setStatus('Engine thinking...');
+      engineThinking = true;
+      updateCapturedPieces();
+      setTimeout(getEngineMove, 500);
+    } else {
+      updateCapturedPieces();
+      setStatus('Your move.');
+    }
   }
+
+  requestAnimationFrame(function() {
+    requestAnimationFrame(initWhenReady);
+  });
 }
 
 function resetGame() {
@@ -2186,38 +2193,22 @@ function analysePosition() {
     }
     setAnalysisStatus('Best move: ' + (data.best_move || '?') + '  |  Eval: ' + evalStr + '  |  Use Coach Me for explanation.');
 
-    // MultiPV lines display
-    var mpvEl = document.getElementById('a-multipv');
-    if (mpvEl) {
-      var lines = data.lines || [];
-      if (!lines.length && data.pv_san && data.pv_san.length > 0) {
-        lines = [{ move_san: data.best_move, eval_str: evalStr,
-                   mate_in: data.mate_in, eval_pawns: data.eval_pawns,
-                   pv_san: data.pv_san, move: data.best_move }];
+    // PV / mate line display
+    var pvEl = document.getElementById('a-pv-line');
+    if (pvEl && data.pv_san && data.pv_san.length > 0) {
+      var pvParts = [];
+      for (var i = 0; i < data.pv_san.length; i++) {
+        if (i % 2 === 0) pvParts.push((Math.floor(i/2) + 1) + '.');
+        pvParts.push(data.pv_san[i]);
       }
-      if (lines.length > 0) {
-        mpvEl.innerHTML = lines.map(function(line, idx) {
-          var pvParts = [];
-          if (line.pv_san) {
-            for (var i = 0; i < Math.min(line.pv_san.length, 6); i++) {
-              if (i % 2 === 0) pvParts.push((Math.floor(i/2)+1) + '.');
-              pvParts.push(line.pv_san[i]);
-            }
-          }
-          var evalCls = line.mate_in ? 'mpv-mate'
-            : (line.eval_pawns !== null && line.eval_pawns < 0 ? 'mpv-neg' : '');
-          var bestCls = idx === 0 ? 'mpv-best' : '';
-          var mv = (line.move || '').replace(/'/g, '');
-          return '<div class="mpv-line ' + bestCls + '" onclick="applyMpvMove('' + mv + '')">' +
-            '<span class="mpv-eval ' + evalCls + '">' + (line.eval_str || '?') + '</span>' +
-            '<span class="mpv-move">' + (line.move_san || line.move || '') + '</span>' +
-            '<span class="mpv-pv">' + pvParts.join(' ') + '</span>' +
-            '</div>';
-        }).join('');
-        mpvEl.style.display = '';
-      } else {
-        mpvEl.style.display = 'none';
-      }
+      var lineLabel = (data.mate_in !== null && data.mate_in !== undefined)
+        ? 'Mate in ' + Math.abs(data.mate_in) + ': '
+        : 'Continuation: ';
+      pvEl.textContent  = lineLabel + pvParts.join(' ');
+      pvEl.style.color  = (data.mate_in !== null && data.mate_in !== undefined) ? '#d4af37' : '#666';
+      pvEl.style.display = '';
+    } else if (pvEl) {
+      pvEl.style.display = 'none';
     }
 
     document.getElementById('btn-coach').disabled = false;
@@ -2344,20 +2335,9 @@ function resetCoachCard() {
     document.getElementById(id).textContent = '—';
   });
   document.getElementById('eval-label').textContent = '—';
-  var mpvElR = document.getElementById('a-multipv');
-  if (mpvElR) { mpvElR.innerHTML = ''; mpvElR.style.display = 'none'; }
+  var pvElR = document.getElementById('a-pv-line');
+  if (pvElR) pvElR.style.display = 'none';
   document.getElementById('eval-bar').style.width = '50%';
-}
-
-function applyMpvMove(move) {
-  // Clicking a MultiPV line highlights that move on the board
-  if (!move || !cg) return;
-  var from = move.substring(0, 2);
-  var to   = move.substring(2, 4);
-  // Show the move arrow on the board (same as best move arrow)
-  cg.set({ drawable: { autoShapes: [
-    { orig: from, dest: to, brush: 'paleBlue' }
-  ]}});
 }
 
 function resetAnalysis() {

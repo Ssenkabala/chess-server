@@ -1642,58 +1642,59 @@ async def arena_send(ws, msg: dict):
 
 
 async def _grant_tournament_medals(tournament_id: str, client=None):
-    """Award medals after a tournament ends. Opens its own client if none provided."""
-    _own_client = client is None
-    if _own_client:
-        client = httpx.AsyncClient(timeout=15)
+    """Fetch final standings and award podium medals to top 3.
+
+    Always opens its own httpx client — safe to run as asyncio.create_task()
+    because the caller's client may already be closed by the time this runs.
+    The optional `client` parameter is accepted but ignored for backwards
+    compatibility with existing call sites.
+    """
     try:
-        # Get tournament info (name, scope)
-        t_r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournaments",
-            params={"id": f"eq.{tournament_id}", "select": "name,scope"},
-            headers={"apikey": SUPABASE_SERVICE_KEY,
-                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        t_data = t_r.json()
-        if not t_data:
-            return
-        t_name  = t_data[0].get("name", "Tournament")
-        t_scope = t_data[0].get("scope", "open")
+        async with httpx.AsyncClient(timeout=15) as client:
+            # Get tournament info (name, scope)
+            t_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{tournament_id}", "select": "name,scope"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            t_data = t_r.json()
+            if not t_data:
+                return
+            t_name  = t_data[0].get("name", "Tournament")
+            t_scope = t_data[0].get("scope", "open")
 
-        # Get final standings ordered by score desc, then elo desc for tiebreak
-        p_r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournament_players",
-            params={"tournament_id": f"eq.{tournament_id}",
-                    "select": "user_id,score,elo",
-                    "order":  "score.desc,elo.desc"},
-            headers={"apikey": SUPABASE_SERVICE_KEY,
-                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        players = p_r.json()
-        if not players:
-            return
+            # Get final standings ordered by score desc, then elo desc for tiebreak
+            p_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"tournament_id": f"eq.{tournament_id}",
+                        "select": "user_id,score,elo",
+                        "order":  "score.desc,elo.desc"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            players = p_r.json()
+            if not players:
+                return
 
-        # Award medals to top 3 (handles ties by elo tiebreak)
-        for pos, player in enumerate(players[:3], start=1):
-            uid = player.get("user_id")
-            if uid:
-                awarded = await award_medals(uid, pos, tournament_id, t_name, t_scope, client)
-                if awarded:
-                    # Also patch rank into tournament_players for record-keeping
-                    await client.patch(
-                        f"{SUPABASE_URL}/rest/v1/tournament_players",
-                        params={"tournament_id": f"eq.{tournament_id}",
-                                "user_id":        f"eq.{uid}"},
-                        headers={"apikey": SUPABASE_SERVICE_KEY,
-                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                                 "Content-Type": "application/json"},
-                        json={"rank": pos}
-                    )
+            # Award medals to top 3 (handles ties by elo tiebreak)
+            for pos, player in enumerate(players[:3], start=1):
+                uid = player.get("user_id")
+                if uid:
+                    awarded = await award_medals(uid, pos, tournament_id, t_name, t_scope, client)
+                    if awarded:
+                        # Also patch rank into tournament_players for record-keeping
+                        await client.patch(
+                            f"{SUPABASE_URL}/rest/v1/tournament_players",
+                            params={"tournament_id": f"eq.{tournament_id}",
+                                    "user_id":        f"eq.{uid}"},
+                            headers={"apikey": SUPABASE_SERVICE_KEY,
+                                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                     "Content-Type": "application/json"},
+                            json={"rank": pos}
+                        )
     except Exception as e:
         print(f"[medals] _grant_tournament_medals error {tournament_id}: {e}", flush=True)
-    finally:
-        if _own_client:
-            await client.aclose()
 
 
 async def arena_auto_start_scheduler():
@@ -1749,7 +1750,7 @@ async def arena_auto_start_scheduler():
                             )
                             print(f"[arena] auto-ended {tid}", flush=True)
                             # Award podium medals
-                            asyncio.create_task(_grant_tournament_medals(tid))  # opens own client
+                            asyncio.create_task(_grant_tournament_medals(tid, client))
                             # Broadcast tournament_ended to all connected players
                             conns = tournament_connections.get(tid, {})
                             ended_msg = {"type": "tournament_ended"}
@@ -3486,7 +3487,7 @@ async def next_round(req: TournamentStartRequest, authorization: str = Header(No
                              "Content-Type": "application/json"},
                     json={"status": "completed"}
                 )
-                asyncio.create_task(_grant_tournament_medals(req.tournament_id))  # opens own client
+                asyncio.create_task(_grant_tournament_medals(req.tournament_id, client))
                 return {"ok": True, "completed": True}
 
             current_games = [g for g in all_games if g["round"] == current_round]
@@ -4502,7 +4503,7 @@ def history():
 
 @app.get("/tournaments")
 def tournaments():
-    return FileResponse("tournament.html")
+    return FileResponse("tournaments.html")
 
 @app.get("/chessboard-1.0.0.min.css")
 def cb_css():

@@ -247,7 +247,6 @@
   <button class="hamburger" id="hamburger" onclick="toggleMobileNav()"><span></span><span></span><span></span></button>
 </div>
 <div class="mobile-drawer" id="mobile-drawer">
-  <a href="/profile">Profile</a>
   <a href="/">Home</a>
   <a href="/play">vs Bot</a>
   <a href="/multiplayer">Live</a>
@@ -255,7 +254,7 @@
   <a href="/leaderboard" class="active">Leaderboard</a>
   <a href="/history">History</a>
   <a href="/watch">Watch</a>
-  
+  <a href="/profile">Profile</a>
   <a id="mob-signin-lb" onclick="toggleMobileNav();openAuth();" style="display:none;color:#00ff9d;cursor:pointer;">Sign In</a>
   <a id="mobile-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
 </div>
@@ -363,7 +362,7 @@ let openCountries = new Set();
 
 const TC_COL = {
   blitz: 'elo_blitz', bullet: 'elo_bullet',
-  rapid: 'elo_rapid', classical: 'elo_classical'
+  rapid: 'elo_rapid', classical: 'elo'
 };
 const TC_LABEL = {
   blitz: 'Blitz ELO', bullet: 'Bullet ELO',
@@ -634,7 +633,7 @@ function renderAllTc(players, eloSumFn) {
     { key: 'elo_blitz',  label: '⚡ Blitz',     col: 'blitz'    },
     { key: 'elo_bullet', label: '🔴 Bullet',    col: 'bullet'   },
     { key: 'elo_rapid',  label: '🐢 Rapid',     col: 'rapid'    },
-    { key: 'elo_classical', label: '♟ Classical',  col: 'classical'},
+    { key: 'elo',        label: '♟ Classical',  col: 'classical'},
   ];
 
   const rows = players.map((p, i) => {

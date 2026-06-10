@@ -798,13 +798,14 @@
 
 <!-- Mobile drawer — outside <nav> so it escapes its stacking context -->
 <div class="mobile-menu" id="mobile-menu">
+  <a href="javascript:void(0)" onclick="navTo('/profile')">Profile</a>
   <a href="javascript:void(0)" onclick="navTo('#features')">Features</a>
   <a href="javascript:void(0)" onclick="navTo('/play')">vs Bot</a>
   <a href="javascript:void(0)" onclick="navTo('/multiplayer')">Live</a>
   <a href="javascript:void(0)" onclick="navTo('/tournaments')">Tournaments</a>
   <a href="javascript:void(0)" onclick="navTo('/leaderboard')">Leaderboard</a>
   <a href="javascript:void(0)" onclick="navTo('/history')">History</a>
-  <a href="javascript:void(0)" onclick="navTo('/profile')">Profile</a>
+  
   <a href="javascript:void(0)" id="mob-signin-btn" onclick="closeNav(); openAuth();" style="display:none;">Sign In</a>
   <a href="javascript:void(0)" id="mob-signout-btn" onclick="signOut()" style="display:none;">Sign Out</a>
   <a href="javascript:void(0)" onclick="navTo('/play')" class="nav-cta" style="text-align:center;padding:9px 22px;">Play Now</a>

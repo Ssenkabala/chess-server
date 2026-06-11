@@ -1023,14 +1023,22 @@ async def get_move(req: MoveRequest):
                     _engine_failures = 0
 
                 if not move_uci:
-                    # Fallback: random legal move — never leave player hanging
-                    move_uci = random.choice(list(game_board.legal_moves)).uci()
+                    legal = list(game_board.legal_moves)
+                    if not legal:
+                        return {"move": None, "fen": game_board.fen(),
+                                "is_game_over": True, "score_cp": 0, "eval_pawns": 0, "candidates": []}
+                    move_uci = random.choice(legal).uci()
                     print("[engine] fallback random move used", flush=True)
-                # Convert UCI string to chess.Move for pushing
                 move = chess.Move.from_uci(move_uci)
 
-            # Update candidates with engine's move
-            candidates = [{"move": move_uci, "eval_pawns": 0}] if move_uci else []
+        # Final guard — move must be legal
+        if move is None or move not in game_board.legal_moves:
+            legal = list(game_board.legal_moves)
+            if not legal:
+                return {"move": None, "fen": game_board.fen(),
+                        "is_game_over": True, "score_cp": 0, "eval_pawns": 0, "candidates": []}
+            print(f"[engine] illegal move {move} — using random", flush=True)
+            move = random.choice(legal)
 
         game_board.push(move)
         return {
@@ -1043,6 +1051,8 @@ async def get_move(req: MoveRequest):
             "candidates":   candidates
         }
     except Exception as e:
+        import traceback
+        print(f"[/move] 500 error: {e}\n{traceback.format_exc()}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
 # ΓöÇΓöÇΓöÇ /coach endpoint ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
@@ -1359,9 +1369,8 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
         "white_profile":        None,
         "black_profile":        None,
         "spectators":           [],   # list of WebSocket connections watching this game
-        # ── Fair play tracking ──────────────────────────────────────────────
-        "move_times_w":         [],   # ms each white move took
-        "move_times_b":         [],   # ms each black move took
+        "move_times_w":         [],   # ms per white move for fair play analysis
+        "move_times_b":         [],   # ms per black move for fair play analysis
     }
 
 
@@ -1532,7 +1541,6 @@ async def clock_loop(game_id: str):
                 game["_elo_updated"] = True
                 await update_elos(game, winner)
             fairplay_log(game, winner)
-            # Delay removal so gameover message is delivered before WS closes
             await asyncio.sleep(1)
             active_games.pop(game_id, None)
             return
@@ -1634,94 +1642,44 @@ async def update_elos(game: dict, result: str):
 
 # ΓöÇΓöÇ WebSocket: Lobby (matchmaking) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
-
-
 # ═══════════════════════════════════════════════════════════════
 #  FAIR PLAY — MOVE TIME ANALYSIS
 # ═══════════════════════════════════════════════════════════════
 
 def analyse_move_times(move_times_ms: list) -> dict:
-    """
-    Analyse a player's per-move timestamps to flag suspicious patterns.
-    Returns {"score": 0.0-1.0, "flags": [...]} — does NOT auto-ban.
-    Score >= 0.6  -> log for manual review.
-    Score >= 0.85 -> strong suspicion, check before prize payout.
-    Only runs when >= 10 moves available (short games are inconclusive).
-    """
+    """Score 0.0-1.0. >= 0.6 log for review. >= 0.85 check before prize payout."""
     if len(move_times_ms) < 10:
         return {"score": 0.0, "flags": []}
-
     import statistics
-    flags = []
-    score = 0.0
-    times = move_times_ms
-
+    flags = []; score = 0.0; times = move_times_ms
     mean = statistics.mean(times)
-    if mean <= 0:
-        return {"score": 0.0, "flags": []}
-
-    # Flag 1: Suspiciously low time variance
-    # Humans vary wildly. Engine-copiers have consistent tab-switch overhead.
-    # Only flag if mean > 3s (instant movers are just fast, not suspicious).
+    if mean <= 0: return {"score": 0.0, "flags": []}
     stdev = statistics.stdev(times) if len(times) > 1 else 0
     cv = stdev / mean
-    if cv < 0.25 and mean > 3000:
-        flags.append("low_time_variance")
-        score += 0.35
-
-    # Flag 2: Almost no fast moves (<3s)
-    # Humans occasionally play instantly (recaptures, forced moves).
-    # Cheaters always take time to tab-switch.
-    fast_ratio = sum(1 for t in times if t < 3000) / len(times)
-    if fast_ratio < 0.05 and len(times) > 12:
-        flags.append("no_fast_moves")
-        score += 0.25
-
-    # Flag 3: Almost no slow moves (>45s)
-    # Humans get stuck on hard positions. Cheaters don't.
-    slow_ratio = sum(1 for t in times if t > 45000) / len(times)
-    if slow_ratio < 0.02 and len(times) > 15:
-        flags.append("no_slow_moves")
-        score += 0.15
-
-    # Flag 4: Tight band — most moves between 5s and 25s
-    # Classic engine-copy pattern: always ~5-20s to switch tab, copy move, return.
-    band_ratio = sum(1 for t in times if 5000 <= t <= 25000) / len(times)
-    if band_ratio > 0.80:
-        flags.append("consistent_band_5_25s")
-        score += 0.25
-
+    if cv < 0.25 and mean > 3000: flags.append("low_variance"); score += 0.35
+    fast = sum(1 for t in times if t < 3000) / len(times)
+    if fast < 0.05 and len(times) > 12: flags.append("no_fast_moves"); score += 0.25
+    slow = sum(1 for t in times if t > 45000) / len(times)
+    if slow < 0.02 and len(times) > 15: flags.append("no_slow_moves"); score += 0.15
+    band = sum(1 for t in times if 5000 <= t <= 25000) / len(times)
+    if band > 0.80: flags.append("consistent_band"); score += 0.25
     return {"score": round(min(score, 1.0), 2), "flags": flags}
 
 
 def fairplay_log(game: dict, result: str):
-    """
-    Run move time analysis on both players post-game and log any suspicion
-    to Railway logs for manual admin review. Never modifies ELO or bans.
-    """
-    game_id = game.get("id", "?")
-    wp = game.get("white_profile") or {}
-    bp = game.get("black_profile") or {}
-
-    for color, profile, times_key in [
-        ("white", wp, "move_times_w"),
-        ("black", bp, "move_times_b"),
-    ]:
-        times = game.get(times_key, [])
-        if not times:
-            continue
-        analysis = analyse_move_times(times)
-        if analysis["score"] >= 0.6:
-            username = profile.get("username", "?")
-            user_id  = profile.get("user_id", "?")
-            level    = "SUSPICIOUS" if analysis["score"] >= 0.85 else "REVIEW"
-            print(
-                f"[fairplay] {level} game={game_id} player={username} ({color}) "
-                f"uid={user_id} result={result} "
-                f"score={analysis['score']} flags={analysis['flags']} "
-                f"moves={len(times)} mean={int(sum(times)/len(times))}ms",
-                flush=True
-            )
+    """Log suspicious move time patterns to Railway logs for manual review."""
+    gid = game.get("id", "?")
+    for color, pkey, tkey in [("white","white_profile","move_times_w"),("black","black_profile","move_times_b")]:
+        times = game.get(tkey, [])
+        if not times: continue
+        a = analyse_move_times(times)
+        if a["score"] >= 0.6:
+            p = game.get(pkey) or {}
+            level = "SUSPICIOUS" if a["score"] >= 0.85 else "REVIEW"
+            print(f"[fairplay] {level} game={gid} {color}={p.get('username','?')} "
+                  f"uid={p.get('user_id','?')} result={result} "
+                  f"score={a['score']} flags={a['flags']} "
+                  f"moves={len(times)} mean={int(sum(times)/len(times))}ms", flush=True)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1735,7 +1693,7 @@ async def arena_send(ws, msg: dict):
         pass
 
 
-async def _grant_tournament_medals(tournament_id: str, client):
+async def _grant_tournament_medals(tournament_id: str, client=None):
     """Fetch final standings and award podium medals to top 3."""
     try:
         # Get tournament info (name, scope)
@@ -2771,12 +2729,11 @@ async def game_ws(ws: WebSocket, game_id: str):
                     continue
 
                 # Record move time for fair play analysis
-                now_move = time.time()
+                _now = time.time()
                 if game.get("last_move_ts"):
-                    move_ms = int((now_move - game["last_move_ts"]) * 1000)
-                    times_key = "move_times_w" if color == "w" else "move_times_b"
-                    game[times_key].append(move_ms)
-                game["last_move_ts"] = now_move
+                    _ms = int((_now - game["last_move_ts"]) * 1000)
+                    game["move_times_w" if color == "w" else "move_times_b"].append(_ms)
+                game["last_move_ts"] = _now
 
                 # Deduct clock
                 remaining = deduct_clock(game)

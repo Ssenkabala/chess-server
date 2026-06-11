@@ -1024,13 +1024,33 @@ async def get_move(req: MoveRequest):
 
                 if not move_uci:
                     # Fallback: random legal move — never leave player hanging
-                    move_uci = random.choice(list(game_board.legal_moves)).uci()
+                    legal = list(game_board.legal_moves)
+                    if not legal:
+                        # Truly game over — board.is_game_over() above may have used
+                        # a fresh board not reflecting the full move history
+                        return {
+                            "move": None, "fen": game_board.fen(),
+                            "is_game_over": True,
+                            "outcome": str(game_board.outcome()),
+                            "score_cp": 0, "eval_pawns": 0, "candidates": []
+                        }
+                    move_uci = random.choice(legal).uci()
                     print("[engine] fallback random move used", flush=True)
                 # Convert UCI string to chess.Move for pushing
                 move = chess.Move.from_uci(move_uci)
 
-            # Update candidates with engine's move
-            candidates = [{"move": move_uci, "eval_pawns": 0}] if move_uci else []
+        # Final guard — move must be legal in game_board
+        if move is None or move not in game_board.legal_moves:
+            legal = list(game_board.legal_moves)
+            if not legal:
+                return {
+                    "move": None, "fen": game_board.fen(),
+                    "is_game_over": True,
+                    "outcome": str(game_board.outcome()),
+                    "score_cp": 0, "eval_pawns": 0, "candidates": []
+                }
+            print(f"[engine] illegal move {move} in position {game_board.fen()[:30]}… — using random", flush=True)
+            move = random.choice(legal)
 
         game_board.push(move)
         return {
@@ -1043,6 +1063,8 @@ async def get_move(req: MoveRequest):
             "candidates":   candidates
         }
     except Exception as e:
+        import traceback
+        print(f"[/move] 500 error: {e}\n{traceback.format_exc()}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
 # ΓöÇΓöÇΓöÇ /coach endpoint ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
@@ -1641,58 +1663,51 @@ async def arena_send(ws, msg: dict):
         pass
 
 
-async def _grant_tournament_medals(tournament_id: str, client=None):
-    """Fetch final standings and award podium medals to top 3.
-
-    Always opens its own httpx client — safe to run as asyncio.create_task()
-    because the caller's client may already be closed by the time this runs.
-    The optional `client` parameter is accepted but ignored for backwards
-    compatibility with existing call sites.
-    """
+async def _grant_tournament_medals(tournament_id: str, client):
+    """Fetch final standings and award podium medals to top 3."""
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            # Get tournament info (name, scope)
-            t_r = await client.get(
-                f"{SUPABASE_URL}/rest/v1/tournaments",
-                params={"id": f"eq.{tournament_id}", "select": "name,scope"},
-                headers={"apikey": SUPABASE_SERVICE_KEY,
-                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-            )
-            t_data = t_r.json()
-            if not t_data:
-                return
-            t_name  = t_data[0].get("name", "Tournament")
-            t_scope = t_data[0].get("scope", "open")
+        # Get tournament info (name, scope)
+        t_r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournaments",
+            params={"id": f"eq.{tournament_id}", "select": "name,scope"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        t_data = t_r.json()
+        if not t_data:
+            return
+        t_name  = t_data[0].get("name", "Tournament")
+        t_scope = t_data[0].get("scope", "open")
 
-            # Get final standings ordered by score desc, then elo desc for tiebreak
-            p_r = await client.get(
-                f"{SUPABASE_URL}/rest/v1/tournament_players",
-                params={"tournament_id": f"eq.{tournament_id}",
-                        "select": "user_id,score,elo",
-                        "order":  "score.desc,elo.desc"},
-                headers={"apikey": SUPABASE_SERVICE_KEY,
-                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-            )
-            players = p_r.json()
-            if not players:
-                return
+        # Get final standings ordered by score desc, then elo desc for tiebreak
+        p_r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/tournament_players",
+            params={"tournament_id": f"eq.{tournament_id}",
+                    "select": "user_id,score,elo",
+                    "order":  "score.desc,elo.desc"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        players = p_r.json()
+        if not players:
+            return
 
-            # Award medals to top 3 (handles ties by elo tiebreak)
-            for pos, player in enumerate(players[:3], start=1):
-                uid = player.get("user_id")
-                if uid:
-                    awarded = await award_medals(uid, pos, tournament_id, t_name, t_scope, client)
-                    if awarded:
-                        # Also patch rank into tournament_players for record-keeping
-                        await client.patch(
-                            f"{SUPABASE_URL}/rest/v1/tournament_players",
-                            params={"tournament_id": f"eq.{tournament_id}",
-                                    "user_id":        f"eq.{uid}"},
-                            headers={"apikey": SUPABASE_SERVICE_KEY,
-                                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                                     "Content-Type": "application/json"},
-                            json={"rank": pos}
-                        )
+        # Award medals to top 3 (handles ties by elo tiebreak)
+        for pos, player in enumerate(players[:3], start=1):
+            uid = player.get("user_id")
+            if uid:
+                awarded = await award_medals(uid, pos, tournament_id, t_name, t_scope, client)
+                if awarded:
+                    # Also patch rank into tournament_players for record-keeping
+                    await client.patch(
+                        f"{SUPABASE_URL}/rest/v1/tournament_players",
+                        params={"tournament_id": f"eq.{tournament_id}",
+                                "user_id":        f"eq.{uid}"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY,
+                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                 "Content-Type": "application/json"},
+                        json={"rank": pos}
+                    )
     except Exception as e:
         print(f"[medals] _grant_tournament_medals error {tournament_id}: {e}", flush=True)
 
@@ -4503,7 +4518,7 @@ def history():
 
 @app.get("/tournaments")
 def tournaments():
-    return FileResponse("tournaments.html")
+    return FileResponse("tournament.html")
 
 @app.get("/chessboard-1.0.0.min.css")
 def cb_css():

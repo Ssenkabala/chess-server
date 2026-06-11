@@ -85,9 +85,13 @@ class SenkabalaEngine {
     }
 
     const id = ++this._idSeq;
-    // Grace = 3s for WASM (runs locally, no network round-trip).
-    // If worker doesn't respond, reject so caller can fall back to server.
-    const timeoutMs = movetime + 3000;
+    // Grace period scales with movetime:
+    //   ≤ 2s think → 3s grace  (low difficulty, should be fast)
+    //   > 2s think → 10s grace (high difficulty — background tab throttling can
+    //                           delay the main-thread timeout timer even though
+    //                           the worker itself continues running unthrottled)
+    const grace = movetime > 2000 ? 10000 : 3000;
+    const timeoutMs = movetime + grace;
 
     return new Promise((resolve, reject) => {
       // Build timer-aware handlers BEFORE registering in _pending

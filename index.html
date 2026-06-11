@@ -2045,10 +2045,28 @@ function startGame(color) {
 }
 
 function resetGame() {
+  // Invalidate any in-flight engine call from the previous game
+  gameSessionId++;
+  engineThinking = false;
+  gameStarted = false;
+
+  // Show the setup panel (colour + difficulty picker)
   document.getElementById('pregame-setup').style.display = 'flex';
   document.getElementById('status').style.display = 'block';
-  if (!gameStarted) return;
-  startGame(playerColor === 'w' ? 'white' : 'black');
+  document.getElementById('status').textContent = 'Choose your color to begin.';
+  document.getElementById('btn-resign').style.display = 'none';
+  document.getElementById('btn-replay').style.display = 'none';
+
+  // Reset board to starting position immediately so user doesn't see
+  // the finished game while choosing colour
+  game = new Chess();
+  if (cg) cg.set({
+    fen:      'start',
+    lastMove: undefined,
+    check:    false,
+    movable:  { color: undefined, dests: new Map() },
+    selectable: { enabled: false }
+  });
 }
 
 function updateCapturedPieces() {

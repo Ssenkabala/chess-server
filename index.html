@@ -1237,6 +1237,7 @@ global.Chessground = Nr;
 
 <!-- Mobile menu drawer -->
 <div class="mobile-menu" id="mobile-menu">
+  <a onclick="navTo('/profile')">Profile</a>
   <a onclick="navTo('/')">Home</a>
   <a onclick="navTo('/play')">vs Bot</a>
   <a onclick="navTo('/multiplayer')">Live</a>
@@ -1244,7 +1245,6 @@ global.Chessground = Nr;
   <a onclick="navTo('/leaderboard')">Leaderboard</a>
   <a onclick="navTo('/history')">My Games</a>
   <a onclick="navTo('/watch')">Watch</a>
-  <a onclick="navTo('/profile')">Profile</a>
   <a id="mob-signin-idx" onclick="closeMenuThenAuth()" style="display:none;">Sign In</a>
   <a id="mob-signout-idx" onclick="signOut()" style="display:none;">Sign Out</a>
 </div>
@@ -1614,6 +1614,7 @@ var engineThinking = false;
 var gameStarted = false;
 var moveHistory = [];   // SAN history for display
 var uciHistory  = [];   // UCI history for engine repetition detection
+var gameSessionId = 0;  // incremented on every new game — stale engine callbacks are discarded
 
 function setStatus(msg) { document.getElementById('status').textContent = msg; }
 
@@ -1729,6 +1730,10 @@ function getEngineMove() {
   var moves = uciHistory.slice();
   var diff  = currentDifficulty;
   var wasmEng = _ensureWasmEngine();
+  var sessionAtCall = gameSessionId;  // capture session at the time of the call
+
+  // Guard: discard result if a new game started while engine was thinking
+  function isStale() { return gameSessionId !== sessionAtCall; }
 
   if (wasmEng) {
     // ── WASM path: engine runs in browser, no server call ──────────────────
@@ -1740,7 +1745,7 @@ function getEngineMove() {
         var dots = 0;
         var thinkInterval = setInterval(function() {
           dots = (dots + 1) % 4;
-          setStatus('Engine thinking' + '.'.repeat(dots));
+          if (!isStale()) setStatus('Engine thinking' + '.'.repeat(dots));
         }, 400);
         setTimeout(function() { clearInterval(thinkInterval); }, thinkMs + 2000);
       }
@@ -1752,6 +1757,7 @@ function getEngineMove() {
         engine:     wasmEng,
         chess:      game
       }).then(function(uciMove) {
+        if (isStale()) return;  // new game started — discard
         if (!uciMove) {
           engineThinking = false;
           if (game.game_over()) { showResult(); }
@@ -1759,8 +1765,9 @@ function getEngineMove() {
         }
         _applyEngineMove(uciMove);
       }).catch(function(err) {
+        if (isStale()) return;  // new game started — discard
         console.warn('[bot] WASM error, falling back to server:', err);
-        _getEngineMoveFromServer(fen, moves, diff);
+        _getEngineMoveFromServer(fen, moves, diff, sessionAtCall);
       });
     };
 
@@ -1769,32 +1776,45 @@ function getEngineMove() {
     } else {
       // Engine loading — show brief wait message then search
       setStatus('Loading engine…');
-      wasmEng.ready().then(doSearch).catch(function() {
-        _getEngineMoveFromServer(fen, moves, diff);
+      wasmEng.ready().then(function() {
+        if (isStale()) return;
+        doSearch();
+      }).catch(function() {
+        if (isStale()) return;
+        _getEngineMoveFromServer(fen, moves, diff, sessionAtCall);
       });
     }
   } else {
     // ── Server fallback: original /move API ─────────────────────────────────
-    _getEngineMoveFromServer(fen, moves, diff);
+    _getEngineMoveFromServer(fen, moves, diff, sessionAtCall);
   }
 }
 
 function _applyEngineMove(uciMove) {
-  var tempGame = new Chess(game.fen());
-  var engineMove = tempGame.move({
-    from:      uciMove.slice(0, 2),
-    to:        uciMove.slice(2, 4),
-    promotion: uciMove[4] || 'q'
-  });
-  if (engineMove) {
-    moveHistory.push(engineMove.san);
-    uciHistory.push(uciMove);
-    game.move({ from: uciMove.slice(0,2), to: uciMove.slice(2,4), promotion: uciMove[4] || 'q' });
-    if (cg) cg.set({
-      fen:      game.fen(),
-      lastMove: [uciMove.slice(0,2), uciMove.slice(2,4)]
-    });
+  // Validate the move on the real game object directly — single source of truth.
+  // Using a tempGame copy previously caused desync when the position had drifted.
+  var from  = uciMove.slice(0, 2);
+  var to    = uciMove.slice(2, 4);
+  var promo = uciMove[4] || 'q';
+
+  var engineMove = game.move({ from: from, to: to, promotion: promo });
+  if (!engineMove) {
+    // Engine returned an illegal move — resync board to current game state
+    console.warn('[bot] illegal engine move:', uciMove, '— resyncing board');
+    if (cg) cg.set({ fen: game.fen() });
+    engineThinking = false;
+    refreshDests();
+    return;
   }
+
+  moveHistory.push(engineMove.san);
+  uciHistory.push(uciMove);
+
+  if (cg) cg.set({
+    fen:      game.fen(),
+    lastMove: [from, to]
+  });
+
   engineThinking = false;
   refreshDests();
   updateCapturedPieces();
@@ -1802,15 +1822,18 @@ function _applyEngineMove(uciMove) {
   setStatus('Your move.');
 }
 
-function _getEngineMoveFromServer(fen, moves, diff) {
+function _getEngineMoveFromServer(fen, moves, diff, sessionAtCall) {
+  // Guard: discard result if a new game started while waiting for server
+  function isStale() { return gameSessionId !== sessionAtCall; }
+
   // Client-side timeout: think_ms[diff] + 22s grace so we never hang forever
   var thinkMs = {1:200,2:200,3:500,4:1000,5:2000,6:4000,7:8000,8:15000};
   var clientTimeout = (thinkMs[diff] || 15000) + 22000;
   var abortCtrl = new AbortController();
   var abortTimer = setTimeout(function() {
     abortCtrl.abort();
+    if (isStale()) return;
     console.warn('[bot] server move request timed out after ' + clientTimeout + 'ms');
-    // Show error and re-enable board
     setStatus('Engine timed out. Please try again.');
     engineThinking = false;
   }, clientTimeout);
@@ -1823,35 +1846,37 @@ function _getEngineMoveFromServer(fen, moves, diff) {
   })
   .then(function(r) { clearTimeout(abortTimer); return r.json(); })
   .then(function(data) {
-    if (data.fen) {
-      if (data.move) {
-        var tempGame = new Chess(game.fen());
-        var engineMove = tempGame.move({
-          from: data.move.slice(0,2),
-          to:   data.move.slice(2,4),
-          promotion: data.move[4] || 'q'
-        });
-        if (engineMove) {
-          moveHistory.push(engineMove.san);
-          uciHistory.push(data.move);
-        }
-      }
-      game.load(data.fen);
-      if (data.move) {
-        if (cg) cg.set({ fen: data.fen, lastMove: [data.move.slice(0,2), data.move.slice(2,4)] });
+    if (isStale()) return;  // new game started while waiting — discard
+    if (data.move) {
+      // Apply directly to game — single source of truth, no tempGame copy
+      var engineMove = game.move({
+        from:      data.move.slice(0,2),
+        to:        data.move.slice(2,4),
+        promotion: data.move[4] || 'q'
+      });
+      if (engineMove) {
+        moveHistory.push(engineMove.san);
+        uciHistory.push(data.move);
+        if (cg) cg.set({ fen: game.fen(), lastMove: [data.move.slice(0,2), data.move.slice(2,4)] });
       } else {
-        if (cg) cg.set({ fen: data.fen });
+        // Server returned illegal move — resync from server FEN as fallback
+        console.warn('[bot] server illegal move:', data.move, '— loading server FEN');
+        if (data.fen) { game.load(data.fen); if (cg) cg.set({ fen: data.fen }); }
       }
-      engineThinking = false;
-      refreshDests();
-      updateCapturedPieces();
+    } else if (data.fen) {
+      game.load(data.fen);
+      if (cg) cg.set({ fen: data.fen });
     }
+    engineThinking = false;
+    refreshDests();
+    updateCapturedPieces();
     renderCandidates(data.candidates);
-    if (data.is_game_over) { showResult(); return; }
+    if (data.is_game_over || game.game_over()) { showResult(); return; }
     setStatus('Your move.');
   })
   .catch(function(err) {
     clearTimeout(abortTimer);
+    if (isStale()) return;
     if (err && err.name === 'AbortError') return; // already handled by abortTimer
     engineThinking = false;
     setStatus('Engine error — please try again.');
@@ -1951,6 +1976,7 @@ function startGame(color) {
   playerColor = (color === 'white') ? 'w' : 'b';
   gameStarted = true;
   engineThinking = false;
+  gameSessionId++;          // invalidate any in-flight engine callbacks from the previous game
   game = new Chess();
   document.getElementById('btn-white').classList.toggle('active', color === 'white');
   document.getElementById('btn-black').classList.toggle('active', color === 'black');
@@ -1965,8 +1991,6 @@ function startGame(color) {
   // On first visit, fonts + layout may not have painted yet — calling
   // Chessground on a zero-width element causes pieces to stack on a2,
   // producing phantom extra pawns for the opponent (reported by users).
-  // Double-rAF ensures the browser commits the pregame-setup hide before
-  // we start polling, then we keep polling until width >= 10px.
   function initWhenReady() {
     var rect = boardEl.getBoundingClientRect();
     if (rect.width < 10) {

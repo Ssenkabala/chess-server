@@ -1683,7 +1683,12 @@ function executePlayerMove(source, target, promotion) {
   var move = game.move({ from: source, to: target, promotion: promotion });
   if (move === null) { cg.set({ fen: game.fen() }); return; }
   moveHistory.push(move.san);
-  uciHistory.push(source + target + (promotion || 'q'));
+  // Only append promotion char when the move is actually a promotion.
+  // Do NOT use (promotion || 'q') — that appends 'q' to every move,
+  // making 'e2e4' become 'e2e4q', which server's push_uci() rejects,
+  // causing game_board to reset and engine to always see the start position.
+  var uciMove = source + target + (move.promotion ? move.promotion : '');
+  uciHistory.push(uciMove);
   if (cg) cg.set({ fen: game.fen(), lastMove: [source, target] });
   refreshDests();
   updateCapturedPieces();
@@ -1936,6 +1941,9 @@ function resignGame() {
   if (!gameStarted || game.game_over()) return;
   var resultKey = playerColor === 'w' ? 'black' : 'white';
   gameStarted = false;
+  engineThinking = false;
+  gameSessionId++;          // invalidate any in-flight WASM/server engine callback
+  if (cg) cg.set({ movable: { color: undefined }, selectable: { enabled: false } });
   document.getElementById('btn-resign').style.display = 'none';
   document.getElementById('btn-replay').style.display = '';
 

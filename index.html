@@ -3,17 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>Africhess</title>
+  <title>AfriChess | Play vs Engine — 8 Difficulty Levels</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon_16x16.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
   <meta name="theme-color" content="#0a0a0a">
-  <meta name="description" content="Play chess against the AfriChess engine — 8 difficulty levels, move analysis, and AI coaching.">
-  <meta property="og:title" content="AfriChess — Play vs Engine">
+  <meta name="description" content="Play chess against AfriChess's custom 2050 ELO engine. Choose from 8 difficulty levels, analyse positions, and get AI coaching. Built for African players.">
+  <meta property="og:title" content="AfriChess | Play vs Engine">
+  <meta property="og:description" content="Play chess against AfriChess's 2050 ELO engine — 8 difficulty levels, AI coaching, and position analysis. Built for African players.">
   <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
   <meta property="og:url" content="https://www.africhess.org/play">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@africhess">
+  <meta name="twitter:title" content="AfriChess | Play vs Engine">
+  <meta name="twitter:description" content="Play chess against AfriChess's 2050 ELO engine. 8 difficulty levels, AI coaching, built for African players.">
+  <meta name="twitter:image" content="https://www.africhess.org/android-chrome-512x512.png">
+  <link rel="canonical" href="https://www.africhess.org/play">
   <!-- Set zoom CSS variable BEFORE any style renders to avoid flash -->
   <script>
     (function() {
@@ -1237,7 +1245,6 @@ global.Chessground = Nr;
 
 <!-- Mobile menu drawer -->
 <div class="mobile-menu" id="mobile-menu">
-  <a onclick="navTo('/profile')">Profile</a>
   <a onclick="navTo('/')">Home</a>
   <a onclick="navTo('/play')">vs Bot</a>
   <a onclick="navTo('/multiplayer')">Live</a>
@@ -1245,6 +1252,7 @@ global.Chessground = Nr;
   <a onclick="navTo('/leaderboard')">Leaderboard</a>
   <a onclick="navTo('/history')">My Games</a>
   <a onclick="navTo('/watch')">Watch</a>
+  <a onclick="navTo('/profile')">Profile</a>
   <a id="mob-signin-idx" onclick="closeMenuThenAuth()" style="display:none;">Sign In</a>
   <a id="mob-signout-idx" onclick="signOut()" style="display:none;">Sign Out</a>
 </div>
@@ -1614,7 +1622,6 @@ var engineThinking = false;
 var gameStarted = false;
 var moveHistory = [];   // SAN history for display
 var uciHistory  = [];   // UCI history for engine repetition detection
-var gameSessionId = 0;  // incremented on every new game — stale engine callbacks are discarded
 
 function setStatus(msg) { document.getElementById('status').textContent = msg; }
 
@@ -1683,12 +1690,7 @@ function executePlayerMove(source, target, promotion) {
   var move = game.move({ from: source, to: target, promotion: promotion });
   if (move === null) { cg.set({ fen: game.fen() }); return; }
   moveHistory.push(move.san);
-  // Only append promotion char when the move is actually a promotion.
-  // Do NOT use (promotion || 'q') — that appends 'q' to every move,
-  // making 'e2e4' become 'e2e4q', which server's push_uci() rejects,
-  // causing game_board to reset and engine to always see the start position.
-  var uciMove = source + target + (move.promotion ? move.promotion : '');
-  uciHistory.push(uciMove);
+  uciHistory.push(source + target + (promotion || 'q'));
   if (cg) cg.set({ fen: game.fen(), lastMove: [source, target] });
   refreshDests();
   updateCapturedPieces();
@@ -1735,10 +1737,6 @@ function getEngineMove() {
   var moves = uciHistory.slice();
   var diff  = currentDifficulty;
   var wasmEng = _ensureWasmEngine();
-  var sessionAtCall = gameSessionId;  // capture session at the time of the call
-
-  // Guard: discard result if a new game started while engine was thinking
-  function isStale() { return gameSessionId !== sessionAtCall; }
 
   if (wasmEng) {
     // ── WASM path: engine runs in browser, no server call ──────────────────
@@ -1750,7 +1748,7 @@ function getEngineMove() {
         var dots = 0;
         var thinkInterval = setInterval(function() {
           dots = (dots + 1) % 4;
-          if (!isStale()) setStatus('Engine thinking' + '.'.repeat(dots));
+          setStatus('Engine thinking' + '.'.repeat(dots));
         }, 400);
         setTimeout(function() { clearInterval(thinkInterval); }, thinkMs + 2000);
       }
@@ -1762,7 +1760,6 @@ function getEngineMove() {
         engine:     wasmEng,
         chess:      game
       }).then(function(uciMove) {
-        if (isStale()) return;  // new game started — discard
         if (!uciMove) {
           engineThinking = false;
           if (game.game_over()) { showResult(); }
@@ -1770,9 +1767,8 @@ function getEngineMove() {
         }
         _applyEngineMove(uciMove);
       }).catch(function(err) {
-        if (isStale()) return;  // new game started — discard
         console.warn('[bot] WASM error, falling back to server:', err);
-        _getEngineMoveFromServer(fen, moves, diff, sessionAtCall);
+        _getEngineMoveFromServer(fen, moves, diff);
       });
     };
 
@@ -1781,45 +1777,32 @@ function getEngineMove() {
     } else {
       // Engine loading — show brief wait message then search
       setStatus('Loading engine…');
-      wasmEng.ready().then(function() {
-        if (isStale()) return;
-        doSearch();
-      }).catch(function() {
-        if (isStale()) return;
-        _getEngineMoveFromServer(fen, moves, diff, sessionAtCall);
+      wasmEng.ready().then(doSearch).catch(function() {
+        _getEngineMoveFromServer(fen, moves, diff);
       });
     }
   } else {
     // ── Server fallback: original /move API ─────────────────────────────────
-    _getEngineMoveFromServer(fen, moves, diff, sessionAtCall);
+    _getEngineMoveFromServer(fen, moves, diff);
   }
 }
 
 function _applyEngineMove(uciMove) {
-  // Validate the move on the real game object directly — single source of truth.
-  // Using a tempGame copy previously caused desync when the position had drifted.
-  var from  = uciMove.slice(0, 2);
-  var to    = uciMove.slice(2, 4);
-  var promo = uciMove[4] || 'q';
-
-  var engineMove = game.move({ from: from, to: to, promotion: promo });
-  if (!engineMove) {
-    // Engine returned an illegal move — resync board to current game state
-    console.warn('[bot] illegal engine move:', uciMove, '— resyncing board');
-    if (cg) cg.set({ fen: game.fen() });
-    engineThinking = false;
-    refreshDests();
-    return;
-  }
-
-  moveHistory.push(engineMove.san);
-  uciHistory.push(uciMove);
-
-  if (cg) cg.set({
-    fen:      game.fen(),
-    lastMove: [from, to]
+  var tempGame = new Chess(game.fen());
+  var engineMove = tempGame.move({
+    from:      uciMove.slice(0, 2),
+    to:        uciMove.slice(2, 4),
+    promotion: uciMove[4] || 'q'
   });
-
+  if (engineMove) {
+    moveHistory.push(engineMove.san);
+    uciHistory.push(uciMove);
+    game.move({ from: uciMove.slice(0,2), to: uciMove.slice(2,4), promotion: uciMove[4] || 'q' });
+    if (cg) cg.set({
+      fen:      game.fen(),
+      lastMove: [uciMove.slice(0,2), uciMove.slice(2,4)]
+    });
+  }
   engineThinking = false;
   refreshDests();
   updateCapturedPieces();
@@ -1827,18 +1810,15 @@ function _applyEngineMove(uciMove) {
   setStatus('Your move.');
 }
 
-function _getEngineMoveFromServer(fen, moves, diff, sessionAtCall) {
-  // Guard: discard result if a new game started while waiting for server
-  function isStale() { return gameSessionId !== sessionAtCall; }
-
+function _getEngineMoveFromServer(fen, moves, diff) {
   // Client-side timeout: think_ms[diff] + 22s grace so we never hang forever
   var thinkMs = {1:200,2:200,3:500,4:1000,5:2000,6:4000,7:8000,8:15000};
   var clientTimeout = (thinkMs[diff] || 15000) + 22000;
   var abortCtrl = new AbortController();
   var abortTimer = setTimeout(function() {
     abortCtrl.abort();
-    if (isStale()) return;
     console.warn('[bot] server move request timed out after ' + clientTimeout + 'ms');
+    // Show error and re-enable board
     setStatus('Engine timed out. Please try again.');
     engineThinking = false;
   }, clientTimeout);
@@ -1851,37 +1831,35 @@ function _getEngineMoveFromServer(fen, moves, diff, sessionAtCall) {
   })
   .then(function(r) { clearTimeout(abortTimer); return r.json(); })
   .then(function(data) {
-    if (isStale()) return;  // new game started while waiting — discard
-    if (data.move) {
-      // Apply directly to game — single source of truth, no tempGame copy
-      var engineMove = game.move({
-        from:      data.move.slice(0,2),
-        to:        data.move.slice(2,4),
-        promotion: data.move[4] || 'q'
-      });
-      if (engineMove) {
-        moveHistory.push(engineMove.san);
-        uciHistory.push(data.move);
-        if (cg) cg.set({ fen: game.fen(), lastMove: [data.move.slice(0,2), data.move.slice(2,4)] });
-      } else {
-        // Server returned illegal move — resync from server FEN as fallback
-        console.warn('[bot] server illegal move:', data.move, '— loading server FEN');
-        if (data.fen) { game.load(data.fen); if (cg) cg.set({ fen: data.fen }); }
+    if (data.fen) {
+      if (data.move) {
+        var tempGame = new Chess(game.fen());
+        var engineMove = tempGame.move({
+          from: data.move.slice(0,2),
+          to:   data.move.slice(2,4),
+          promotion: data.move[4] || 'q'
+        });
+        if (engineMove) {
+          moveHistory.push(engineMove.san);
+          uciHistory.push(data.move);
+        }
       }
-    } else if (data.fen) {
       game.load(data.fen);
-      if (cg) cg.set({ fen: data.fen });
+      if (data.move) {
+        if (cg) cg.set({ fen: data.fen, lastMove: [data.move.slice(0,2), data.move.slice(2,4)] });
+      } else {
+        if (cg) cg.set({ fen: data.fen });
+      }
+      engineThinking = false;
+      refreshDests();
+      updateCapturedPieces();
     }
-    engineThinking = false;
-    refreshDests();
-    updateCapturedPieces();
     renderCandidates(data.candidates);
-    if (data.is_game_over || game.game_over()) { showResult(); return; }
+    if (data.is_game_over) { showResult(); return; }
     setStatus('Your move.');
   })
   .catch(function(err) {
     clearTimeout(abortTimer);
-    if (isStale()) return;
     if (err && err.name === 'AbortError') return; // already handled by abortTimer
     engineThinking = false;
     setStatus('Engine error — please try again.');
@@ -1941,9 +1919,6 @@ function resignGame() {
   if (!gameStarted || game.game_over()) return;
   var resultKey = playerColor === 'w' ? 'black' : 'white';
   gameStarted = false;
-  engineThinking = false;
-  gameSessionId++;          // invalidate any in-flight WASM/server engine callback
-  if (cg) cg.set({ movable: { color: undefined }, selectable: { enabled: false } });
   document.getElementById('btn-resign').style.display = 'none';
   document.getElementById('btn-replay').style.display = '';
 
@@ -1984,89 +1959,52 @@ function startGame(color) {
   playerColor = (color === 'white') ? 'w' : 'b';
   gameStarted = true;
   engineThinking = false;
-  gameSessionId++;          // invalidate any in-flight engine callbacks from the previous game
   game = new Chess();
   document.getElementById('btn-white').classList.toggle('active', color === 'white');
   document.getElementById('btn-black').classList.toggle('active', color === 'black');
   document.getElementById('btn-resign').style.display = '';
   document.getElementById('btn-replay').style.display = 'none';
 
-  if (cg) { cg.destroy(); cg = null; }
-
-  var boardEl = document.getElementById('board');
-
-  // Defer Chessground init until the board element has real dimensions.
-  // On first visit, fonts + layout may not have painted yet — calling
-  // Chessground on a zero-width element causes pieces to stack on a2,
-  // producing phantom extra pawns for the opponent (reported by users).
-  function initWhenReady() {
-    var rect = boardEl.getBoundingClientRect();
-    if (rect.width < 10) {
-      requestAnimationFrame(initWhenReady);
-      return;
-    }
-    cg = Chessground(boardEl, {
-      orientation: color,
-      turnColor: 'white',
-      fen: 'start',
-      movable: {
-        color: color === 'white' ? 'white' : 'black',
-        free: false,
-        dests: toDests(),
-        events: { after: function(orig, dest) {
-          if (isPromotion(orig, dest)) {
-            showPromotion(orig, dest, function(promo) { executePlayerMove(orig, dest, promo); });
-          } else {
-            executePlayerMove(orig, dest, 'q');
-          }
-        }}
-      },
-      draggable:   { enabled: true },
-      selectable:  { enabled: true },
-      animation:   { enabled: true, duration: 120 },
-      highlight:   { lastMove: true, check: true },
-      coordinates: true,
-    });
-    makeBoardResizable('board-wrap', function() { return cg; });
-    if (playerColor === 'b') {
-      setStatus('Engine thinking...');
-      engineThinking = true;
-      updateCapturedPieces();
-      setTimeout(getEngineMove, 500);
-    } else {
-      updateCapturedPieces();
-      setStatus('Your move.');
-    }
-  }
-
-  requestAnimationFrame(function() {
-    requestAnimationFrame(initWhenReady);
+  if (cg) { cg.destroy(); }
+  cg = Chessground(document.getElementById('board'), {
+    orientation: color,
+    turnColor: 'white',
+    fen: 'start',
+    movable: {
+      color: color === 'white' ? 'white' : 'black',
+      free: false,
+      dests: toDests(),
+      events: { after: function(orig, dest) {
+        if (isPromotion(orig, dest)) {
+          showPromotion(orig, dest, function(promo) { executePlayerMove(orig, dest, promo); });
+        } else {
+          executePlayerMove(orig, dest, 'q');
+        }
+      }}
+    },
+    draggable: { enabled: true },
+    selectable: { enabled: true },
+    animation: { enabled: true, duration: 120 },
+    highlight: { lastMove: true, check: true },
+    coordinates: true,
   });
+  makeBoardResizable('board-wrap', function() { return cg; });
+  if (playerColor === 'b') {
+    setStatus('Engine thinking...');
+    engineThinking = true;
+    updateCapturedPieces();
+    setTimeout(getEngineMove, 500);
+  } else {
+    updateCapturedPieces();
+    setStatus('Your move.');
+  }
 }
 
 function resetGame() {
-  // Invalidate any in-flight engine call from the previous game
-  gameSessionId++;
-  engineThinking = false;
-  gameStarted = false;
-
-  // Show the setup panel (colour + difficulty picker)
   document.getElementById('pregame-setup').style.display = 'flex';
   document.getElementById('status').style.display = 'block';
-  document.getElementById('status').textContent = 'Choose your color to begin.';
-  document.getElementById('btn-resign').style.display = 'none';
-  document.getElementById('btn-replay').style.display = 'none';
-
-  // Reset board to starting position immediately so user doesn't see
-  // the finished game while choosing colour
-  game = new Chess();
-  if (cg) cg.set({
-    fen:      'start',
-    lastMove: undefined,
-    check:    false,
-    movable:  { color: undefined, dests: new Map() },
-    selectable: { enabled: false }
-  });
+  if (!gameStarted) return;
+  startGame(playerColor === 'w' ? 'white' : 'black');
 }
 
 function updateCapturedPieces() {

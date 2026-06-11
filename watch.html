@@ -3,7 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AfriChess · Watch Live</title>
+  <title>AfriChess · Watch Live Games</title>
+  <meta name="description" content="Watch live chess games on AfriChess in real time. Follow ongoing matches between African players across all time controls.">
+  <meta property="og:title" content="AfriChess | Watch Live">
+  <meta property="og:description" content="Watch live chess games on AfriChess. Follow ongoing matches between African players in real time.">
+  <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
+  <meta property="og:url" content="https://www.africhess.org/watch">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@africhess">
+  <meta name="twitter:title" content="AfriChess | Watch Live">
+  <meta name="twitter:description" content="Watch live chess games on AfriChess in real time.">
+  <meta name="twitter:image" content="https://www.africhess.org/android-chrome-512x512.png">
+  <link rel="canonical" href="https://www.africhess.org/watch">
   <link rel="icon" href="/favicon.ico">
 
   <!-- Chessground -->
@@ -216,7 +228,6 @@
   </div>
   <div class="drawer-overlay" id="drawer-overlay" onclick="toggleDrawer()"></div>
   <div class="mobile-drawer" id="mobile-drawer">
-    <a href="/profile">Profile</a>
     <a href="/">Home</a>
     <a href="/play">vs Bot</a>
     <a href="/multiplayer">Live</a>
@@ -224,6 +235,7 @@
     <a href="/leaderboard">Leaderboard</a>
     <a href="/watch" class="active">Watch</a>
     <a href="/history">History</a>
+    <a href="/profile">Profile</a>
   </div>
 
   <div class="page">
@@ -355,54 +367,34 @@
     document.getElementById('watch-title').textContent = `${white} vs ${black}`;
     document.getElementById('watch-tc').textContent    = tc;
 
-    // Player labels
-    document.getElementById('name-top').textContent    = black;
-    document.getElementById('elo-top').textContent     = `ELO ${blackElo}`;
-    document.getElementById('name-bottom').textContent = white;
-    document.getElementById('elo-bottom').textContent  = `ELO ${whiteElo}`;
+    // Init board (view-only)
+    if (cg) { cg.destroy(); cg = null; }
+    const el = document.getElementById('cg-container');
+    el.innerHTML = '';
+    cg = Chessground(el, {
+      viewOnly:    true,
+      orientation: 'white',
+      animation:   { enabled: true, duration: 150 },
+      highlight:   { lastMove: true, check: true },
+    });
 
     chess      = new Chess();
     sanHistory = [];
     renderMoveList();
     setStatus('Connecting…');
 
-    // Destroy previous board if any
-    if (cg) { cg.destroy(); cg = null; }
-    const el = document.getElementById('cg-container');
-    el.innerHTML = '';
+    // Player labels
+    document.getElementById('name-top').textContent    = black;
+    document.getElementById('elo-top').textContent     = `ELO ${blackElo}`;
+    document.getElementById('name-bottom').textContent = white;
+    document.getElementById('elo-bottom').textContent  = `ELO ${whiteElo}`;
 
-    // Defer Chessground init until container has real dimensions.
-    // watch-view was just set from display:none to display:'' — the browser
-    // hasn't painted yet so getBoundingClientRect() returns 0. We must wait
-    // for at least one layout pass before calling Chessground.
-    function initBoardWhenReady() {
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 10) {
-        requestAnimationFrame(initBoardWhenReady);
-        return;
-      }
-      cg = Chessground(el, {
-        viewOnly:    true,
-        orientation: 'white',
-        animation:   { enabled: true, duration: 150 },
-        highlight:   { lastMove: true, check: true },
-      });
+    // Connect WS
+    if (watchWs) { watchWs.close(); watchWs = null; }
+    watchWs = new WebSocket(`${WS_BASE}/ws/watch/${gameId}`);
 
-      // Connect WS only after board is ready
-      if (watchWs) { watchWs.close(); watchWs = null; }
-      watchWs = new WebSocket(`${WS_BASE}/ws/watch/${gameId}`);
-      watchWs.onmessage = onWatchMessage.bind(null, white, black);
-      watchWs.onclose   = () => { setStatus('Disconnected.'); };
-      watchWs.onerror   = () => { setStatus('Connection error.'); };
-    }
-
-    requestAnimationFrame(function() {
-      requestAnimationFrame(initBoardWhenReady);
-    });
-  }
-
-  function onWatchMessage(white, black, e) {
-    const msg = JSON.parse(e.data);
+    watchWs.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
       if (msg.type === 'ping') return;
 
       if (msg.type === 'game_state') {
@@ -461,6 +453,10 @@
         stopClockTick();
         setStatus('Game finished.');
       }
+    };
+
+    watchWs.onerror = () => setStatus('Connection error.');
+    watchWs.onclose = () => { stopClockTick(); };
   }
 
   function backToList() {

@@ -2311,7 +2311,11 @@ function analysePosition() {
   // ─── Dispatch ─────────────────────────────────────────────────────────────
   if (wasmEng && _wasmReady()) {
     wasmEng._analysisInfoHandler = onInfo;
-    wasmEng.analyse(fen, [], 5000, 3)  // 3 candidate lines, 5s think
+    // Use analyse() for multi-line if available, fall back to bestMove() for old builds
+    var analyseCall = typeof wasmEng.analyse === 'function'
+      ? wasmEng.analyse(fen, [], 5000, 3)
+      : wasmEng.bestMove(fen, [], 5000);
+    analyseCall
       .then(function(move) { onDone(move); })
       .catch(function()    { fallbackToServer(); });
   } else if (wasmEng) {

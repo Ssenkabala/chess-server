@@ -2870,36 +2870,43 @@ async def game_ws(ws: WebSocket, game_id: str):
                     await send(opponent_ws, {"type": "takeback_declined"})
 
             elif msg_type == "rematch_offer":
+                # Only notify opponent — do NOT create game yet
                 game["rematch_offered_by"] = color
                 opponent_ws = game.get("black_game_ws") if color == "w" else game.get("white_game_ws")
                 if opponent_ws:
                     await send(opponent_ws, {"type": "rematch_offer"})
-                old_white_profile = game["white_profile"]
-                old_black_profile = game["black_profile"]
-                old_white_ws      = game["white_ws"]
-                old_black_ws      = game["black_ws"]
 
-                new_game_id = uuid.uuid4().hex[:12]
-                # Colors swapped: old black becomes new white
-                ng = new_game(new_game_id, old_black_ws, old_white_ws,
-                              old_black_profile.get("username", "?") if old_black_profile else "?",
-                              old_white_profile.get("username", "?") if old_white_profile else "?")
-                ng["white_profile"]   = old_black_profile
-                ng["black_profile"]   = old_white_profile
-                # Clear stale lobby sockets — players will connect fresh via /ws/game/{new_game_id}
-                ng["white_ws"] = None
-                ng["black_ws"] = None
-                active_games[new_game_id] = ng
+            elif msg_type == "rematch_accept":
+                # Only valid if opponent offered
+                if game.get("rematch_offered_by") and game["rematch_offered_by"] != color:
+                    old_white_profile = game["white_profile"]
+                    old_black_profile = game["black_profile"]
+                    white_game_ws     = game.get("white_game_ws")
+                    black_game_ws     = game.get("black_game_ws")
 
-                # Notify players on the OLD game sockets before they disconnect
-                await send(old_black_ws, {
-                    "type": "rematch_start", "game_id": new_game_id, "color": "white"
-                })
-                await send(old_white_ws, {
-                    "type": "rematch_start", "game_id": new_game_id, "color": "black"
-                })
-                asyncio.create_task(clock_loop(new_game_id))
-                asyncio.create_task(cleanup_game(game_id, delay=10))
+                    new_game_id = uuid.uuid4().hex[:12]
+                    # Colors swapped: old black becomes new white
+                    ng = new_game(new_game_id, black_game_ws, white_game_ws,
+                                  old_black_profile.get("username", "?") if old_black_profile else "?",
+                                  old_white_profile.get("username", "?") if old_white_profile else "?")
+                    ng["white_profile"]     = old_black_profile
+                    ng["black_profile"]     = old_white_profile
+                    ng["white_game_ws"]     = black_game_ws
+                    ng["black_game_ws"]     = white_game_ws
+                    active_games[new_game_id] = ng
+
+                    # Notify both players on their current game sockets
+                    if black_game_ws:
+                        await send(black_game_ws, {
+                            "type": "rematch_start", "game_id": new_game_id, "color": "white"
+                        })
+                    if white_game_ws:
+                        await send(white_game_ws, {
+                            "type": "rematch_start", "game_id": new_game_id, "color": "black"
+                        })
+                    asyncio.create_task(clock_loop(new_game_id))
+                    asyncio.create_task(first_move_timeout_loop(new_game_id))
+                    asyncio.create_task(cleanup_game(game_id, delay=10))
 
             elif msg_type == "rematch_decline":
                 opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]

@@ -2028,21 +2028,34 @@ function onGameMessage(e) {
     const btn = document.getElementById('btn-takeback');
     if (btn) { btn.disabled = false; btn.textContent = '↩ Take Back'; }
 
-    // Pop exactly one move from local game and history
-    if (game.history().length > 0) {
-      game.undo();
+    // Use server FEN as authoritative — don't trust local undo chain
+    game.load(msg.fen);
+    // Rebuild sanHistory and fenHistory to match
+    // Easiest: pop until local game history length matches server's position
+    while (sanHistory.length > 0) {
+      const testGame = new Chess();
+      // Replay from start to check move count
+      const history = game.history();
+      if (sanHistory.length <= history.length + 1) break;
       sanHistory.pop();
       fenHistory.pop();
     }
+    // Simpler: just pop one entry since we always pop exactly one move
+    if (sanHistory.length > 0) sanHistory.pop();
+    if (fenHistory.length > 0) fenHistory.pop();
 
     myTurn = msg.turn === myColor;
     viewingMove = -1;
     renderMoveList();
     refreshDests();
-    if (cg) cg.set({ fen: game.fen(), movable: { color: myTurn ? myColor : undefined, dests: toDests() } });
+    if (cg) cg.set({
+      fen: msg.fen,
+      lastMove: undefined,
+      movable: { color: myTurn ? myColor : undefined, dests: toDests() }
+    });
     updateTurnIndicator();
+    startClockTick();
     showGameStatus('Takeback accepted.', false);
-    setTimeout(() => updateTurnIndicator(), 1500);
   }
 
   if (msg.type === 'rematch_offer') {
@@ -2396,7 +2409,6 @@ function hideTakebackBar() {
 
 function showOverlay(result, reason) {
   const overlay = document.getElementById('overlay');
-  if (overlay.classList.contains('active')) return;
   overlay.classList.add('active');
 
   const scoreEl  = document.getElementById('result-score');

@@ -3309,6 +3309,13 @@ async def submit_feedback(req: FeedbackRequest):
 app.mount("/img", StaticFiles(directory="img"), name="img")
 app.mount("/static", StaticFiles(directory="."), name="static")
 
+@app.get("/book.bin")
+def serve_book():
+    import os
+    if not os.path.exists("book.bin"):
+        raise HTTPException(status_code=404, detail="Opening book not found")
+    return FileResponse("book.bin", media_type="application/octet-stream")
+
 @app.get("/")
 def root():
     return FileResponse("landing.html")

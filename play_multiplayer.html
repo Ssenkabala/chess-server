@@ -2028,19 +2028,9 @@ function onGameMessage(e) {
     const btn = document.getElementById('btn-takeback');
     if (btn) { btn.disabled = false; btn.textContent = '↩ Take Back'; }
 
-    // Use server FEN as authoritative — don't trust local undo chain
+    // Use server FEN and clock as authoritative
     game.load(msg.fen);
-    // Rebuild sanHistory and fenHistory to match
-    // Easiest: pop until local game history length matches server's position
-    while (sanHistory.length > 0) {
-      const testGame = new Chess();
-      // Replay from start to check move count
-      const history = game.history();
-      if (sanHistory.length <= history.length + 1) break;
-      sanHistory.pop();
-      fenHistory.pop();
-    }
-    // Simpler: just pop one entry since we always pop exactly one move
+    if (msg.clock) updateClocks(msg.clock);
     if (sanHistory.length > 0) sanHistory.pop();
     if (fenHistory.length > 0) fenHistory.pop();
 
@@ -2520,12 +2510,15 @@ function showOverlay(result, reason) {
       });
     }
   } else {
-    // Restore regular rematch buttons in case we're reusing the overlay
+    // Restore regular rematch buttons — remove any dynamically added decline button
     const regularBtns = document.getElementById('rematch-area');
     if (regularBtns) regularBtns.style.display = 'flex';
     const tourneyBtns = document.getElementById('tournament-overlay-btns');
     if (tourneyBtns) tourneyBtns.style.display = 'none';
-    document.getElementById('btn-rematch').textContent = 'Rematch';
+    // Remove dynamically added decline button if present
+    const declineBtn = document.getElementById('btn-decline');
+    if (declineBtn) declineBtn.remove();
+    document.getElementById('btn-rematch').textContent = '⟳ Rematch';
     document.getElementById('btn-rematch').disabled = false;
     document.getElementById('btn-rematch').onclick = offerRematch;
     document.getElementById('rematch-status').textContent = '';
@@ -2550,6 +2543,7 @@ function showOverlay(result, reason) {
         opponent:          opponentUsername ? 'human:' + opponentUsername : 'human',
         player_elo_before: myProfile ? (myProfile.eloBefore || myProfile.elo) : null,
         player_elo_after:  myProfile ? myProfile.elo : null,
+        time_control:      window._timeControl || null,
       }).then(function(res) {
         if (res.error) console.error('Multiplayer save failed:', res.error.message);
         else console.log('Multiplayer game saved. Opponent:', opponentUsername);

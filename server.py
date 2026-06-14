@@ -2858,9 +2858,10 @@ async def game_ws(ws: WebSocket, game_id: str):
                         board.pop()
                     new_fen = board.fen()
                     await broadcast(game, {
-                        "type": "takeback",
-                        "fen":  new_fen,
-                        "turn": "white" if board.turn == chess.WHITE else "black",
+                        "type":  "takeback",
+                        "fen":   new_fen,
+                        "turn":  "white" if board.turn == chess.WHITE else "black",
+                        "clock": game["clock"],
                     })
 
             elif msg_type == "takeback_decline":
@@ -3241,6 +3242,7 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         "elo_classical": profile.get("elo", 1500),   # elo col = classical
         "created_at": profile.get("created_at"),
         "country":    profile.get("country"),
+        "gender":     profile.get("gender"),
         "games_played": profile.get("games_played", 0),
         "wins":       wins,
         "losses":     losses,

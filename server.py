@@ -1371,6 +1371,7 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
         "white_profile":        None,
         "black_profile":        None,
         "spectators":           [],   # list of WebSocket connections watching this game
+        "takeback_offered_by":  None, # color ("w"/"b") that offered takeback, or None
         "move_times_w":         [],   # ms per white move for fair play analysis
         "move_times_b":         [],   # ms per black move for fair play analysis
     }
@@ -2835,10 +2836,40 @@ async def game_ws(ws: WebSocket, game_id: str):
                         await update_elos(game, "draw")
                     asyncio.create_task(cleanup_game(game_id, delay=10))
 
+            elif msg_type == "takeback_offer":
+                # Can only offer takeback if there are moves to take back
+                # and opponent hasn't already offered one
+                if game["board"].move_stack and not game.get("takeback_offered_by"):
+                    game["takeback_offered_by"] = color
+                    opponent_ws = game.get("black_game_ws") if color == "w" else game.get("white_game_ws")
+                    if opponent_ws:
+                        await send(opponent_ws, {"type": "takeback_offer"})
+
+            elif msg_type == "takeback_accept":
+                # Only accept if the opponent offered (not yourself)
+                offered_by = game.get("takeback_offered_by")
+                if offered_by and offered_by != color and not game["over"]:
+                    game["takeback_offered_by"] = None
+                    board = game["board"]
+                    # Always pop exactly one move — the last move played.
+                    # The offerer just played and wants it back; the acceptor
+                    # agrees and now it becomes the offerer's turn again.
+                    if board.move_stack:
+                        board.pop()
+                    new_fen = board.fen()
+                    await broadcast(game, {
+                        "type": "takeback",
+                        "fen":  new_fen,
+                        "turn": "white" if board.turn == chess.WHITE else "black",
+                    })
+
+            elif msg_type == "takeback_decline":
+                game["takeback_offered_by"] = None
+                opponent_ws = game.get("black_game_ws") if color == "w" else game.get("white_game_ws")
+                if opponent_ws:
+                    await send(opponent_ws, {"type": "takeback_declined"})
+
             elif msg_type == "rematch_offer":
-                game["rematch_offered_by"] = color
-                opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
-                await send(opponent_ws, {"type": "rematch_offer"})
 
             elif msg_type == "rematch_accept":
                 old_white_profile = game["white_profile"]

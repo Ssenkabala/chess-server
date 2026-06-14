@@ -650,6 +650,37 @@ global.Chessground = Nr;
       color: #666;
     }
     .move-list span { color: #333; margin-right: 2px; }
+    .move-list .mv {
+      color: #aaa;
+      cursor: pointer;
+      padding: 1px 3px;
+      border-radius: 2px;
+      transition: background 0.1s;
+    }
+    .move-list .mv:hover  { background: #1a1a1a; color: #fff; }
+    .move-list .mv.active { background: #00ff9d22; color: #00ff9d; }
+    .takeback-bar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: #0a0a0a;
+      border-top: 1px solid #1a1a1a;
+      font-size: 12px;
+      color: #888;
+    }
+    .takeback-bar.visible { display: flex; }
+    .takeback-bar button {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 3px;
+      border: 1px solid #333;
+      background: #111;
+      color: #ccc;
+      cursor: pointer;
+    }
+    .takeback-bar button.accept { border-color: #00ff9d55; color: #00ff9d; }
+    .takeback-bar button.decline { border-color: #ff444455; color: #ff4444; }
 
     @media (max-width: 600px) {
       body { padding: 0 !important; overflow-x: hidden; }
@@ -1047,9 +1078,17 @@ global.Chessground = Nr;
 
       <!-- Bottom controls -->
       <div class="controls-bar">
+        <button class="ctrl-btn" onclick="offerTakeback()" id="btn-takeback">↩ Take Back</button>
         <button class="ctrl-btn" onclick="offerDraw()" id="btn-draw">½ Draw</button>
         <button class="ctrl-btn danger" onclick="resign()" id="btn-resign">⚑ Resign</button>
         <button class="ctrl-btn" onclick="goToLobby()">+ New</button>
+      </div>
+
+      <!-- Takeback notification bar — shown to opponent when offer arrives -->
+      <div class="takeback-bar" id="takeback-bar">
+        <span id="takeback-msg">Opponent requests a takeback</span>
+        <button class="accept"  onclick="acceptTakeback()">Accept</button>
+        <button class="decline" onclick="declineTakeback()">Decline</button>
       </div>
 
       <!-- Move list -->
@@ -1850,6 +1889,10 @@ function startGame() {
   };
 
   document.getElementById('move-list').innerHTML = '';
+  sanHistory  = [];
+  fenHistory  = [];
+  viewingMove = -1;
+  hideTakebackBar();
   document.getElementById('overlay').classList.remove('active');
 }
 
@@ -1969,7 +2012,40 @@ function onGameMessage(e) {
     // Start (or restart) the local tick now that myTurn is correctly set
     startClockTick();
   }
-  if (msg.type === 'rematch_offer') {
+  if (msg.type === 'takeback_offer') {
+    showTakebackBar();
+  }
+
+  if (msg.type === 'takeback_declined') {
+    const btn = document.getElementById('btn-takeback');
+    if (btn) { btn.disabled = false; btn.textContent = '↩ Take Back'; }
+    showGameStatus('Takeback declined.', false);
+    setTimeout(() => updateTurnIndicator(), 2000);
+  }
+
+  if (msg.type === 'takeback') {
+    hideTakebackBar();
+    const btn = document.getElementById('btn-takeback');
+    if (btn) { btn.disabled = false; btn.textContent = '↩ Take Back'; }
+
+    // Pop exactly one move from local game and history
+    if (game.history().length > 0) {
+      game.undo();
+      sanHistory.pop();
+      fenHistory.pop();
+    }
+
+    myTurn = msg.turn === myColor;
+    viewingMove = -1;
+    renderMoveList();
+    refreshDests();
+    if (cg) cg.set({ fen: game.fen(), movable: { color: myTurn ? myColor : undefined, dests: toDests() } });
+    updateTurnIndicator();
+    showGameStatus('Takeback accepted.', false);
+    setTimeout(() => updateTurnIndicator(), 1500);
+  }
+
+
     document.getElementById('rematch-status').textContent = 'Opponent wants a rematch!';
     const rematchBtn = document.getElementById('btn-rematch');
     rematchBtn.textContent = 'Accept';
@@ -2006,6 +2082,10 @@ function onGameMessage(e) {
     game = new Chess();
         myTurn = myColor === 'white';
     document.getElementById('move-list').innerHTML = '';
+    sanHistory  = [];
+    fenHistory  = [];
+    viewingMove = -1;
+    hideTakebackBar();
     resetClockDisplay();
 
     const rwrap = document.getElementById('board-wrap');
@@ -2114,6 +2194,8 @@ function executeMove(source, target, promo) {
 // afterMove: called by chessground after drag or tap-to-move
 function afterMove(source, target) {
   if (!myTurn || gameOver) { cg.set({ fen: game.fen() }); return; }
+  // If player was reviewing history, snap back to live before moving
+  if (viewingMove !== -1) returnToLive();
   if (isPromotion(source, target)) {
     showPromotion(source, target, promo => executeMove(source, target, promo));
     return;
@@ -2215,19 +2297,100 @@ function showGameStatus(msg, highlight) {
   el.className = 'status-bar' + (highlight ? ' highlight' : '');
 }
 
+// ── Move list & board history ─────────────────────────────────────────────────
+var sanHistory    = [];   // SAN strings in order
+var fenHistory    = [];   // FEN after each move (index 0 = start)
+var viewingMove   = -1;  // -1 = live (latest position)
+
 function appendMove(uci) {
   if (!uci) return;
+
+  // Record FEN after this move (game already has it applied)
+  fenHistory.push(game.fen());
+
+  // Build SAN from UCI using a temp game replayed to previous position
+  var tempGame = new Chess();
+  var hist = game.history({ verbose: true });
+  var san = hist.length > 0 ? hist[hist.length - 1].san : uci;
+  sanHistory.push(san);
+
+  renderMoveList();
+  viewingMove = -1; // snap back to live
+  if (cg) cg.set({ fen: game.fen() });
+}
+
+function renderMoveList() {
   const list = document.getElementById('move-list');
-  const moveNum = Math.ceil(game.history().length / 2);
-  if (game.history().length % 2 === 1) {
-    const num = document.createElement('span');
-    num.textContent = moveNum + '.';
-    list.appendChild(num);
+  list.innerHTML = '';
+
+  for (var i = 0; i < sanHistory.length; i++) {
+    if (i % 2 === 0) {
+      const num = document.createElement('span');
+      num.textContent = (Math.floor(i / 2) + 1) + '.';
+      list.appendChild(num);
+    }
+    const mv = document.createElement('span');
+    mv.className = 'mv' + (viewingMove === i ? ' active' : '');
+    mv.textContent = sanHistory[i];
+    mv.dataset.idx = i;
+    mv.onclick = function() { jumpToMove(parseInt(this.dataset.idx)); };
+    list.appendChild(mv);
   }
-  const mv = document.createElement('span');
-  mv.textContent = uci + ' ';
-  list.appendChild(mv);
   list.scrollTop = list.scrollHeight;
+}
+
+function jumpToMove(idx) {
+  viewingMove = idx;
+  var fen = fenHistory[idx];
+  if (cg && fen) cg.set({ fen: fen, movable: { color: undefined } });
+  renderMoveList();
+
+  // Show a "back to live" hint if not at the latest move
+  if (idx < sanHistory.length - 1) {
+    showGameStatus('Viewing move ' + (idx + 1) + ' — click last move or make a move to return live', false);
+  }
+}
+
+function returnToLive() {
+  viewingMove = -1;
+  if (cg) {
+    cg.set({ fen: game.fen(), movable: { color: myColor, dests: toDests() } });
+  }
+  renderMoveList();
+}
+
+// ── Takeback ──────────────────────────────────────────────────────────────────
+function offerTakeback() {
+  if (gameOver) return;
+  // Can only offer takeback when it's the opponent's turn — meaning you just moved
+  if (myTurn) {
+    showGameStatus('You can only request a takeback after you have moved.', false);
+    return;
+  }
+  const btn = document.getElementById('btn-takeback');
+  if (btn) { btn.disabled = true; btn.textContent = '↩ Sent…'; }
+  sendGame({ type: 'takeback_offer' });
+  showGameStatus('Takeback offer sent — waiting for opponent…', false);
+}
+
+function acceptTakeback() {
+  hideTakebackBar();
+  sendGame({ type: 'takeback_accept' });
+}
+
+function declineTakeback() {
+  hideTakebackBar();
+  sendGame({ type: 'takeback_decline' });
+}
+
+function showTakebackBar() {
+  const bar = document.getElementById('takeback-bar');
+  if (bar) bar.classList.add('visible');
+}
+
+function hideTakebackBar() {
+  const bar = document.getElementById('takeback-bar');
+  if (bar) bar.classList.remove('visible');
 }
 
 function showOverlay(result, reason) {

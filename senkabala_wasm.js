@@ -39,6 +39,23 @@ class SenkabalaEngine {
       // Step 3: send the compiled module to the worker (transferable)
       this._worker.postMessage({ type: 'module', wasmModule });
 
+      // Step 4: fetch the Polyglot opening book and send to worker
+      // Book is only ~1-4MB and loads in the background — if unavailable,
+      // the worker simply falls through to the engine search (graceful degradation)
+      fetch('/book.bin')
+        .then(function(r) {
+          if (!r.ok) throw new Error('book not found');
+          return r.arrayBuffer();
+        })
+        .then(function(buf) {
+          // Transfer the ArrayBuffer — zero-copy, instantly available in worker
+          this._worker.postMessage({ type: 'book', bookData: buf }, [buf]);
+          console.log('[SenkabalaWASM] Opening book loaded');
+        }.bind(this))
+        .catch(function() {
+          console.log('[SenkabalaWASM] No opening book — engine search only');
+        });
+
     } catch(e) {
       console.warn('[SenkabalaWASM] Failed to start:', e);
       this._worker = null;

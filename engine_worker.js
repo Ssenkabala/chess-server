@@ -17,6 +17,7 @@ importScripts('/senkabala.js');
 let _module   = null;
 let _init     = null;
 let _bestMove = null;
+let _analyse  = null;
 let _ready    = false;
 
 // Parse and forward UCI info lines to the main thread
@@ -81,6 +82,7 @@ async function initWithModule(wasmModule) {
         });
         _init     = _module.cwrap('engine_init',      null,     []);
         _bestMove = _module.cwrap('engine_best_move', 'string', ['string', 'string', 'number']);
+        _analyse  = _module.cwrap('engine_analyse',   'string', ['string', 'string', 'number', 'number']);
         _init();
         _ready = true;
         self.postMessage({ type: 'ready' });
@@ -105,6 +107,28 @@ self.onmessage = function(e) {
         try {
             const movesStr = (msg.moves || []).join(' ');
             const move = _bestMove(msg.fen, movesStr, msg.movetime_ms);
+            self.postMessage({
+                type: 'result',
+                id:   msg.id,
+                move: (move && move !== '0000') ? move : null,
+            });
+        } catch(e) {
+            self.postMessage({ type: 'error', id: msg.id, message: String(e) });
+        }
+        return;
+    }
+
+    if (msg.type === 'analyse') {
+        // Multi-line analysis — uses engine_analyse() with configurable MultiPV.
+        // Info lines are emitted per-depth via the print/printErr hooks above.
+        if (!_ready) {
+            self.postMessage({ type: 'error', id: msg.id, message: 'Engine not ready' });
+            return;
+        }
+        try {
+            const movesStr = (msg.moves || []).join(' ');
+            const multipv  = msg.multipv || 3;
+            const move = _analyse(msg.fen, movesStr, msg.movetime_ms, multipv);
             self.postMessage({
                 type: 'result',
                 id:   msg.id,

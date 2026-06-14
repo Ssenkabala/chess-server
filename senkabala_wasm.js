@@ -80,32 +80,38 @@ class SenkabalaEngine {
   }
 
   bestMove(fen, moves = [], movetime = 1000) {
+    return this._search('search', fen, moves, movetime, {});
+  }
+
+  // Multi-line analysis — calls engine_analyse() in the worker with multipv lines.
+  // Info messages stream back per depth via _analysisInfoHandler.
+  analyse(fen, moves = [], movetime = 5000, multipv = 3) {
+    return this._search('analyse', fen, moves, movetime, { multipv });
+  }
+
+  _search(msgType, fen, moves, movetime, extra) {
     if (!this._worker) return Promise.reject(new Error('Worker not available'));
 
     if (!this._ready) {
-      return this.ready().then(() => this.bestMove(fen, moves, movetime));
+      return this.ready().then(() => this._search(msgType, fen, moves, movetime, extra));
     }
 
     const id = ++this._idSeq;
-    // Grace = 3s for WASM (runs locally, no network round-trip).
-    // If worker doesn't respond, reject so caller can fall back to server.
     const grace = movetime > 2000 ? 10000 : 3000;
     const timeoutMs = movetime + grace;
 
     return new Promise((resolve, reject) => {
-      // Build timer-aware handlers BEFORE registering in _pending
-      // so there is no window where the worker can resolve with the wrong handler.
       let timer;
       const wrappedResolve = (v) => { clearTimeout(timer); resolve(v); };
       const wrappedReject  = (e) => { clearTimeout(timer); reject(e);  };
 
       this._pending.set(id, { resolve: wrappedResolve, reject: wrappedReject });
-      this._worker.postMessage({ type: 'search', id, fen, moves, movetime_ms: movetime });
+      this._worker.postMessage({ type: msgType, id, fen, moves, movetime_ms: movetime, ...extra });
 
       timer = setTimeout(() => {
         if (this._pending.has(id)) {
           this._pending.delete(id);
-          console.warn(`[WASM] move timeout after ${timeoutMs}ms — falling back to server`);
+          console.warn(`[WASM] ${msgType} timeout after ${timeoutMs}ms — falling back to server`);
           reject(new Error('WASM timeout'));
         }
       }, timeoutMs);

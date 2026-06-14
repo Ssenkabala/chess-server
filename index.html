@@ -2311,7 +2311,7 @@ function analysePosition() {
   // ─── Dispatch ─────────────────────────────────────────────────────────────
   if (wasmEng && _wasmReady()) {
     wasmEng._analysisInfoHandler = onInfo;
-    wasmEng.bestMove(fen, [], 5000)   // 5s = deeper analysis than game moves
+    wasmEng.analyse(fen, [], 5000, 3)  // 3 candidate lines, 5s think
       .then(function(move) { onDone(move); })
       .catch(function()    { fallbackToServer(); });
   } else if (wasmEng) {

@@ -2020,13 +2020,11 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
 
                 int elapsed=(int)chrono::duration_cast<chrono::milliseconds>(
                     chrono::steady_clock::now()-searchStart).count();
-                // cout → Emscripten print() hook → worker forwards as 'info' message
-                cout<<"info depth "<<depth
+                cerr<<"info depth "<<depth
                     <<" multipv "<<(pvIdx+1)
                     <<" score cp "<<depthBestScore
                     <<" time "<<elapsed
                     <<" pv "<<moveStr(depthBest)<<"\n";
-                cout.flush();
             }
         } // end pvIdx loop
 
@@ -2428,6 +2426,55 @@ const char* engine_best_move(const char* fen_str,
     wasmTimerPreset = true;
     Move best = search(board, 9999999, 9999999, 1, 0, 0);
     wasmTimerPreset = false;
+
+    if (best != NULL_MOVE) {
+        std::string ms = moveStr(best);
+        strncpy(result, ms.c_str(), 7);
+        result[7] = '\0';
+    }
+    return result;
+}
+
+// ── Analysis export — same as engine_best_move but with configurable MultiPV ──
+// Used by the analysis tab only. Game moves always use engine_best_move (MultiPV=1).
+// multipv: number of lines to search (1–5). Each line is reported via cout info lines.
+EMSCRIPTEN_KEEPALIVE
+const char* engine_analyse(const char* fen_str,
+                            const char* moves_str,
+                            int movetime_ms,
+                            int multipv) {
+    if (!wasmInitDone) engine_init();
+
+    static char result[8];
+    result[0] = '\0';
+
+    memset(posHistory, 0, sizeof(posHistory));
+    memset(history,    0, sizeof(history));
+
+    Board board = parseFEN(std::string(fen_str));
+    if (moves_str && moves_str[0] != '\0') {
+        std::istringstream ss(moves_str);
+        std::string tok;
+        while (ss >> tok) {
+            Move m = parseMove(board, tok);
+            if (m == NULL_MOVE) break;
+            UndoInfo u;
+            if (!makeMove(board, m, u)) break;
+        }
+    }
+
+    // Set MultiPV for this search, restore to 1 after
+    int savedMultiPV = multiPVCount;
+    multiPVCount     = std::max(1, std::min(multipv, 5));
+
+    stopNow         = false;
+    ponderMove      = NULL_MOVE;
+    searchTimeMs    = std::max(10, movetime_ms);
+    wasmTimerPreset = true;
+    Move best = search(board, 9999999, 9999999, 1, 0, 0);
+    wasmTimerPreset = false;
+
+    multiPVCount = savedMultiPV;  // restore — never affects game searches
 
     if (best != NULL_MOVE) {
         std::string ms = moveStr(best);

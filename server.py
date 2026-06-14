@@ -2870,8 +2870,10 @@ async def game_ws(ws: WebSocket, game_id: str):
                     await send(opponent_ws, {"type": "takeback_declined"})
 
             elif msg_type == "rematch_offer":
-
-            elif msg_type == "rematch_accept":
+                game["rematch_offered_by"] = color
+                opponent_ws = game.get("black_game_ws") if color == "w" else game.get("white_game_ws")
+                if opponent_ws:
+                    await send(opponent_ws, {"type": "rematch_offer"})
                 old_white_profile = game["white_profile"]
                 old_black_profile = game["black_profile"]
                 old_white_ws      = game["white_ws"]
@@ -3837,11 +3839,15 @@ async def set_username(request: Request, authorization: str = Header(None)):
     if not is_admin and _is_reserved(username):
         raise HTTPException(400, "That username is reserved. Please choose a different name.")
 
+    # Normalise for uniqueness — store as-typed but check case-insensitively
+    # so 'Isa', 'isa', 'ISA' can't coexist
+    username_lower = username.lower()
+
     async with httpx.AsyncClient() as client:
-        # Check uniqueness
+        # Check uniqueness — case-insensitive so 'Isa' blocks 'isa' and 'ISA'
         check = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles",
-            params={"username": f"eq.{username}", "select": "user_id"},
+            params={"username": f"ilike.{username_lower}", "select": "user_id"},
             headers={"apikey": SUPABASE_SERVICE_KEY,
                      "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
@@ -3887,18 +3893,18 @@ async def set_username(request: Request, authorization: str = Header(None)):
     return {"ok": True}
 
 @app.post("/api/update-gender")
-async def update_gender(req: Request, user=Depends(verify_key)):
+async def update_gender(request: Request, authorization: str = Header(None)):
     """Update the authenticated user's gender (male/female/prefer_not_to_say)."""
-    body   = await req.json()
-    gender = body.get("gender", "")
+    user_id = await verify_jwt(authorization)
+    body    = await request.json()
+    gender  = body.get("gender", "")
     allowed = {"male", "female", "prefer_not_to_say"}
     if gender not in allowed:
         raise HTTPException(status_code=400, detail=f"gender must be one of {allowed}")
-    uid = user.user.id
     async with httpx.AsyncClient() as client:
         await client.patch(
             f"{SUPABASE_URL}/rest/v1/profiles",
-            params={"user_id": f"eq.{uid}"},
+            params={"user_id": f"eq.{user_id}"},
             headers={"apikey": SUPABASE_SERVICE_KEY,
                      "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                      "Content-Type": "application/json",

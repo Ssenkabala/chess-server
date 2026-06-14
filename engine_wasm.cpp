@@ -1637,11 +1637,21 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
         // accepting repetition when it's actually losing.
         if(rc >= 2) return 0;
         if(rc == 1) {
-            int contempt = (ply==1) ? -80 : (ply==2) ? -60 : (ply==3) ? -45 : (ply==4) ? -30 : -20;
+            // Contempt — engine should strongly avoid self-imposed draws.
+            // Values are deliberately high: a won position is worth 300-500cp,
+            // so contempt must exceed that to prevent the engine choosing repetition
+            // over a genuinely winning line.
+            //   ply 1: -300  (engine directly choosing to repeat — almost never acceptable)
+            //   ply 2: -200  (opponent's reply leads to repeat — still strongly avoid)
+            //   ply 3: -150
+            //   ply 4: -100
+            //   ply 5+: -60  (deep in tree — opponent may be forcing it)
+            //   rc>=2:   0   (third occurrence = draw by rule, must accept)
+            int contempt = (ply==1) ? -300 : (ply==2) ? -200 : (ply==3) ? -150 : (ply==4) ? -100 : -60;
             // Scale with static eval: penalise draw much harder when winning.
             int se = evaluate(b);
-            if (se > 100)  contempt -= (se - 100) / 3;   // much stronger penalty when winning
-            if (se < -150) contempt += (-se - 150) / 16;  // slight relief when losing
+            if (se > 100)  contempt -= (se - 100) / 2;   // stronger penalty when clearly winning
+            if (se < -200) contempt += (-se - 200) / 8;  // slight relief when clearly losing
             return contempt;
         }
     }
@@ -2426,55 +2436,6 @@ const char* engine_best_move(const char* fen_str,
     wasmTimerPreset = true;
     Move best = search(board, 9999999, 9999999, 1, 0, 0);
     wasmTimerPreset = false;
-
-    if (best != NULL_MOVE) {
-        std::string ms = moveStr(best);
-        strncpy(result, ms.c_str(), 7);
-        result[7] = '\0';
-    }
-    return result;
-}
-
-// ── Analysis export — same as engine_best_move but with configurable MultiPV ──
-// Used by the analysis tab only. Game moves always use engine_best_move (MultiPV=1).
-// multipv: number of lines to search (1–5). Each line is reported via cout info lines.
-EMSCRIPTEN_KEEPALIVE
-const char* engine_analyse(const char* fen_str,
-                            const char* moves_str,
-                            int movetime_ms,
-                            int multipv) {
-    if (!wasmInitDone) engine_init();
-
-    static char result[8];
-    result[0] = '\0';
-
-    memset(posHistory, 0, sizeof(posHistory));
-    memset(history,    0, sizeof(history));
-
-    Board board = parseFEN(std::string(fen_str));
-    if (moves_str && moves_str[0] != '\0') {
-        std::istringstream ss(moves_str);
-        std::string tok;
-        while (ss >> tok) {
-            Move m = parseMove(board, tok);
-            if (m == NULL_MOVE) break;
-            UndoInfo u;
-            if (!makeMove(board, m, u)) break;
-        }
-    }
-
-    // Set MultiPV for this search, restore to 1 after
-    int savedMultiPV = multiPVCount;
-    multiPVCount     = std::max(1, std::min(multipv, 5));
-
-    stopNow         = false;
-    ponderMove      = NULL_MOVE;
-    searchTimeMs    = std::max(10, movetime_ms);
-    wasmTimerPreset = true;
-    Move best = search(board, 9999999, 9999999, 1, 0, 0);
-    wasmTimerPreset = false;
-
-    multiPVCount = savedMultiPV;  // restore — never affects game searches
 
     if (best != NULL_MOVE) {
         std::string ms = moveStr(best);

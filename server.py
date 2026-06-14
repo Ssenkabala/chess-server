@@ -2881,21 +2881,23 @@ async def game_ws(ws: WebSocket, game_id: str):
                 if game.get("rematch_offered_by") and game["rematch_offered_by"] != color:
                     old_white_profile = game["white_profile"]
                     old_black_profile = game["black_profile"]
+                    old_tc            = game.get("time_control")
                     white_game_ws     = game.get("white_game_ws")
                     black_game_ws     = game.get("black_game_ws")
+                    # IDs for the new game — colors swap
+                    new_white_id = game.get("black_id", "?")
+                    new_black_id = game.get("white_id", "?")
 
                     new_game_id = uuid.uuid4().hex[:12]
                     # Colors swapped: old black becomes new white
-                    ng = new_game(new_game_id, black_game_ws, white_game_ws,
-                                  old_black_profile.get("username", "?") if old_black_profile else "?",
-                                  old_white_profile.get("username", "?") if old_white_profile else "?")
-                    ng["white_profile"]     = old_black_profile
-                    ng["black_profile"]     = old_white_profile
-                    ng["white_game_ws"]     = black_game_ws
-                    ng["black_game_ws"]     = white_game_ws
+                    ng = new_game(new_game_id, None, None,
+                                  new_white_id, new_black_id, old_tc)
+                    ng["white_profile"] = old_black_profile
+                    ng["black_profile"] = old_white_profile
+                    # white_game_ws / black_game_ws left as None — players connect fresh
                     active_games[new_game_id] = ng
 
-                    # Notify both players on their current game sockets
+                    # Notify both players — they reconnect via /ws/game/{new_game_id}
                     if black_game_ws:
                         await send(black_game_ws, {
                             "type": "rematch_start", "game_id": new_game_id, "color": "white"
@@ -2904,8 +2906,6 @@ async def game_ws(ws: WebSocket, game_id: str):
                         await send(white_game_ws, {
                             "type": "rematch_start", "game_id": new_game_id, "color": "black"
                         })
-                    asyncio.create_task(clock_loop(new_game_id))
-                    asyncio.create_task(first_move_timeout_loop(new_game_id))
                     asyncio.create_task(cleanup_game(game_id, delay=10))
 
             elif msg_type == "rematch_decline":

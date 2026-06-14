@@ -703,7 +703,7 @@ function drawMultiEloChart(tcHistories) {
 
   for (const [tc, style] of Object.entries(TC_STYLES)) {
     const pts = tcHistories[tc] || [];
-    if (pts.length < 2) continue;   // need at least 2 points to draw a line
+    if (pts.length < 1) continue;   // need at least 1 point
     hasAnyData = true;
 
     // Map date → elo; for dates where TC has no game, interpolate (null = gap)
@@ -715,12 +715,12 @@ function drawMultiEloChart(tcHistories) {
       data,
       borderColor:        style.color,
       backgroundColor:    'transparent',
-      borderWidth:        2,
+      borderWidth:        pts.length > 1 ? 2 : 0,   // no line for single point
       borderDash:         style.dash,
-      pointRadius:        3,
+      pointRadius:        pts.length > 1 ? 3 : 6,   // bigger dot if only one game
       pointBackgroundColor: style.color,
       tension:            0.3,
-      spanGaps:           false,   // don't connect across gaps
+      spanGaps:           false,
     });
   }
 
@@ -879,8 +879,14 @@ async function saveGender() {
     }
   } else {
     const data = await r.json().catch(() => ({}));
-    alert(data.detail || 'Failed to save gender.');
-    if (btn) btn.disabled = false;
+    const msg = data.detail || 'Failed to save gender.';
+    alert(msg);
+    // If already locked, reload profile to show correct locked state
+    if (msg.includes('locked')) {
+      setTimeout(() => loadProfile(), 500);
+    } else {
+      if (btn) btn.disabled = false;
+    }
   }
 }
 

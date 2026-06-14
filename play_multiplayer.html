@@ -2045,7 +2045,7 @@ function onGameMessage(e) {
     setTimeout(() => updateTurnIndicator(), 1500);
   }
 
-
+  if (msg.type === 'rematch_offer') {
     document.getElementById('rematch-status').textContent = 'Opponent wants a rematch!';
     const rematchBtn = document.getElementById('btn-rematch');
     rematchBtn.textContent = 'Accept';
@@ -2125,6 +2125,8 @@ function onGameMessage(e) {
       if (!gameOver) showGameStatus('Connection lost.');
     };
   }
+} // end onGameMessage
+
 function sendGame(obj) {
   if (gameWs && gameWs.readyState === WebSocket.OPEN) {
     gameWs.send(JSON.stringify(obj));

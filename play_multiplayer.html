@@ -2125,7 +2125,6 @@ function onGameMessage(e) {
       if (!gameOver) showGameStatus('Connection lost.');
     };
   }
-}
 function sendGame(obj) {
   if (gameWs && gameWs.readyState === WebSocket.OPEN) {
     gameWs.send(JSON.stringify(obj));

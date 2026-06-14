@@ -3904,32 +3904,43 @@ async def update_gender(request: Request, authorization: str = Header(None)):
     """Set the authenticated user's gender — locked after first save."""
     user_id = await verify_jwt(authorization)
     body    = await request.json()
-    gender  = body.get("gender", "")
+    gender  = (body.get("gender") or "").strip()
     allowed = {"male", "female", "prefer_not_to_say"}
+
     if gender not in allowed:
-        raise HTTPException(status_code=400, detail=f"gender must be one of {allowed}")
+        print(f"[gender] invalid value {gender!r} from {user_id}", flush=True)
+        raise HTTPException(status_code=400, detail=f"Invalid gender value. Must be one of: male, female, prefer_not_to_say")
 
     async with httpx.AsyncClient() as client:
-        # Check if already set — locked after first save
+        # Check if profile exists and if gender already set
         check = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles",
             params={"user_id": f"eq.{user_id}", "select": "gender"},
             headers={"apikey": SUPABASE_SERVICE_KEY,
                      "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
-        data = check.json()
-        if data and data[0].get("gender"):
+        rows = check.json()
+
+        # If profile exists and gender already set — locked
+        if rows and rows[0].get("gender"):
             raise HTTPException(status_code=400, detail="Gender is locked and cannot be changed.")
 
-        await client.patch(
-            f"{SUPABASE_URL}/rest/v1/profiles",
-            params={"user_id": f"eq.{user_id}"},
-            headers={"apikey": SUPABASE_SERVICE_KEY,
-                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                     "Content-Type": "application/json",
-                     "Prefer": "return=minimal"},
-            json={"gender": gender}
-        )
+        if rows:
+            # Profile exists, gender not set — patch it
+            await client.patch(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{user_id}"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json",
+                         "Prefer": "return=minimal"},
+                json={"gender": gender}
+            )
+        else:
+            # No profile row yet — shouldn't happen but handle gracefully
+            raise HTTPException(status_code=400, detail="Profile not found. Please set a username first.")
+
+    print(f"[gender] set {user_id} → {gender}", flush=True)
     return {"ok": True}
 
 

@@ -834,13 +834,15 @@ def analyse_position(fen: str, think_time: float, moves: list[str] | None = None
     raw_score = result["score_cp"]
     stm_score = -raw_score if board.turn == chess.BLACK else raw_score
 
-    # ── Pass 2: deep mate search if clearly winning (> +5 pawns) ─────────
-    # Threshold: 500cp. Skip if engine already returned a mate score (>900000).
-    WINNING_THRESHOLD = 500    # centipawns
+    # ── Pass 2: deep mate search if position looks winning ─────────────────
+    # Lower threshold: +100cp (not +500) — even a slight advantage warrants
+    # a deep mate search so forced mates like Qh3# aren't missed.
+    # Skip if engine already returned a mate score (>900000).
+    WINNING_THRESHOLD = 100     # centipawns — was 500, lowered to catch more mates
     MATE_SCORE_FLOOR  = 900000
 
     if stm_score > WINNING_THRESHOLD and abs(raw_score) < MATE_SCORE_FLOOR:
-        mate_ms = think_ms * 5   # 5× time for the deep pass (e.g. 2s → 10s)
+        mate_ms = max(think_ms * 8, 8000)  # at least 8s for mate search (was 5×)
         stdout2, stderr2 = _run_engine(pos_cmd, mate_ms)
         result2 = _parse_engine_output(stdout2, stderr2)
         # Use deep result if it found a move (it always should)

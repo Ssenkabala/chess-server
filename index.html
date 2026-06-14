@@ -641,52 +641,48 @@ global.Chessground = Nr;
       border-radius: 2px;
       letter-spacing: 0.05em;
     }
-    /* ── Candidate moves ── */
+    /* ── Analysis lines — Lichess style ── */
     .candidates-wrap {
       width: 100%;
       max-width: 480px;
-      background: #161616;
-      border: 1px solid #2a2a2a;
-      border-radius: 2px;
-      padding: 12px 14px;
       display: none;
+      margin: 4px 0 8px;
     }
     .candidates-wrap.visible { display: block; }
-    .candidates-label {
-      font-size: 10px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: #444;
-      margin-bottom: 10px;
-    }
+    .candidates-label { display: none; } /* hidden — no label needed */
     .candidate-row {
       display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 5px 0;
-      border-bottom: 1px solid #1e1e1e;
+      align-items: baseline;
+      gap: 8px;
+      padding: 3px 0;
+      border-bottom: 1px solid #1a1a1a;
+      font-family: monospace;
+      font-size: 13px;
+      line-height: 1.5;
     }
     .candidate-row:last-child { border-bottom: none; }
-    .candidate-rank {
-      font-size: 10px;
-      color: #444;
-      width: 16px;
-      text-align: right;
+    .candidate-rank { display: none; } /* no rank numbers */
+    .candidate-eval {
+      color: #00ff9d;
+      font-size: 13px;
+      min-width: 54px;
       flex-shrink: 0;
+      font-weight: 600;
     }
     .candidate-move {
-      font-family: monospace;
-      font-size: 14px;
-      color: #00ff9d;
-      width: 56px;
-      flex-shrink: 0;
-    }
-    .candidate-bar-wrap {
+      color: #ccc;
+      font-size: 13px;
       flex: 1;
-      height: 4px;
-      background: #222;
-      border-radius: 2px;
+      white-space: nowrap;
       overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .candidate-bar-wrap { display: none; } /* no bar — clean like Lichess */
+    .candidate-bar { display: none; }
+    .candidate-depth {
+      color: #444;
+      font-size: 11px;
+      flex-shrink: 0;
     }
     .candidate-bar {
       height: 100%;
@@ -1356,10 +1352,8 @@ global.Chessground = Nr;
     </div>
     <div class="eval-label" id="eval-label">—</div>
 
-    <!-- Continuation / mate line -->
-    <div id="a-pv-line" style="display:none;font-size:11px;color:#888;letter-spacing:0.04em;
-         padding:6px 10px;background:#0d0d0d;border-radius:4px;margin:4px 0 8px;
-         font-family:monospace;line-height:1.6;word-break:break-all;"></div>
+    <!-- Continuation line — hidden, PV shown inline in candidate rows -->
+    <div id="a-pv-line" style="display:none;"></div>
 
     <!-- Candidate moves -->
     <div class="candidates-wrap" id="candidates-wrap">
@@ -1546,18 +1540,18 @@ function renderCandidates(candidates) {
   if (!wrap || !list) return;
   wrap.classList.add('visible');
   list.innerHTML = '';
-  var maxEval = Math.max.apply(null, candidates.map(function(c) { return Math.abs(c.eval_pawns); }));
-  if (maxEval === 0) maxEval = 1;
-  candidates.forEach(function(c, i) {
+  candidates.forEach(function(c) {
     var sign   = c.eval_pawns >= 0 ? '+' : '';
-    var barPct = Math.min(100, (Math.abs(c.eval_pawns) / maxEval) * 100);
-    var row    = document.createElement('div');
+    var evalDisp = Math.abs(c.eval_pawns) >= 99
+      ? (c.eval_pawns > 0 ? '#' : '-#')
+      : sign + c.eval_pawns.toFixed(2);
+    var row = document.createElement('div');
     row.className = 'candidate-row';
+    // eval on left, SAN moves on right (server returns pv_san if available)
+    var moveLine = c.pv_san ? c.pv_san.join(' ') : (c.move || '');
     row.innerHTML =
-      '<span class="candidate-rank">' + (i+1) + '</span>' +
-      '<span class="candidate-move">' + c.move + '</span>' +
-      '<div class="candidate-bar-wrap"><div class="candidate-bar" style="width:' + barPct + '%"></div></div>' +
-      '<span class="candidate-eval">' + sign + c.eval_pawns.toFixed(2) + '</span>';
+      '<span class="candidate-eval">' + evalDisp + '</span>' +
+      '<span class="candidate-move">' + moveLine + '</span>';
     list.appendChild(row);
   });
 }  
@@ -2231,28 +2225,48 @@ function analysePosition() {
       pvEl.style.display = '';
     }
 
-    // Candidate moves panel — one row per multipv line
+    // Candidate moves panel — one row per multipv line, Lichess style
     var keys = Object.keys(infoLines).map(Number).sort(function(a,b){return a-b;});
     if (keys.length > 0 && list && wrap) {
       wrap.classList.add('visible');
       list.innerHTML = '';
-      var scores = keys.map(function(k) { return Math.abs(infoLines[k].score); });
-      var maxSc  = Math.max.apply(null, scores) || 1;
       keys.forEach(function(k) {
         var ln  = infoLines[k];
-        var s   = ln.score >= 0 ? '+' : '';
         var ev  = ln.isMate
-          ? (ln.score > 0 ? 'M' + Math.abs(Math.round(ln.score/100000))
-                          : '-M' + Math.abs(Math.round(ln.score/100000)))
-          : s + (ln.score / 100).toFixed(2);
-        var pct = Math.min(100, (Math.abs(ln.score) / maxSc) * 100);
+          ? (ln.score > 0 ? '#' + Math.abs(Math.round(ln.score/100000))
+                          : '-#' + Math.abs(Math.round(ln.score/100000)))
+          : (ln.score >= 0 ? '+' : '') + (ln.score / 100).toFixed(2);
+
+        // Translate full PV to SAN
+        var tempG = new Chess(fen);
+        var sanArr = [];
+        var pvLine = ln.pvLine || (ln.pvMove ? [ln.pvMove] : []);
+        for (var i = 0; i < Math.min(pvLine.length, 10); i++) {
+          var m = tempG.move({ from: pvLine[i].slice(0,2), to: pvLine[i].slice(2,4),
+                               promotion: pvLine[i][4] || 'q' });
+          if (!m) break;
+          sanArr.push(m.san);
+        }
+
+        // Build move number notation like Lichess: "1. e4 e5 2. Nf3..."
+        var mn = analysisGame.moveNumber ? analysisGame.moveNumber() : 1;
+        var isBlack = analysisGame.turn() === 'b';
+        var moveParts = [];
+        for (var j = 0; j < sanArr.length; j++) {
+          var globalMove = j + (isBlack ? 1 : 0);
+          if (globalMove % 2 === 0) {
+            moveParts.push((mn + Math.floor(globalMove / 2)) + '.');
+          }
+          moveParts.push(sanArr[j]);
+        }
+        if (isBlack && sanArr.length > 0) moveParts.unshift(mn + '...');
+
         var row = document.createElement('div');
         row.className = 'candidate-row';
         row.innerHTML =
-          '<span class="candidate-rank">' + k + '</span>' +
-          '<span class="candidate-move">' + (ln.pvMove || '?') + '</span>' +
-          '<div class="candidate-bar-wrap"><div class="candidate-bar" style="width:' + pct + '%"></div></div>' +
-          '<span class="candidate-eval">' + ev + '</span>';
+          '<span class="candidate-eval">' + ev + '</span>' +
+          '<span class="candidate-move">' + moveParts.join(' ') + '</span>' +
+          '<span class="candidate-depth">d' + ln.depth + '</span>';
         list.appendChild(row);
       });
     }
@@ -2278,7 +2292,7 @@ function analysePosition() {
     // Cache result so Coach Me can reuse it without re-running engine
     lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: lastLine.score || 0 };
 
-    setAnalysisStatus('Best: ' + finalMove + '  ·  Eval: ' + evalStr + '  ·  Use Coach Me for explanation.');
+    setAnalysisStatus('Eval: ' + evalStr + '  ·  Use Coach Me for explanation.');
     document.getElementById('btn-coach').disabled = false;
   }
 
@@ -2295,12 +2309,35 @@ function analysePosition() {
       if (data.detail) { setAnalysisStatus('Engine error: ' + data.detail); document.getElementById('btn-coach').disabled = false; return; }
       if (data.best_move) highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
       updateEvalBar(data.eval_pawns || 0);
-      var ev = data.mate_in != null ? '#' + Math.abs(data.mate_in)
-             : (data.eval_pawns >= 0 ? '+' : '') + (data.eval_pawns || 0).toFixed(2);
-      setAnalysisStatus('Best: ' + (data.best_move||'?') + '  ·  Eval: ' + ev + '  ·  Use Coach Me for explanation.');
-      if (pvEl && data.pv_san && data.pv_san.length > 0) {
-        var pp = []; for (var i=0;i<data.pv_san.length;i++){ if(i%2===0)pp.push((Math.floor(i/2)+1)+'.'); pp.push(data.pv_san[i]); }
-        pvEl.textContent = 'Server: ' + pp.join(' '); pvEl.style.display = '';
+      var ev = data.mate_in != null
+        ? (data.mate_in > 0 ? '#' + Math.abs(data.mate_in) : '-#' + Math.abs(data.mate_in))
+        : (data.eval_pawns >= 0 ? '+' : '') + (data.eval_pawns || 0).toFixed(2);
+      setAnalysisStatus('Eval: ' + ev);
+
+      // Render in candidate rows — same style as WASM live output
+      if (data.best_move && data.pv_san) {
+        var wrap2 = document.getElementById('candidates-wrap');
+        var list2 = document.getElementById('candidates-list');
+        if (wrap2 && list2) {
+          wrap2.classList.add('visible');
+          list2.innerHTML = '';
+          var row = document.createElement('div');
+          row.className = 'candidate-row';
+          // Build move number notation
+          var startMn = analysisGame.moveNumber ? analysisGame.moveNumber() : 1;
+          var isBlk   = analysisGame.turn() === 'b';
+          var pp = [];
+          if (isBlk && data.pv_san.length > 0) pp.push(startMn + '...');
+          for (var pi = 0; pi < data.pv_san.length; pi++) {
+            var gm = pi + (isBlk ? 1 : 0);
+            if (gm % 2 === 0) pp.push((startMn + Math.floor(gm/2)) + '.');
+            pp.push(data.pv_san[pi]);
+          }
+          row.innerHTML =
+            '<span class="candidate-eval">' + ev + '</span>' +
+            '<span class="candidate-move">' + pp.join(' ') + '</span>';
+          list2.appendChild(row);
+        }
       }
       renderCandidates(data.candidates);
       document.getElementById('btn-coach').disabled = false;

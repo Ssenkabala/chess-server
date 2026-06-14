@@ -1196,11 +1196,12 @@ global.Chessground = Nr;
   <!-- Load WASM engine only if browser supports it -->
   <script>
     if (window._wasmSupported) {
+      var _v = '?v=3';   // bump this whenever senkabala.js or senkabala_wasm.js changes
       var s1 = document.createElement('script');
-      s1.src = '/senkabala.js';
+      s1.src = '/senkabala.js' + _v;
       s1.onload = function() {
         var s2 = document.createElement('script');
-        s2.src = '/senkabala_wasm.js';
+        s2.src = '/senkabala_wasm.js' + _v;
         s2.onerror = function() {
           console.log('[bot] senkabala_wasm.js not found — using server /move');
         };

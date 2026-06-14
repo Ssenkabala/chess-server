@@ -12,7 +12,7 @@
  *   { type: 'info',   depth, score, time, pv, multipv }
  */
 
-importScripts('/senkabala.js');
+importScripts('/senkabala.js?v=3');
 
 let _module   = null;
 let _init     = null;

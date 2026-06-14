@@ -2170,63 +2170,100 @@ function analysePosition() {
   setAnalysisStatus('⏳ Engine analysing...');
   document.getElementById('btn-coach').disabled = true;
 
-  fetch(API_BASE + '/analyse-position', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fen: fen })
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.detail) {
-      setAnalysisStatus('Engine error: ' + data.detail);
-      document.getElementById('btn-coach').disabled = false;
-      return;
-    }
-    if (data.best_move) {
-      highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
-    }
+  var wasmEng = _ensureWasmEngine();
+
+  function renderAnalysis(bestMove, evalPawns, mateIn, pvSan) {
+    if (bestMove) highlightBestMove(bestMove.slice(0,2), bestMove.slice(2,4));
+
     var evalStr;
-    if (data.eval_pawns !== undefined) {
-      var abs = Math.abs(data.eval_pawns);
+    if (mateIn !== null && mateIn !== undefined) {
+      evalStr = '#' + Math.abs(mateIn);
+    } else if (evalPawns !== undefined && evalPawns !== null) {
+      var abs = Math.abs(evalPawns);
       if (abs >= 99) {
-        evalStr = data.eval_pawns > 0 ? '#' : '-#';
+        evalStr = evalPawns > 0 ? '#' : '-#';
       } else {
-        evalStr = (data.eval_pawns >= 0 ? '+' : '') + data.eval_pawns;
+        evalStr = (evalPawns >= 0 ? '+' : '') + evalPawns.toFixed(2);
       }
     } else {
       evalStr = '?';
     }
-    updateEvalBar(data.eval_pawns || 0);
-    // Show mate_in if available (more accurate than eval_pawns >= 99 check)
-    if (data.mate_in !== null && data.mate_in !== undefined) {
-      evalStr = '#' + Math.abs(data.mate_in);
-    }
-    setAnalysisStatus('Best move: ' + (data.best_move || '?') + '  |  Eval: ' + evalStr + '  |  Use Coach Me for explanation.');
 
-    // PV / mate line display
+    updateEvalBar(evalPawns || 0);
+    setAnalysisStatus('Best move: ' + (bestMove || '?') + '  |  Eval: ' + evalStr + '  |  Use Coach Me for explanation.');
+
     var pvEl = document.getElementById('a-pv-line');
-    if (pvEl && data.pv_san && data.pv_san.length > 0) {
+    if (pvEl && pvSan && pvSan.length > 0) {
       var pvParts = [];
-      for (var i = 0; i < data.pv_san.length; i++) {
+      for (var i = 0; i < pvSan.length; i++) {
         if (i % 2 === 0) pvParts.push((Math.floor(i/2) + 1) + '.');
-        pvParts.push(data.pv_san[i]);
+        pvParts.push(pvSan[i]);
       }
-      var lineLabel = (data.mate_in !== null && data.mate_in !== undefined)
-        ? 'Mate in ' + Math.abs(data.mate_in) + ': '
+      var lineLabel = (mateIn !== null && mateIn !== undefined)
+        ? 'Mate in ' + Math.abs(mateIn) + ': '
         : 'Continuation: ';
       pvEl.textContent  = lineLabel + pvParts.join(' ');
-      pvEl.style.color  = (data.mate_in !== null && data.mate_in !== undefined) ? '#d4af37' : '#666';
+      pvEl.style.color  = (mateIn !== null && mateIn !== undefined) ? '#d4af37' : '#666';
       pvEl.style.display = '';
     } else if (pvEl) {
       pvEl.style.display = 'none';
     }
+    document.getElementById('btn-coach').disabled = false;
+  }
 
-    document.getElementById('btn-coach').disabled = false;
-  })
-  .catch(() => {
-    setAnalysisStatus('Engine error — is the server running?');
-    document.getElementById('btn-coach').disabled = false;
-  });
+  function fallbackToServer() {
+    fetch(API_BASE + '/analyse-position', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fen: fen })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.detail) {
+        setAnalysisStatus('Engine error: ' + data.detail);
+        document.getElementById('btn-coach').disabled = false;
+        return;
+      }
+      renderAnalysis(data.best_move, data.eval_pawns, data.mate_in, data.pv_san);
+    })
+    .catch(function() {
+      setAnalysisStatus('Engine error — is the server running?');
+      document.getElementById('btn-coach').disabled = false;
+    });
+  }
+
+  if (wasmEng && _wasmReady()) {
+    // WASM path — run engine locally, build SAN line via chess.js
+    wasmEng.bestMove(fen, [], 2000)
+      .then(function(uciMove) {
+        if (!uciMove) { fallbackToServer(); return; }
+
+        // Get eval by asking for the position score
+        // Build a minimal PV by playing the best move and showing it
+        var tempGame = new Chess(fen);
+        var move = tempGame.move({ from: uciMove.slice(0,2), to: uciMove.slice(2,4), promotion: uciMove[4] || 'q' });
+        var pvSan = move ? [move.san] : [];
+
+        // Estimate eval from engine internal — WASM bestMove doesn't return eval,
+        // so fetch eval from a lightweight server call without engine (just FEN scoring)
+        // For now use 0 eval and let coach provide the explanation
+        renderAnalysis(uciMove, null, null, pvSan);
+        setAnalysisStatus('Best move: ' + uciMove + '  |  Use Coach Me for full evaluation.');
+      })
+      .catch(function() {
+        fallbackToServer();
+      });
+  } else if (wasmEng) {
+    // Engine still loading — wait then try
+    setAnalysisStatus('⏳ Loading engine...');
+    wasmEng.ready().then(function() {
+      analysePosition();
+    }).catch(function() {
+      fallbackToServer();
+    });
+  } else {
+    fallbackToServer();
+  }
 }
 
 function getCoaching() {
@@ -2242,37 +2279,72 @@ function getCoaching() {
   document.getElementById('btn-coach').disabled = true;
   resetCoachCard();
 
-  fetch(API_BASE + '/coach-free', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fen: fen, user_id: currentUser.id, think_time: 1.0 })
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.detail) {
-      setAnalysisStatus('⚠ ' + data.detail);
+  var wasmEng = _ensureWasmEngine();
+
+  function requestCoach(bestMove, evalPawns) {
+    // Send to server — if WASM provided best_move + eval_pawns, server skips
+    // the engine pool entirely and goes straight to Claude AI explanation
+    var body = {
+      fen: fen,
+      user_id: currentUser.id,
+      think_time: 1.0,
+    };
+    if (bestMove) { body.best_move = bestMove; body.eval_pawns = evalPawns; }
+
+    fetch(API_BASE + '/coach-free', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.detail) {
+        setAnalysisStatus('⚠ ' + data.detail);
+        document.getElementById('btn-coach').disabled = false;
+        return;
+      }
+      if (data.uses_remaining !== undefined) {
+        var usageEl = document.getElementById('coach-usage-label');
+        if (usageEl) usageEl.textContent = data.uses_remaining + ' coach uses left today';
+      }
+      if (data.best_move) {
+        highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
+      }
+      updateEvalBar(data.eval_pawns || evalPawns || 0);
+      parseAndRenderCoaching(data.coaching, data.best_move || bestMove, data.eval_pawns || evalPawns);
+      setAnalysisStatus('Analysis complete.');
       document.getElementById('btn-coach').disabled = false;
-      return;
-    }
+    })
+    .catch(function() {
+      setAnalysisStatus('Coach unavailable — try again.');
+      document.getElementById('btn-coach').disabled = false;
+    });
+  }
 
-    // Update usage display
-    if (data.uses_remaining !== undefined) {
-      var usageEl = document.getElementById('coach-usage-label');
-      if (usageEl) usageEl.textContent = data.uses_remaining + ' coach uses left today';
-    }
-
-    if (data.best_move) {
-      highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
-    }
-    updateEvalBar(data.eval_pawns || 0);
-    parseAndRenderCoaching(data.coaching, data.best_move, data.eval_pawns);
-    setAnalysisStatus('Analysis complete.');
-    document.getElementById('btn-coach').disabled = false;
-  })
-  .catch(() => {
-    setAnalysisStatus('Coach unavailable — try again.');
-    document.getElementById('btn-coach').disabled = false;
-  });
+  if (wasmEng && _wasmReady()) {
+    // WASM: get best move locally, then send to server for AI explanation only
+    wasmEng.bestMove(fen, [], 2000)
+      .then(function(uciMove) {
+        if (!uciMove) { requestCoach(null, null); return; }
+        // Use 0.0 eval — server's Claude explanation doesn't need a precise number,
+        // just the best move. The explanation is qualitative not quantitative.
+        requestCoach(uciMove, 0.0);
+      })
+      .catch(function() {
+        // WASM failed — let server do both engine + explanation
+        requestCoach(null, null);
+      });
+  } else if (wasmEng) {
+    setAnalysisStatus('<span class="spinner"></span> Loading engine...');
+    wasmEng.ready().then(function() {
+      getCoaching();
+    }).catch(function() {
+      requestCoach(null, null);
+    });
+  } else {
+    // No WASM — full server path
+    requestCoach(null, null);
+  }
 }
 
 function parseAndRenderCoaching(text, bestMove, evalPawns) {

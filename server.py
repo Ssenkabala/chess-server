@@ -2911,6 +2911,9 @@ class FreeCoachRequest(BaseModel):
     pgn: Optional[str] = None
     user_id: str
     think_time: float = 0.5
+    # Optional: client can pre-compute these via WASM to skip server engine pool
+    best_move: Optional[str] = None
+    eval_pawns: Optional[float] = None
 
 FREE_COACH_LIMIT = 10  # free tier daily limit (kept for legacy refs)
 
@@ -2979,15 +2982,25 @@ async def coach_free(req: FreeCoachRequest):
             json={"coach_uses_today": uses_today + 1, "coach_reset_date": today}
         )
 
-    # Run analysis — use semaphore and run in thread to avoid blocking event loop
-    try:
-        async with engine_semaphore:
-            loop = asyncio.get_event_loop()
-            analysis = await loop.run_in_executor(None, analyse_position, req.fen, req.think_time)
-    except Exception as e:
-        import traceback
-        print(f"coach-free engine error: {traceback.format_exc()}", flush=True)
-        raise HTTPException(500, f"Engine error: {e}")
+    # Run analysis — skip if client already sent pre-computed WASM result
+    if req.best_move and req.eval_pawns is not None:
+        # Client ran WASM locally — use those results directly, no engine pool needed
+        analysis = {
+            "best_move":  req.best_move,
+            "score_cp":   int(req.eval_pawns * 100),
+            "pv":         [req.best_move],
+            "pv_san":     [],
+            "mate_in":    None,
+        }
+    else:
+        try:
+            async with engine_semaphore:
+                loop = asyncio.get_event_loop()
+                analysis = await loop.run_in_executor(None, analyse_position, req.fen, req.think_time)
+        except Exception as e:
+            import traceback
+            print(f"coach-free engine error: {traceback.format_exc()}", flush=True)
+            raise HTTPException(500, f"Engine error: {e}")
 
     score_pawns = round(analysis["score_cp"] / 100, 2)
 

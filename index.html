@@ -2195,37 +2195,6 @@ function analysePosition() {
     if (mpv === 1 && pvMove) bestMoveInfo = pvMove;
     infoLines[mpv] = { depth: depth, score: score, pvLine: pvLine, pvMove: pvMove, isMate: isMate };
 
-    // Status bar — current depth + eval
-    var evalStr = isMate
-      ? (score > 0 ? 'Mate in ' + Math.abs(Math.round(score / 100000))
-                   : '-Mate in ' + Math.abs(Math.round(score / 100000)))
-      : (score >= 0 ? '+' : '') + (score / 100).toFixed(2);
-    setAnalysisStatus('🔍 Depth ' + depth + '  ·  Eval: ' + evalStr + '  ·  ' + (pvMove || '…'));
-
-    // PV line — translate UCI moves to SAN using chess.js
-    if (pvEl && pvLine.length > 0) {
-      var tempG   = new Chess(fen);
-      var sanArr  = [];
-      for (var i = 0; i < Math.min(pvLine.length, 10); i++) {
-        var m = tempG.move({ from: pvLine[i].slice(0,2), to: pvLine[i].slice(2,4),
-                             promotion: pvLine[i][4] || 'q' });
-        if (!m) break;
-        sanArr.push(m.san);
-      }
-      var pvParts = [];
-      var mn = analysisGame.moveNumber ? analysisGame.moveNumber() : 1;
-      var isBlack = analysisGame.turn() === 'b';
-      for (var j = 0; j < sanArr.length; j++) {
-        var needsNum = (j === 0) || ((j + (isBlack ? 1 : 0)) % 2 === 0);
-        if (j === 0 && isBlack)      pvParts.push(mn + '…');
-        else if (needsNum)            pvParts.push((mn + Math.floor((j + (isBlack?1:0)) / 2)) + '.');
-        pvParts.push(sanArr[j]);
-      }
-      pvEl.textContent  = 'Depth ' + depth + ': ' + pvParts.join(' ');
-      pvEl.style.color  = '#888';
-      pvEl.style.display = '';
-    }
-
     // Candidate moves panel — one row per multipv line, Lichess style
     var keys = Object.keys(infoLines).map(Number).sort(function(a,b){return a-b;});
     if (keys.length > 0 && list && wrap) {
@@ -2233,10 +2202,19 @@ function analysePosition() {
       list.innerHTML = '';
       keys.forEach(function(k) {
         var ln  = infoLines[k];
-        var ev  = ln.isMate
-          ? (ln.score > 0 ? '#' + Math.abs(Math.round(ln.score/100000))
-                          : '-#' + Math.abs(Math.round(ln.score/100000)))
-          : (ln.score >= 0 ? '+' : '') + (ln.score / 100).toFixed(2);
+        var absScore = Math.abs(ln.score);
+        var ev;
+        // Mate detection: engine uses 999000 - ply for mate scores
+        // isMate flag uses 100000 sentinel — also catch large raw cp scores
+        if (ln.isMate || absScore >= 90000) {
+          // Real mate: score is 999000 - ply, so mate in N = ceil((999000 - absScore + 1) / 2)
+          var mateN = absScore >= 900000
+            ? Math.ceil((999000 - absScore + 1) / 2)
+            : Math.abs(Math.round(ln.score / 100000));
+          ev = ln.score > 0 ? '#' + mateN : '-#' + mateN;
+        } else {
+          ev = (ln.score >= 0 ? '+' : '') + (ln.score / 100).toFixed(2);
+        }
 
         // Translate full PV to SAN
         var tempG = new Chess(fen);
@@ -2249,18 +2227,16 @@ function analysePosition() {
           sanArr.push(m.san);
         }
 
-        // Build move number notation like Lichess: "1. e4 e5 2. Nf3..."
+        // Build move number notation: "1. e4 e5 2. Nf3..."
         var mn = analysisGame.moveNumber ? analysisGame.moveNumber() : 1;
         var isBlack = analysisGame.turn() === 'b';
         var moveParts = [];
+        if (isBlack && sanArr.length > 0) moveParts.push(mn + '…');
         for (var j = 0; j < sanArr.length; j++) {
           var globalMove = j + (isBlack ? 1 : 0);
-          if (globalMove % 2 === 0) {
-            moveParts.push((mn + Math.floor(globalMove / 2)) + '.');
-          }
+          if (globalMove % 2 === 0) moveParts.push((mn + Math.floor(globalMove / 2)) + '.');
           moveParts.push(sanArr[j]);
         }
-        if (isBlack && sanArr.length > 0) moveParts.unshift(mn + '...');
 
         var row = document.createElement('div');
         row.className = 'candidate-row';
@@ -2270,6 +2246,18 @@ function analysePosition() {
           '<span class="candidate-depth">d' + ln.depth + '</span>';
         list.appendChild(row);
       });
+
+      // Update status bar — just depth, quietly
+      var topLine = infoLines[1] || {};
+      var absTop = Math.abs(topLine.score || 0);
+      var evTop;
+      if (topLine.isMate || absTop >= 90000) {
+        var mN = absTop >= 900000 ? Math.ceil((999000 - absTop + 1) / 2) : Math.abs(Math.round((topLine.score||0)/100000));
+        evTop = (topLine.score > 0 ? '#' : '-#') + mN;
+      } else {
+        evTop = (topLine.score >= 0 ? '+' : '') + ((topLine.score||0) / 100).toFixed(2);
+      }
+      setAnalysisStatus('Depth ' + depth + '  ·  ' + evTop);
     }
   }
 
@@ -2286,9 +2274,15 @@ function analysePosition() {
     var lastLine  = infoLines[1] || {};
     var evalPawns = lastLine.score != null ? lastLine.score / 100 : null;
     updateEvalBar(evalPawns || 0);
-    var evalStr = lastLine.isMate
-      ? '#' + Math.abs(Math.round((lastLine.score||0)/100000))
-      : evalPawns != null ? (evalPawns >= 0 ? '+' : '') + evalPawns.toFixed(2) : '?';
+    var absLast = Math.abs(lastLine.score || 0);
+    var evalStr;
+    if (lastLine.isMate || absLast >= 90000) {
+      var mateN = absLast >= 900000 ? Math.ceil((999000 - absLast + 1) / 2) : Math.abs(Math.round((lastLine.score||0)/100000));
+      evalStr = (lastLine.score > 0 ? '#' : '-#') + mateN;
+      updateEvalBar(lastLine.score > 0 ? 100 : -100);
+    } else {
+      evalStr = evalPawns != null ? (evalPawns >= 0 ? '+' : '') + evalPawns.toFixed(2) : '?';
+    }
 
     // Cache result so Coach Me can reuse it without re-running engine
     lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: lastLine.score || 0 };

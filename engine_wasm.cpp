@@ -1445,6 +1445,7 @@ atomic<bool> stopNow{false};
 bool wasmTimerPreset = false;
 atomic<bool> pondering{false};  // true while pondering (infinite search until "stop")
 Move ponderMove = NULL_MOVE;    // the expected opponent reply we're pondering on
+int  multiPVCount = 1;          // UCI MultiPV option — how many best moves to report
 
 // Search runs in a background thread so the UCI loop stays responsive
 // to "stop" and "ponderhit" commands during pondering.
@@ -1900,106 +1901,134 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
     Move bestMove=NULL_MOVE;
     int  bestScore=0;
 
+    // ----------------------------------------------------------------
+    // ROOT MOVE LIST — persists across depths, carries per-move scores
+    // ----------------------------------------------------------------
+    struct RootMove { Move m; int score; };
+    vector<RootMove> rootMoves;
+    {
+        MoveList ml; genMoves(b, ml);
+        sortMoves(b, ml, NULL_MOVE, 0);
+        for(int i = 0; i < ml.n; i++){
+            UndoInfo u;
+            if(makeMove(b, ml.m[i], u)){ unmakeMove(b, ml.m[i], u); rootMoves.push_back({ml.m[i], 0}); }
+        }
+    }
+
     for(int depth=1; depth<=64; depth++){
-        // Generate all root moves once per depth
-        MoveList ml; genMoves(b,ml);
-        // Order root moves: put previous bestMove first
-        sortMoves(b, ml, bestMove, 0);
 
-        int  depthBestScore=-INF;
-        Move depthBest=NULL_MOVE;
-        int  alpha=-INF, beta=INF;
+        // Sort root moves by score from previous depth (best first)
+        if(depth > 1)
+            stable_sort(rootMoves.begin(), rootMoves.end(),
+                [](const RootMove& a, const RootMove& b){ return a.score > b.score; });
 
-        // Aspiration windows from depth 4+
-        if(depth>=4){
-            alpha=max(-INF, bestScore-50);
-            beta =min( INF, bestScore+50);
-        }
+        // MultiPV loop — each iteration finds the next-best root move
+        vector<Move> excluded;
+        int pvLimit = min(multiPVCount, (int)rootMoves.size());
 
-        bool research=false;
-        do {
-            research=false;
-            depthBestScore=-INF;
-            depthBest=NULL_MOVE;
+        for(int pvIdx = 0; pvIdx < pvLimit; pvIdx++){
 
-            for(int i=0;i<ml.n;i++){
-                UndoInfo u;
-                if(!makeMove(b,ml.m[i],u)) continue;
-                // At root: if this move causes immediate threefold repetition,
-                // assign it a heavy penalty instead of searching further.
-                // This prevents the engine from walking into a draw when winning.
-                int sc;
-                if(repetitionCount(b) >= 2) {
-                    // Third repetition — this move draws immediately.
-                    // Accept only if every other move also loses badly.
-                    sc = -200 + depth; // heavy penalty, never preferred over any winning move
-                    unmakeMove(b,ml.m[i],u);
-                    if(sc>depthBestScore){ depthBestScore=sc; depthBest=ml.m[i]; }
-                    continue;
-                }
-                if(depthBest==NULL_MOVE)
-                    sc=-negamax(b,depth-1,-beta,-alpha,1);  // full window for first move
-                else {
-                    sc=-negamax(b,depth-1,-alpha-1,-alpha,1); // null window
-                    if(sc>alpha && sc<beta && !stopNow)
-                        sc=-negamax(b,depth-1,-beta,-alpha,1); // re-search
-                }
-                unmakeMove(b,ml.m[i],u);
-                if(stopNow) goto done;
-                if(sc>depthBestScore){ depthBestScore=sc; depthBest=ml.m[i]; }
-                if(sc>alpha) alpha=sc;
-                if(alpha>=beta) break;
+            int prevScore = rootMoves[pvIdx].score;
+            int alpha = -INF, beta = INF;
+            if(depth >= 4){
+                alpha = max(-INF, prevScore - 50);
+                beta  = min( INF, prevScore + 50);
             }
 
-            // Aspiration window widening
-            if(depth>=4){
-                if(depthBestScore<=alpha-50){ alpha=max(-INF,alpha-100); research=true; }
-                else if(depthBestScore>=beta+50){ beta=min(INF,beta+100);  research=true; }
-            }
-        } while(research && !stopNow);
+            Move depthBest      = NULL_MOVE;
+            int  depthBestScore = -INF;
+            bool research       = false;
 
-        done:
-        if(!stopNow && depthBest!=NULL_MOVE){
-            // Instability extension: if score drops significantly from previous depth,
-            // spend more time searching, but cap tightly relative to base time only.
-            // Old cap was timeMs/6 which allowed 100s on a 10-min game.
-            if(depth > 4 && bestMove != NULL_MOVE) {
-#ifdef __EMSCRIPTEN__
-                // In WASM, never extend beyond the preset movetime.
-                // The caller (JS) controls timing — extensions cause unpredictable delays.
-                if (wasmTimerPreset) {
-                    searchTimeMs = baseTime;  // no extension
-                } else {
-#endif
-                int scoreDrop = bestScore - depthBestScore;
-                int extCap1 = isBullet ? baseTime + 1500 : baseTime + 5000;
-                int extCap2 = isBullet ? baseTime + 800  : baseTime + 3000;
-                if(scoreDrop > 30)       searchTimeMs = min(baseTime*3, extCap1);
-                else if(scoreDrop > 15)  searchTimeMs = min(baseTime*2, extCap2);
-                else                     searchTimeMs = baseTime;
-#ifdef __EMSCRIPTEN__
-                }
-#endif
-            }
-            bestMove  = depthBest;
-            bestScore = depthBestScore;
-            // Record ponder move: make bestMove, take first reply
-            {
-                UndoInfo pu; Board pb=b;
-                if(makeMove(pb,bestMove,pu)){
-                    MoveList pml; genMoves(pb,pml);
-                    ponderMove=NULL_MOVE;
-                    for(int pi=0;pi<pml.n;pi++){
-                        UndoInfo pu2; if(makeMove(pb,pml.m[pi],pu2)){ponderMove=pml.m[pi];unmakeMove(pb,pml.m[pi],pu2);break;}
+            do {
+                research       = false;
+                depthBest      = NULL_MOVE;
+                depthBestScore = -INF;
+
+                for(auto& rm : rootMoves){
+                    bool skip = false;
+                    for(Move ex : excluded) if(rm.m == ex){ skip=true; break; }
+                    if(skip) continue;
+
+                    UndoInfo u;
+                    if(!makeMove(b, rm.m, u)) continue;
+
+                    int sc;
+                    if(repetitionCount(b) >= 2){
+                        sc = -200 + depth;
+                        unmakeMove(b, rm.m, u);
+                        if(sc > depthBestScore){ depthBestScore = sc; depthBest = rm.m; }
+                        continue;
                     }
-                    unmakeMove(pb,bestMove,pu);
+                    if(depthBest == NULL_MOVE)
+                        sc = -negamax(b, depth-1, -beta, -alpha, 1);
+                    else {
+                        sc = -negamax(b, depth-1, -alpha-1, -alpha, 1);
+                        if(sc > alpha && sc < beta && !stopNow)
+                            sc = -negamax(b, depth-1, -beta, -alpha, 1);
+                    }
+                    unmakeMove(b, rm.m, u);
+                    if(stopNow) goto done;
+                    if(sc > depthBestScore){ depthBestScore = sc; depthBest = rm.m; }
+                    if(sc > alpha) alpha = sc;
+                    if(alpha >= beta) break;
                 }
+
+                if(depth >= 4){
+                    if(depthBestScore <= alpha - 50){ alpha = max(-INF, alpha-100); research = true; }
+                    else if(depthBestScore >= beta + 50){ beta = min(INF, beta+100); research = true; }
+                }
+            } while(research && !stopNow);
+
+            done:
+            if(!stopNow && depthBest != NULL_MOVE){
+                for(auto& rm : rootMoves) if(rm.m == depthBest){ rm.score = depthBestScore; break; }
+                excluded.push_back(depthBest);
+
+                if(pvIdx == 0){
+#ifdef __EMSCRIPTEN__
+                    if (wasmTimerPreset) {
+                        searchTimeMs = baseTime;  // no instability extension in WASM
+                    } else {
+#endif
+                    if(depth > 4 && bestMove != NULL_MOVE){
+                        int scoreDrop = bestScore - depthBestScore;
+                        int extCap1 = isBullet ? baseTime + 1500 : baseTime + 5000;
+                        int extCap2 = isBullet ? baseTime + 800  : baseTime + 3000;
+                        if(scoreDrop > 30)      searchTimeMs = min(baseTime*3, extCap1);
+                        else if(scoreDrop > 15) searchTimeMs = min(baseTime*2, extCap2);
+                        else                    searchTimeMs = baseTime;
+                    }
+#ifdef __EMSCRIPTEN__
+                    }
+#endif
+                    bestMove  = depthBest;
+                    bestScore = depthBestScore;
+                    // Ponder move
+                    {
+                        UndoInfo pu; Board pb = b;
+                        if(makeMove(pb, bestMove, pu)){
+                            MoveList pml; genMoves(pb, pml);
+                            ponderMove = NULL_MOVE;
+                            for(int pi = 0; pi < pml.n; pi++){
+                                UndoInfo pu2;
+                                if(makeMove(pb,pml.m[pi],pu2)){ ponderMove=pml.m[pi]; unmakeMove(pb,pml.m[pi],pu2); break; }
+                            }
+                            unmakeMove(pb, bestMove, pu);
+                        }
+                    }
+                }
+
+                int elapsed=(int)chrono::duration_cast<chrono::milliseconds>(
+                    chrono::steady_clock::now()-searchStart).count();
+                // cout → Emscripten print() hook → worker forwards as 'info' message
+                cout<<"info depth "<<depth
+                    <<" multipv "<<(pvIdx+1)
+                    <<" score cp "<<depthBestScore
+                    <<" time "<<elapsed
+                    <<" pv "<<moveStr(depthBest)<<"\n";
+                cout.flush();
             }
-            int elapsed=(int)chrono::duration_cast<chrono::milliseconds>(
-                chrono::steady_clock::now()-searchStart).count();
-            cerr<<"info depth "<<depth<<" score cp "<<bestScore
-                <<" time "<<elapsed<<" pv "<<moveStr(bestMove)<<"\n";
-        }
+        } // end pvIdx loop
 
         int elapsed=(int)chrono::duration_cast<chrono::milliseconds>(
             chrono::steady_clock::now()-searchStart).count();
@@ -2008,9 +2037,9 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
 
     // Safety net
     if(bestMove==NULL_MOVE){
-        MoveList ml; genMoves(b,ml);
-        for(int i=0;i<ml.n;i++){
-            UndoInfo u; if(makeMove(b,ml.m[i],u)){unmakeMove(b,ml.m[i],u);bestMove=ml.m[i];break;}
+        for(auto& rm : rootMoves){
+            UndoInfo u;
+            if(makeMove(b, rm.m, u)){ unmakeMove(b, rm.m, u); bestMove = rm.m; break; }
         }
     }
     return bestMove;
@@ -2138,9 +2167,10 @@ int main(){
 
         if(cmd=="uci"){
             cout<<"id name SenkabalaIII v20\n"
-                <<"id author Senkabala\n"
+                <<"id author Isa Ssenkabala\n"
                 <<"option name SyzygyPath type string default\n"
                 <<"option name Hash type spin default 128 min 1 max 1024\n"
+                <<"option name MultiPV type spin default 1 min 1 max 5\n"
                 <<"uciok\n";
         }
         else if(cmd=="isready"){
@@ -2177,6 +2207,9 @@ int main(){
             }
             else if(name=="Hash"){
                 // Could resize TT here — for now ignore
+            }
+            else if(name=="MultiPV"){
+                if(!value.empty()) multiPVCount = max(1, min(5, stoi(value)));
             }
         }
         else if(cmd=="ucinewgame"){

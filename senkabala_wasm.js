@@ -55,8 +55,10 @@ class SenkabalaEngine {
     }
 
     if (msg.type === 'info') {
-      // Uncomment to show search depth in console:
-      // console.log(`[engine] depth ${msg.depth} time ${msg.time}ms pv ${msg.pv}`);
+      // Forward live depth/eval/pv data to whoever is listening (e.g. analysePosition)
+      if (typeof this._analysisInfoHandler === 'function') {
+        this._analysisInfoHandler(msg);
+      }
       return;
     }
 

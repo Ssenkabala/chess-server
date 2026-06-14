@@ -2093,6 +2093,8 @@ renderBar('pieces-player',   captured[bottomColor], diffOpp > 0 ? diffOpp : 0, b
 // ══════════════════════════════════════════════════════════════
 var analysisGame = new Chess();
 var analysisCg = null;
+// Cache the most recent analysis result so Coach Me can reuse it without re-running the engine
+var lastAnalysisResult = null;  // { fen, bestMove, evalCp }  — set by analysePosition on completion
 var _autoAnalyseTimer = null;
 
 function setAnalysisStatus(msg) {
@@ -2114,6 +2116,7 @@ function initAnalysisBoard() {
             var move = analysisGame.move({ from: source, to: target, promotion: 'q' });
             if (move === null) { analysisCg.set({ fen: analysisGame.fen() }); return; }
             analysisCg.set({ fen: analysisGame.fen(), lastMove: [source, target] });
+            lastAnalysisResult = null;  // position changed — invalidate cache
             resetCoachCard();
             clearBestMoveHighlight();
             scheduleAutoAnalyse();
@@ -2132,6 +2135,7 @@ function initAnalysisBoard() {
 
 function loadFen() {
   if (!analysisCg) initAnalysisBoard();
+  lastAnalysisResult = null;  // position changed — invalidate cache
 
   var fen = document.getElementById('fen-input').value.trim();
   if (!fen) {
@@ -2170,48 +2174,117 @@ function analysePosition() {
   setAnalysisStatus('⏳ Engine analysing...');
   document.getElementById('btn-coach').disabled = true;
 
+  // Clear previous results
+  var pvEl  = document.getElementById('a-pv-line');
+  var wrap  = document.getElementById('candidates-wrap');
+  var list  = document.getElementById('candidates-list');
+  if (pvEl)  { pvEl.textContent = ''; pvEl.style.display = 'none'; }
+  if (wrap)  wrap.classList.remove('visible');
+  if (list)  list.innerHTML = '';
+
   var wasmEng = _ensureWasmEngine();
+  var analysisActive = true;
+  var infoLines      = {};        // multipv index → latest line
+  var bestMoveInfo   = null;      // best move from deepest info line
 
-  function renderAnalysis(bestMove, evalPawns, mateIn, pvSan) {
-    if (bestMove) highlightBestMove(bestMove.slice(0,2), bestMove.slice(2,4));
+  // ─── Live info handler — fires on every depth completion ──────────────────
+  function onInfo(msg) {
+    if (!analysisActive) return;
+    var depth  = msg.depth;
+    var score  = msg.score;       // centipawns (or mate sentinel)
+    var pvMove = msg.pv;
+    var pvLine = msg.pvLine || (pvMove ? [pvMove] : []);
+    var mpv    = msg.multipv || 1;
+    var isMate = msg.isMate;
 
-    var evalStr;
-    if (mateIn !== null && mateIn !== undefined) {
-      evalStr = '#' + Math.abs(mateIn);
-    } else if (evalPawns !== undefined && evalPawns !== null) {
-      var abs = Math.abs(evalPawns);
-      if (abs >= 99) {
-        evalStr = evalPawns > 0 ? '#' : '-#';
-      } else {
-        evalStr = (evalPawns >= 0 ? '+' : '') + evalPawns.toFixed(2);
+    if (mpv === 1 && pvMove) bestMoveInfo = pvMove;
+    infoLines[mpv] = { depth: depth, score: score, pvLine: pvLine, pvMove: pvMove, isMate: isMate };
+
+    // Status bar — current depth + eval
+    var evalStr = isMate
+      ? (score > 0 ? 'Mate in ' + Math.abs(Math.round(score / 100000))
+                   : '-Mate in ' + Math.abs(Math.round(score / 100000)))
+      : (score >= 0 ? '+' : '') + (score / 100).toFixed(2);
+    setAnalysisStatus('🔍 Depth ' + depth + '  ·  Eval: ' + evalStr + '  ·  ' + (pvMove || '…'));
+
+    // PV line — translate UCI moves to SAN using chess.js
+    if (pvEl && pvLine.length > 0) {
+      var tempG   = new Chess(fen);
+      var sanArr  = [];
+      for (var i = 0; i < Math.min(pvLine.length, 10); i++) {
+        var m = tempG.move({ from: pvLine[i].slice(0,2), to: pvLine[i].slice(2,4),
+                             promotion: pvLine[i][4] || 'q' });
+        if (!m) break;
+        sanArr.push(m.san);
       }
-    } else {
-      evalStr = '?';
-    }
-
-    updateEvalBar(evalPawns || 0);
-    setAnalysisStatus('Best move: ' + (bestMove || '?') + '  |  Eval: ' + evalStr + '  |  Use Coach Me for explanation.');
-
-    var pvEl = document.getElementById('a-pv-line');
-    if (pvEl && pvSan && pvSan.length > 0) {
       var pvParts = [];
-      for (var i = 0; i < pvSan.length; i++) {
-        if (i % 2 === 0) pvParts.push((Math.floor(i/2) + 1) + '.');
-        pvParts.push(pvSan[i]);
+      var mn = analysisGame.moveNumber ? analysisGame.moveNumber() : 1;
+      var isBlack = analysisGame.turn() === 'b';
+      for (var j = 0; j < sanArr.length; j++) {
+        var needsNum = (j === 0) || ((j + (isBlack ? 1 : 0)) % 2 === 0);
+        if (j === 0 && isBlack)      pvParts.push(mn + '…');
+        else if (needsNum)            pvParts.push((mn + Math.floor((j + (isBlack?1:0)) / 2)) + '.');
+        pvParts.push(sanArr[j]);
       }
-      var lineLabel = (mateIn !== null && mateIn !== undefined)
-        ? 'Mate in ' + Math.abs(mateIn) + ': '
-        : 'Continuation: ';
-      pvEl.textContent  = lineLabel + pvParts.join(' ');
-      pvEl.style.color  = (mateIn !== null && mateIn !== undefined) ? '#d4af37' : '#666';
+      pvEl.textContent  = 'Depth ' + depth + ': ' + pvParts.join(' ');
+      pvEl.style.color  = '#888';
       pvEl.style.display = '';
-    } else if (pvEl) {
-      pvEl.style.display = 'none';
     }
+
+    // Candidate moves panel — one row per multipv line
+    var keys = Object.keys(infoLines).map(Number).sort(function(a,b){return a-b;});
+    if (keys.length > 0 && list && wrap) {
+      wrap.classList.add('visible');
+      list.innerHTML = '';
+      var scores = keys.map(function(k) { return Math.abs(infoLines[k].score); });
+      var maxSc  = Math.max.apply(null, scores) || 1;
+      keys.forEach(function(k) {
+        var ln  = infoLines[k];
+        var s   = ln.score >= 0 ? '+' : '';
+        var ev  = ln.isMate
+          ? (ln.score > 0 ? 'M' + Math.abs(Math.round(ln.score/100000))
+                          : '-M' + Math.abs(Math.round(ln.score/100000)))
+          : s + (ln.score / 100).toFixed(2);
+        var pct = Math.min(100, (Math.abs(ln.score) / maxSc) * 100);
+        var row = document.createElement('div');
+        row.className = 'candidate-row';
+        row.innerHTML =
+          '<span class="candidate-rank">' + k + '</span>' +
+          '<span class="candidate-move">' + (ln.pvMove || '?') + '</span>' +
+          '<div class="candidate-bar-wrap"><div class="candidate-bar" style="width:' + pct + '%"></div></div>' +
+          '<span class="candidate-eval">' + ev + '</span>';
+        list.appendChild(row);
+      });
+    }
+  }
+
+  // ─── Final result handler ─────────────────────────────────────────────────
+  function onDone(uciMove) {
+    analysisActive = false;
+    if (wasmEng) wasmEng._analysisInfoHandler = null;
+
+    var finalMove = bestMoveInfo || uciMove;
+    if (!finalMove) { fallbackToServer(); return; }
+
+    highlightBestMove(finalMove.slice(0,2), finalMove.slice(2,4));
+
+    var lastLine  = infoLines[1] || {};
+    var evalPawns = lastLine.score != null ? lastLine.score / 100 : null;
+    updateEvalBar(evalPawns || 0);
+    var evalStr = lastLine.isMate
+      ? '#' + Math.abs(Math.round((lastLine.score||0)/100000))
+      : evalPawns != null ? (evalPawns >= 0 ? '+' : '') + evalPawns.toFixed(2) : '?';
+
+    // Cache result so Coach Me can reuse it without re-running engine
+    lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: lastLine.score || 0 };
+
+    setAnalysisStatus('Best: ' + finalMove + '  ·  Eval: ' + evalStr + '  ·  Use Coach Me for explanation.');
     document.getElementById('btn-coach').disabled = false;
   }
 
+  // ─── Server fallback ──────────────────────────────────────────────────────
   function fallbackToServer() {
+    analysisActive = false;
     fetch(API_BASE + '/analyse-position', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2219,52 +2292,38 @@ function analysePosition() {
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      if (data.detail) {
-        setAnalysisStatus('Engine error: ' + data.detail);
-        document.getElementById('btn-coach').disabled = false;
-        return;
+      if (data.detail) { setAnalysisStatus('Engine error: ' + data.detail); document.getElementById('btn-coach').disabled = false; return; }
+      if (data.best_move) highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
+      updateEvalBar(data.eval_pawns || 0);
+      var ev = data.mate_in != null ? '#' + Math.abs(data.mate_in)
+             : (data.eval_pawns >= 0 ? '+' : '') + (data.eval_pawns || 0).toFixed(2);
+      setAnalysisStatus('Best: ' + (data.best_move||'?') + '  ·  Eval: ' + ev + '  ·  Use Coach Me for explanation.');
+      if (pvEl && data.pv_san && data.pv_san.length > 0) {
+        var pp = []; for (var i=0;i<data.pv_san.length;i++){ if(i%2===0)pp.push((Math.floor(i/2)+1)+'.'); pp.push(data.pv_san[i]); }
+        pvEl.textContent = 'Server: ' + pp.join(' '); pvEl.style.display = '';
       }
-      renderAnalysis(data.best_move, data.eval_pawns, data.mate_in, data.pv_san);
-    })
-    .catch(function() {
-      setAnalysisStatus('Engine error — is the server running?');
+      renderCandidates(data.candidates);
       document.getElementById('btn-coach').disabled = false;
-    });
+    })
+    .catch(function() { setAnalysisStatus('Engine error — is the server running?'); document.getElementById('btn-coach').disabled = false; });
   }
 
+  // ─── Dispatch ─────────────────────────────────────────────────────────────
   if (wasmEng && _wasmReady()) {
-    // WASM path — run engine locally, build SAN line via chess.js
-    wasmEng.bestMove(fen, [], 2000)
-      .then(function(uciMove) {
-        if (!uciMove) { fallbackToServer(); return; }
-
-        // Get eval by asking for the position score
-        // Build a minimal PV by playing the best move and showing it
-        var tempGame = new Chess(fen);
-        var move = tempGame.move({ from: uciMove.slice(0,2), to: uciMove.slice(2,4), promotion: uciMove[4] || 'q' });
-        var pvSan = move ? [move.san] : [];
-
-        // Estimate eval from engine internal — WASM bestMove doesn't return eval,
-        // so fetch eval from a lightweight server call without engine (just FEN scoring)
-        // For now use 0 eval and let coach provide the explanation
-        renderAnalysis(uciMove, null, null, pvSan);
-        setAnalysisStatus('Best move: ' + uciMove + '  |  Use Coach Me for full evaluation.');
-      })
-      .catch(function() {
-        fallbackToServer();
-      });
+    wasmEng._analysisInfoHandler = onInfo;
+    wasmEng.bestMove(fen, [], 5000)   // 5s = deeper analysis than game moves
+      .then(function(move) { onDone(move); })
+      .catch(function()    { fallbackToServer(); });
   } else if (wasmEng) {
-    // Engine still loading — wait then try
     setAnalysisStatus('⏳ Loading engine...');
-    wasmEng.ready().then(function() {
-      analysePosition();
-    }).catch(function() {
-      fallbackToServer();
-    });
+    wasmEng.ready()
+      .then(function() { analysePosition(); })
+      .catch(fallbackToServer);
   } else {
     fallbackToServer();
   }
 }
+
 
 function getCoaching() {
   if (!analysisCg) initAnalysisBoard();
@@ -2322,16 +2381,19 @@ function getCoaching() {
   }
 
   if (wasmEng && _wasmReady()) {
-    // WASM: get best move locally, then send to server for AI explanation only
-    wasmEng.bestMove(fen, [], 2000)
+    // If analysis was just run on this exact position, reuse its result —
+    // no point running the engine again for the same FEN
+    if (lastAnalysisResult && lastAnalysisResult.fen === fen) {
+      requestCoach(lastAnalysisResult.bestMove, lastAnalysisResult.evalCp / 100);
+      return;
+    }
+    // Otherwise run engine at full analysis strength (no random chance, full time)
+    wasmEng.bestMove(fen, [], 5000)
       .then(function(uciMove) {
         if (!uciMove) { requestCoach(null, null); return; }
-        // Use 0.0 eval — server's Claude explanation doesn't need a precise number,
-        // just the best move. The explanation is qualitative not quantitative.
         requestCoach(uciMove, 0.0);
       })
       .catch(function() {
-        // WASM failed — let server do both engine + explanation
         requestCoach(null, null);
       });
   } else if (wasmEng) {

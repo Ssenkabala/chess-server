@@ -1804,7 +1804,8 @@ function startGame() {
 
   resetClockDisplay();
   updateTurnIndicator();
-  startClockTick();
+  // Clock tick starts on first move message, not here — prevents
+  // incorrect ticking before any moves have been made
 
   // Connect game websocket after board is ready
   gameWs = new WebSocket(WS_BASE + '/ws/game/' + gameId);
@@ -1965,6 +1966,8 @@ function onGameMessage(e) {
     refreshDests();
     multiMoveHistory.push(msg.move);
     appendMove(msg.move);
+    // Start (or restart) the local tick now that myTurn is correctly set
+    startClockTick();
   }
   if (msg.type === 'rematch_offer') {
     document.getElementById('rematch-status').textContent = 'Opponent wants a rematch!';
@@ -2015,7 +2018,7 @@ function onGameMessage(e) {
       highlight: { lastMove: true, check: true }, coordinates: true,
     });
     updateTurnIndicator();
-    startClockTick();
+    // Clock starts on first move, not here
 
     gameWs = new WebSocket(WS_BASE + '/ws/game/' + gameId);
     gameWs.onopen = () => {

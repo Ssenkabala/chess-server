@@ -23,182 +23,141 @@ let _analyse  = null;
 let _ready    = false;
 
 // ── Polyglot opening book ─────────────────────────────────────────────────────
-let _bookData = null;   // DataView of the .bin file, set when 'book' message arrives
+// Uses 32-bit integer pairs [hi, lo] instead of BigInt for broad browser/worker
+// compatibility. XOR is done on each half independently.
+let _bookData = null;
 
-// Polyglot Zobrist keys — must match the spec exactly
-// Source: http://hgm.nubati.net/book_format.html
 const PG = (function() {
-    // 64-bit keys stored as two 32-bit halves [hi, lo]
-    // Piece indices: 0=BP 1=BR 2=BB 3=BN 4=BQ 5=BK 6=WP 7=WR 8=WB 9=WN 10=WQ 11=WK
-    // Square: a1=0, b1=1 ... h8=63
-    // We use BigInt for correctness — Polyglot uses 64-bit XOR
-    const RANDOM_PIECE = [
-        0x9D39247E33776D41n,0x2AF7398005AAA5C7n,0x44DB015024623547n,0x9C15F73E62A76AE2n,
-        0x75834465489C0C89n,0x3290AC3A203001BFn,0x0FBBAD1F61042279n,0xE83A908FF2FB60CAn,
-        0x0D7E765D58755C10n,0x1A083822CEAFE02Dn,0x9605D5F0E25EC3B0n,0xD021FF5CD13A2ED5n,
-        0x40BDF15D4A672D37n,0x011355146FD56395n,0x5DB4832046F3D9E5n,0x239F8B2D7FF719CCn,
-        0x05D1A1AE85B49AA1n,0x679F848F6E8FC971n,0x7449BBFF801FED0Bn,0x7D11CDB1C3B7ADF0n,
-        0x82C7709E781EB7CCn,0xF3218F1C9510786Cn,0x331478F3AF51BBE6n,0x4BB38DE5E7219443n,
-        0xAA649C6EBCFD50FCn,0x8DBD98A352AFD40Bn,0x87D2074B81D79217n,0x19F3C751D3E92AE1n,
-        0xB4AB30F062B19ABFn,0x7B0500AC42047AC4n,0xC9452CA81A09D85Dn,0x24AA6C514DA27500n,
-        0x4C9F34427501B447n,0x14A280EB7E09CF2Fn,0xC0855F9143544455n,0x5B422063CAFE30AFn,
-        0x0D73AE18A5F7B8ACn,0x80F8E21B3A8FF7A1n,0xECBE8B92FE57ADBE n,0x1B0BF5052D65B1C5n,
-        0x80CF7B60DA70E29Cn,0x9C1C5EB29B58DF1Cn,0x2BA5AB2B5D9B4B34n,0x6E31FBC52BEDB4A9n,
-        0x7BFC4E0F38C0E47Cn,0x2F807F52B87A4B06n,0x69D5B4FA0FAD5E65n,0x0E0773D2CF1EB9D8n,
-        0x95D4B1D8532DB14Cn,0x78D9E64E5E7A40F2n,0x06C2E77E8BACF86Dn,0x3A4B9FCEED5F2AC0n,
-        0x2ABA28A0FC5E8F0An,0xA6B7B9FAE64C8621n,0x8AEB77F2FB49CF46n,0x7FDBD6A25DA38C1En,
-        0x8BB9374C30ED6F92n,0xCBD6CFDE59E1CA70n,0x4EB6BE14FD6FEFF4n,0xA484048FD3C82E52n,
-        0x82FFD24CB97B08BAn,0xC49B5ADB6D42EB4Cn,0x7A476C2B7F26A7BCn,0x7D0E0CC5DB96F3D3n,
-        0xB4ED4FD6FD73CACBn,0x5CBEEF88EBCE40BDn,0x3B0085C68CF68AE9n,0x73ADC8DE96CAEDBEn,
-        0x68E21B87F57B8F42n,0xF5BC36C50A2B9D25n,0x6D5AA02B7BCC37A9n,0xC5C43F93AB6A5DC3n,
-        0xB07A17A4E2B15E99n,0xD48EAB8AF2E9A3A9n,0x700DB6D3DB4C5B71n,0x0895E7A57AC1D24An,
-        0xF06EFA0AE534B6B9n,0xD2F9F0F7B2FE2CEEn,0xCEED6D6AECCDBB30n,0x7F5B7BDFE64A99CCn,
-        0x47EC3524DD48A58Bn,0x60E97D10D02ACE8Bn,0x3D025C79E9929F74n,0x0F0A8A44A8EA4B6Fn,
-        0x28ACC0C1B87B76F4n,0xDC5B3E7D1AEB1C51n,0xBF0EF5C95C34FA52n,0x4A1B40D85D41B7E6n,
-        0x2D13DE0ED8D5B2E6n,0x7DC0D1E9E7C9E2A9n,0x25440FCDE4DE0A14n,0xC4ACF1B7D81CB2A0n,
-        0x7ABD8B12E6E98E97n,0x4A3D553A3DA1E2AAn,0x7F0FB8C3E8B9DBC5n,0x0A0E8A65A58AE4A0n,
-        0xBF2BCA6D3ABE3C7An,0x14BEB73DF6B15D51n,0x40E8E42DE52B1B43n,0xE7E2FC1B2B4A3A00n,
-        0x48AC99E3F2D5F3DFn,0xA8A08A8A22D0A2B8n,0x6ADCBB80EFFB50E2n,0x25CDE52EEB4D5C25n,
-        0xA9EAE45D8EF1BB8An,0x9C74AE26B82F55E1n,0x025819C7B3C8FE86n,0x0EA8A86A37F27A03n,
-        0x06AD7B617E80BF5An,0x8723AF2B6B32FD8Fn,0x12B1EA9FAA7C6855n,0x7C6A5D33D45B7EE4n,
-        0x831A40A56FFB97BAn,0x3CC2985B8A0C2895n,0x4BCC36B0C61BADC0n,0x2D3FA74A7F17B22Fn,
-        0xC56A47E5861DDDFFn,0x7CC6E3A8DE9E5AA4n,0x60F4D5A7C7A0ABBAn,0x4AEE4B0E8CF82FC4n,
-        0x1B9B026B53B97498n,0x7CD39DD6AFA1D955n,0x1CE820A23A9C97FAn,0xEBDE9E0AAEAF8A28n,
-        0xDE46B7BB8F1A0D04n,0x4F0FF64E2C2D9479n,0x040E94CB7B22C5AAn,0xCA8A2F08E32E8C2En,
-        0xD47E42BD4A05F012n,0xBB6A7E07BE9E1B27n,0xB44E6B9EC7CA23D4n,0xBF4EF46CA4C82ECDn,
-        0x18B37F0D81AD8BDCn,0x8E9A96F3C4E2EFEEn,0x92FD8F1CAA2DC7F2n,0xCB0DDB1AC0A1960Fn,
-        0xE4C08A9EBD5C3ED5n,0x7E2FAC40E3B9CC06n,0x2E9B4F77A32F2DCAn,0x92BC83D9A01A0D26n,
-        0xD9B0A406B40F73DEn,0x5C2BAD6AB1A11B36n,0x07C5E44FBBDDDE2Bn,0x03773A09A5F0CF2An,
-        0x1F43E396FA4EBFCCn,0x84F08FFA47A3C8BEn,0x1D9D7B0C9AF7F2BEn,0x42EE5F28DC76AB91n,
-        0x4BF5A08FEA5AB97An,0xCA48BEB5E8E0A2C3n,0x6FBCCB71F9A9E8D1n,0x0B2E0A39AFF77CA0n,
-        0x8DAD96975C1EB40En,0x5BF5867FC2B0E27Cn,0x7B74879DE7AC5F73n,0x2E97A2C70FC54EA6n,
-        0x4C59FDCFD9A4ADABn,0x3A79E03C62ABA6B0n,0x4C61A2B00F2B95E9n,0x2BD3D0F7DEE7F9CFn,
-        0xB78FA00A39DBFA0Dn,0x62640F8ADFEAFF07n,0x68D8B9F84A671F1Bn,0x5ECE1A4A10C90813n,
-        0x22B0E7FBDD85AB3En,0x0C28FDC92AFD3C14n,0x5BC7B8D1B2D90437n,0x67CCA9E1BC64CB8En,
-        0xD60E5B428B9BDC84n,0x7E9E99B11B7F0FFEn,0x7F18862BFBABF6FBn,0x0EE7B7CD3FBA3B89n,
-        0xDCE6EC3D9095E0F9n,0x52CB9FAF4D2B05DEn,0x48B6E35AD0D97FBAn,0x8E703D8A0E1C3B58n,
-        0x53BB0DDF5CA44A8Cn,0x2DF6E19BDB1F67B7n,0x06ABBFC91E95EF91n,0xC8EAB3D1DE3C62F2n,
-        0xA1E94ED8C98B9C62n,0x33D9E29D6ABDD4F4n,0xA9A39D32D8E18C6Cn,0x0B8E7A2AE97D0B19n,
-        0x99D6920E5AC45AC5n,0xE23B6C5C04E8FA00n,0x576B72C10BD83EC9n,0x24CA37CB90E2B1B8n,
-        0xCF1B6E35AE93D5F6n,0x3CE6BEF88E1B26B9n,0x4F86B9AA7D1C6F9Fn,0xC4EA06B9E7C62F00n,
+    // 64-bit Polyglot random numbers stored as [hi32, lo32] pairs (big-endian)
+    // Piece index: 0=BP 1=BR 2=BB 3=BN 4=BQ 5=BK 6=WP 7=WR 8=WB 9=WN 10=WQ 11=WK
+    const RP = [
+        [0x9D39247E,0x33776D41],[0x2AF73980,0x05AAA5C7],[0x44DB0150,0x24623547],[0x9C15F73E,0x62A76AE2],
+        [0x75834465,0x489C0C89],[0x3290AC3A,0x203001BF],[0x0FBBAD1F,0x61042279],[0xE83A908F,0xF2FB60CA],
+        [0x0D7E765D,0x58755C10],[0x1A083822,0xCEAFE02D],[0x9605D5F0,0xE25EC3B0],[0xD021FF5C,0xD13A2ED5],
+        [0x40BDF15D,0x4A672D37],[0x01135514,0x6FD56395],[0x5DB48320,0x46F3D9E5],[0x239F8B2D,0x7FF719CC],
+        [0x05D1A1AE,0x85B49AA1],[0x679F848F,0x6E8FC971],[0x7449BBFF,0x801FED0B],[0x7D11CDB1,0xC3B7ADF0],
+        [0x82C7709E,0x781EB7CC],[0xF3218F1C,0x9510786C],[0x331478F3,0xAF51BBE6],[0x4BB38DE5,0xE7219443],
+        [0xAA649C6E,0xBCFD50FC],[0x8DBD98A3,0x52AFD40B],[0x87D2074B,0x81D79217],[0x19F3C751,0xD3E92AE1],
+        [0xB4AB30F0,0x62B19ABF],[0x7B0500AC,0x42047AC4],[0xC9452CA8,0x1A09D85D],[0x24AA6C51,0x4DA27500],
+        [0x4C9F3442,0x7501B447],[0x14A280EB,0x7E09CF2F],[0xC0855F91,0x43544455],[0x5B422063,0xCAFE30AF],
+        [0x0D73AE18,0xA5F7B8AC],[0x80F8E21B,0x3A8FF7A1],[0xECBE8B92,0xFE57ADBE],[0x1B0BF505,0x2D65B1C5],
+        [0x80CF7B60,0xDA70E29C],[0x9C1C5EB2,0x9B58DF1C],[0x2BA5AB2B,0x5D9B4B34],[0x6E31FBC5,0x2BEDB4A9],
+        [0x7BFC4E0F,0x38C0E47C],[0x2F807F52,0xB87A4B06],[0x69D5B4FA,0x0FAD5E65],[0x0E0773D2,0xCF1EB9D8],
+        [0x95D4B1D8,0x532DB14C],[0x78D9E64E,0x5E7A40F2],[0x06C2E77E,0x8BACF86D],[0x3A4B9FCE,0xED5F2AC0],
+        [0x2ABA28A0,0xFC5E8F0A],[0xA6B7B9FA,0xE64C8621],[0x8AEB77F2,0xFB49CF46],[0x7FDBD6A2,0x5DA38C1E],
+        [0x8BB9374C,0x30ED6F92],[0xCBD6CFDE,0x59E1CA70],[0x4EB6BE14,0xFD6FEFF4],[0xA484048F,0xD3C82E52],
+        [0x82FFD24C,0xB97B08BA],[0xC49B5ADB,0x6D42EB4C],[0x7A476C2B,0x7F26A7BC],[0x7D0E0CC5,0xDB96F3D3],
+        [0xB4ED4FD6,0xFD73CACB],[0x5CBEEF88,0xEBCE40BD],[0x3B0085C6,0x8CF68AE9],[0x73ADC8DE,0x96CAEDBE],
+        [0x68E21B87,0xF57B8F42],[0xF5BC36C5,0x0A2B9D25],[0x6D5AA02B,0x7BCC37A9],[0xC5C43F93,0xAB6A5DC3],
+        [0xB07A17A4,0xE2B15E99],[0xD48EAB8A,0xF2E9A3A9],[0x700DB6D3,0xDB4C5B71],[0x0895E7A5,0x7AC1D24A],
+        [0xF06EFA0A,0xE534B6B9],[0xD2F9F0F7,0xB2FE2CEE],[0xCEED6D6A,0xECCDBB30],[0x7F5B7BDF,0xE64A99CC],
+        [0x47EC3524,0xDD48A58B],[0x60E97D10,0xD02ACE8B],[0x3D025C79,0xE9929F74],[0x0F0A8A44,0xA8EA4B6F],
+        [0x28ACC0C1,0xB87B76F4],[0xDC5B3E7D,0x1AEB1C51],[0xBF0EF5C9,0x5C34FA52],[0x4A1B40D8,0x5D41B7E6],
+        [0x2D13DE0E,0xD8D5B2E6],[0x7DC0D1E9,0xE7C9E2A9],[0x25440FCD,0xE4DE0A14],[0xC4ACF1B7,0xD81CB2A0],
+        [0x7ABD8B12,0xE6E98E97],[0x4A3D553A,0x3DA1E2AA],[0x7F0FB8C3,0xE8B9DBC5],[0x0A0E8A65,0xA58AE4A0],
+        [0xBF2BCA6D,0x3ABE3C7A],[0x14BEB73D,0xF6B15D51],[0x40E8E42D,0xE52B1B43],[0xE7E2FC1B,0x2B4A3A00],
+        [0x48AC99E3,0xF2D5F3DF],[0xA8A08A8A,0x22D0A2B8],[0x6ADCBB80,0xEFFB50E2],[0x25CDE52E,0xEB4D5C25],
+        [0xA9EAE45D,0x8EF1BB8A],[0x9C74AE26,0xB82F55E1],[0x025819C7,0xB3C8FE86],[0x0EA8A86A,0x37F27A03],
+        [0x06AD7B61,0x7E80BF5A],[0x8723AF2B,0x6B32FD8F],[0x12B1EA9F,0xAA7C6855],[0x7C6A5D33,0xD45B7EE4],
+        [0x831A40A5,0x6FFB97BA],[0x3CC2985B,0x8A0C2895],[0x4BCC36B0,0xC61BADC0],[0x2D3FA74A,0x7F17B22F],
+        [0xC56A47E5,0x861DDDFF],[0x7CC6E3A8,0xDE9E5AA4],[0x60F4D5A7,0xC7A0ABBA],[0x4AEE4B0E,0x8CF82FC4],
+        [0x1B9B026B,0x53B97498],[0x7CD39DD6,0xAFA1D955],[0x1CE820A2,0x3A9C97FA],[0xEBDE9E0A,0xAEAF8A28],
+        [0xDE46B7BB,0x8F1A0D04],[0x4F0FF64E,0x2C2D9479],[0x040E94CB,0x7B22C5AA],[0xCA8A2F08,0xE32E8C2E],
+        [0xD47E42BD,0x4A05F012],[0xBB6A7E07,0xBE9E1B27],[0xB44E6B9E,0xC7CA23D4],[0xBF4EF46C,0xA4C82ECD],
+        [0x18B37F0D,0x81AD8BDC],[0x8E9A96F3,0xC4E2EFEE],[0x92FD8F1C,0xAA2DC7F2],[0xCB0DDB1A,0xC0A1960F],
+        [0xE4C08A9E,0xBD5C3ED5],[0x7E2FAC40,0xE3B9CC06],[0x2E9B4F77,0xA32F2DCA],[0x92BC83D9,0xA01A0D26],
+        [0xD9B0A406,0xB40F73DE],[0x5C2BAD6A,0xB1A11B36],[0x07C5E44F,0xBBDDDE2B],[0x03773A09,0xA5F0CF2A],
+        [0x1F43E396,0xFA4EBFCC],[0x84F08FFA,0x47A3C8BE],[0x1D9D7B0C,0x9AF7F2BE],[0x42EE5F28,0xDC76AB91],
+        [0x4BF5A08F,0xEA5AB97A],[0xCA48BEB5,0xE8E0A2C3],[0x6FBCCB71,0xF9A9E8D1],[0x0B2E0A39,0xAFF77CA0],
+        [0x8DAD9697,0x5C1EB40E],[0x5BF5867F,0xC2B0E27C],[0x7B74879D,0xE7AC5F73],[0x2E97A2C7,0x0FC54EA6],
+        [0x4C59FDCF,0xD9A4ADAB],[0x3A79E03C,0x62ABA6B0],[0x4C61A2B0,0x0F2B95E9],[0x2BD3D0F7,0xDEE7F9CF],
+        [0xB78FA00A,0x39DBFA0D],[0x62640F8A,0xDFEAFF07],[0x68D8B9F8,0x4A671F1B],[0x5ECE1A4A,0x10C90813],
+        [0x22B0E7FB,0xDD85AB3E],[0x0C28FDC9,0x2AFD3C14],[0x5BC7B8D1,0xB2D90437],[0x67CCA9E1,0xBC64CB8E],
+        [0xD60E5B42,0x8B9BDC84],[0x7E9E99B1,0x1B7F0FFE],[0x7F18862B,0xFBABF6FB],[0x0EE7B7CD,0x3FBA3B89],
+        [0xDCE6EC3D,0x9095E0F9],[0x52CB9FAF,0x4D2B05DE],[0x48B6E35A,0xD0D97FBA],[0x8E703D8A,0x0E1C3B58],
+        [0x53BB0DDF,0x5CA44A8C],[0x2DF6E19B,0xDB1F67B7],[0x06ABBFC9,0x1E95EF91],[0xC8EAB3D1,0xDE3C62F2],
+        [0xA1E94ED8,0xC98B9C62],[0x33D9E29D,0x6ABDD4F4],[0xA9A39D32,0xD8E18C6C],[0x0B8E7A2A,0xE97D0B19],
+        [0x99D6920E,0x5AC45AC5],[0xE23B6C5C,0x04E8FA00],[0x576B72C1,0x0BD83EC9],[0x24CA37CB,0x90E2B1B8],
+        [0xCF1B6E35,0xAE93D5F6],[0x3CE6BEF8,0x8E1B26B9],[0x4F86B9AA,0x7D1C6F9F],[0xC4EA06B9,0xE7C62F00]
     ];
-    const RANDOM_CASTLE = [
-        0x31D71DCE64281BF4n,0xF165B587DF898190n,0xA57E6339DD2CF3A0n,0x1EF6E6DBB1961EC9n,
-    ];
-    const RANDOM_EN_PASSANT = [
-        0x70CC73D90BC26E24n,0xE21A6B35DF0C3AD7n,0x003A93D8B2806962n,0x1C99DED33CB890A1n,
-        0xCF3145DE0ADD4289n,0xD0E4427A5514FB72n,0x77C621CC9FB3A483n,0x67A34DAC4356550Bn,
-    ];
-    const RANDOM_TURN = 0xF8D626AAAF278509n;
+    const RC  = [[0x31D71DCE,0x64281BF4],[0xF165B587,0xDF898190],[0xA57E6339,0xDD2CF3A0],[0x1EF6E6DB,0xB1961EC9]];
+    const REP = [[0x70CC73D9,0x0BC26E24],[0xE21A6B35,0xDF0C3AD7],[0x003A93D8,0xB2806962],[0x1C99DED3,0x3CB890A1],
+                 [0xCF3145DE,0x0ADD4289],[0xD0E4427A,0x5514FB72],[0x77C621CC,0x9FB3A483],[0x67A34DAC,0x4356550B]];
+    const RT  = [0xF8D626AA,0xAF278509];
 
-    const PIECE_MAP = {
-        'p': 0, 'r': 1, 'b': 2, 'n': 3, 'q': 4, 'k': 5,
-        'P': 6, 'R': 7, 'B': 8, 'N': 9, 'Q': 10, 'K': 11,
-    };
+    const PIECE_MAP = { p:0,r:1,b:2,n:3,q:4,k:5, P:6,R:7,B:8,N:9,Q:10,K:11 };
 
-    function squareIndex(file, rank) {
-        return rank * 8 + file;  // a1=0, h1=7, a8=56
-    }
+    // XOR two [hi,lo] pairs — each half independently
+    function xp(a, b) { return [((a[0]^b[0])>>>0), ((a[1]^b[1])>>>0)]; }
 
     function hashPosition(fen) {
-        const parts = fen.split(' ');
-        const board = parts[0];
-        const turn  = parts[1];
-        const castle= parts[2] || '-';
-        const ep    = parts[3] || '-';
-
-        let hash = 0n;
-
-        // Pieces
-        let rank = 7, file = 0;
-        for (const ch of board) {
+        var parts = fen.split(' ');
+        var board = parts[0], turn = parts[1], castle = parts[2]||'-', ep = parts[3]||'-';
+        var h = [0,0];
+        var rank = 7, file = 0;
+        for (var i = 0; i < board.length; i++) {
+            var ch = board[i];
             if (ch === '/') { rank--; file = 0; }
-            else if (ch >= '1' && ch <= '8') { file += parseInt(ch); }
+            else if (ch >= '1' && ch <= '8') { file += +ch; }
             else {
-                const sq  = squareIndex(file, rank);
-                const idx = PIECE_MAP[ch];
-                if (idx !== undefined) {
-                    hash ^= RANDOM_PIECE[idx * 64 + sq];
-                }
+                var idx = PIECE_MAP[ch];
+                if (idx !== undefined) h = xp(h, RP[idx * 64 + (rank * 8 + file)]);
                 file++;
             }
         }
-
-        // Turn — Polyglot XORs RANDOM_TURN when it's WHITE to move
-        if (turn === 'w') hash ^= RANDOM_TURN;
-
-        // Castling
-        if (castle.includes('K')) hash ^= RANDOM_CASTLE[0];
-        if (castle.includes('Q')) hash ^= RANDOM_CASTLE[1];
-        if (castle.includes('k')) hash ^= RANDOM_CASTLE[2];
-        if (castle.includes('q')) hash ^= RANDOM_CASTLE[3];
-
-        // En passant — only XOR if the ep square is actually reachable
-        if (ep !== '-') {
-            const epFile = ep.charCodeAt(0) - 97; // 'a'=0
-            hash ^= RANDOM_EN_PASSANT[epFile];
-        }
-
-        return hash;
+        if (turn === 'w') h = xp(h, RT);
+        if (castle.indexOf('K') >= 0) h = xp(h, RC[0]);
+        if (castle.indexOf('Q') >= 0) h = xp(h, RC[1]);
+        if (castle.indexOf('k') >= 0) h = xp(h, RC[2]);
+        if (castle.indexOf('q') >= 0) h = xp(h, RC[3]);
+        if (ep !== '-') h = xp(h, REP[ep.charCodeAt(0) - 97]);
+        return h;
     }
 
-    // Decode a Polyglot move (16-bit packed)
     function decodeMove(mv) {
-        const toFile  = (mv >> 0)  & 7;
-        const toRank  = (mv >> 3)  & 7;
-        const frFile  = (mv >> 6)  & 7;
-        const frRank  = (mv >> 9)  & 7;
-        const promo   = (mv >> 12) & 7;
-        const FILES   = 'abcdefgh';
-        const PROMOS  = ['', 'n', 'b', 'r', 'q'];  // Polyglot promo encoding
-        return FILES[frFile] + (frRank + 1) + FILES[toFile] + (toRank + 1) + (PROMOS[promo] || '');
+        var FILES  = 'abcdefgh';
+        var PROMOS = ['','n','b','r','q'];
+        var toFile = (mv >> 0) & 7, toRank = (mv >> 3) & 7;
+        var frFile = (mv >> 6) & 7, frRank = (mv >> 9) & 7;
+        var promo  = (mv >> 12) & 7;
+        return FILES[frFile]+(frRank+1)+FILES[toFile]+(toRank+1)+(PROMOS[promo]||'');
     }
 
-    // Probe the Polyglot book — returns best UCI move or null
     function probe(fen) {
         if (!_bookData) return null;
         try {
-            const hash = hashPosition(fen);
-            const view = _bookData;
-            const n    = view.byteLength / 16;  // each entry is 16 bytes
-
-            // Binary search for the hash
-            let lo = 0, hi = n - 1;
-            while (lo <= hi) {
-                const mid     = (lo + hi) >> 1;
-                const off     = mid * 16;
-                // Read 64-bit key as two 32-bit halves (big-endian)
-                const keyHi   = BigInt(view.getUint32(off, false));
-                const keyLo   = BigInt(view.getUint32(off + 4, false));
-                const key     = (keyHi << 32n) | keyLo;
-                if (key === hash) {
-                    // Found — collect all entries with this hash, pick highest weight
-                    let best = null, bestW = -1;
+            var h   = hashPosition(fen);
+            var hi  = h[0], lo = h[1];
+            var view = _bookData;
+            var n   = (view.byteLength / 16) | 0;
+            var lft = 0, rgt = n - 1;
+            while (lft <= rgt) {
+                var mid = (lft + rgt) >> 1;
+                var off = mid * 16;
+                var khi = view.getUint32(off,     false);
+                var klo = view.getUint32(off + 4, false);
+                if (khi === hi && klo === lo) {
                     // Scan back to first matching entry
-                    let start = mid;
-                    while (start > 0) {
-                        const o2  = (start - 1) * 16;
-                        const h2  = (BigInt(view.getUint32(o2, false)) << 32n) | BigInt(view.getUint32(o2 + 4, false));
-                        if (h2 !== hash) break;
-                        start--;
+                    var s = mid;
+                    while (s > 0) {
+                        var o2 = (s-1)*16;
+                        if (view.getUint32(o2,false)!==hi||view.getUint32(o2+4,false)!==lo) break;
+                        s--;
                     }
-                    // Collect all with this hash
-                    for (let i = start; i < n; i++) {
-                        const o  = i * 16;
-                        const h  = (BigInt(view.getUint32(o, false)) << 32n) | BigInt(view.getUint32(o + 4, false));
-                        if (h !== hash) break;
-                        const mv = view.getUint16(o + 8, false);
-                        const wt = view.getUint16(o + 10, false);
+                    var best = null, bestW = -1;
+                    for (var j = s; j < n; j++) {
+                        var oj  = j * 16;
+                        if (view.getUint32(oj,false)!==hi||view.getUint32(oj+4,false)!==lo) break;
+                        var mv  = view.getUint16(oj + 8, false);
+                        var wt  = view.getUint16(oj + 10, false);
                         if (wt > bestW) { bestW = wt; best = decodeMove(mv); }
                     }
                     return best;
-                } else if (key < hash) { lo = mid + 1; }
-                else                   { hi = mid - 1; }
+                } else if (khi < hi || (khi === hi && klo < lo)) { lft = mid + 1; }
+                else { rgt = mid - 1; }
             }
             return null;
-        } catch(e) {
-            return null;
-        }
+        } catch(e) { return null; }
     }
 
     return { probe };

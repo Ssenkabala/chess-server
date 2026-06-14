@@ -3894,14 +3894,26 @@ async def set_username(request: Request, authorization: str = Header(None)):
 
 @app.post("/api/update-gender")
 async def update_gender(request: Request, authorization: str = Header(None)):
-    """Update the authenticated user's gender (male/female/prefer_not_to_say)."""
+    """Set the authenticated user's gender — locked after first save."""
     user_id = await verify_jwt(authorization)
     body    = await request.json()
     gender  = body.get("gender", "")
     allowed = {"male", "female", "prefer_not_to_say"}
     if gender not in allowed:
         raise HTTPException(status_code=400, detail=f"gender must be one of {allowed}")
+
     async with httpx.AsyncClient() as client:
+        # Check if already set — locked after first save
+        check = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{user_id}", "select": "gender"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        data = check.json()
+        if data and data[0].get("gender"):
+            raise HTTPException(status_code=400, detail="Gender is locked and cannot be changed.")
+
         await client.patch(
             f"{SUPABASE_URL}/rest/v1/profiles",
             params={"user_id": f"eq.{user_id}"},

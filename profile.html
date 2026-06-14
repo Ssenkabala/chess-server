@@ -851,6 +851,14 @@ async function saveGender() {
   if (!sel) return;
   const val = sel.value;
   if (!val) { alert('Please select a gender.'); return; }
+
+  // Confirmation warning — this is permanent
+  const labels = { male: 'Male', female: 'Female', prefer_not_to_say: 'Prefer not to say' };
+  const confirmed = confirm(
+    `Set your gender to "${labels[val] || val}"?\n\nThis cannot be changed after saving.`
+  );
+  if (!confirmed) return;
+
   const btn = document.getElementById('btn-save-gender');
   if (btn) btn.disabled = true;
   const { data: { session } } = await sb.auth.getSession();
@@ -861,12 +869,17 @@ async function saveGender() {
     body: JSON.stringify({ gender: val })
   });
   if (r.ok) {
-    const saved = document.getElementById('gender-saved');
-    if (saved) { saved.style.display = ''; setTimeout(() => { saved.style.display = 'none'; }, 2500); }
-    // Reload profile to show locked state
-    setTimeout(() => loadProfile(), 1500);
+    // Replace dropdown with locked display — same pattern as country
+    const row = document.getElementById('gender-row');
+    if (row) {
+      row.innerHTML = `<span style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;">
+        <span>${labels[val] || val}</span>
+        <span style="font-size:10px;color:#333;letter-spacing:0.1em;text-transform:uppercase;margin-left:4px;">🔒 locked</span>
+      </span>`;
+    }
   } else {
-    alert('Failed to save gender.');
+    const data = await r.json().catch(() => ({}));
+    alert(data.detail || 'Failed to save gender.');
     if (btn) btn.disabled = false;
   }
 }
@@ -874,10 +887,16 @@ async function saveGender() {
 async function saveCountry() {
   const sel   = document.getElementById('country-select');
   const btn   = document.getElementById('btn-save-country');
-  const saved = document.getElementById('country-saved');
   if (!sel) return;
   const val   = sel.value;
   if (!val) { alert('Please select a country.'); return; }
+
+  // Confirmation warning — this is permanent
+  const confirmed = confirm(
+    `Set your country to "${COUNTRY_NAMES[val] || val}"?\n\nThis cannot be changed after saving.`
+  );
+  if (!confirmed) return;
+
   btn.disabled = true;
   btn.textContent = '...';
   const { data: { session } } = await sb.auth.getSession();

@@ -2018,10 +2018,34 @@ function startGame(color) {
 }
 
 function resetGame() {
+  // Kill any in-flight engine call
+  gameSessionId++;
+  engineThinking = false;
+  gameStarted    = false;
+
+  // Show color picker with board reset to start
+  game = new Chess();
+  if (cg) cg.set({
+    fen:      'start',
+    lastMove: undefined,
+    check:    false,
+    movable:  { color: undefined, dests: new Map() },
+    selectable: { enabled: false }
+  });
+
   document.getElementById('pregame-setup').style.display = 'flex';
   document.getElementById('status').style.display = 'block';
-  if (!gameStarted) return;
-  startGame(playerColor === 'w' ? 'white' : 'black');
+  document.getElementById('status').textContent = 'Choose your color to begin.';
+  document.getElementById('btn-resign').style.display = 'none';
+  document.getElementById('btn-replay').style.display = 'none';
+  document.getElementById('gameover-overlay').classList.remove('active');
+
+  // Pre-highlight the flipped color as a UX hint (user can still override)
+  var flippedColor = playerColor === 'w' ? 'black' : 'white';
+  var wBtn = document.getElementById('btn-white');
+  var bBtn = document.getElementById('btn-black');
+  if (wBtn) wBtn.style.opacity = flippedColor === 'white' ? '1' : '0.5';
+  if (bBtn) bBtn.style.opacity = flippedColor === 'black' ? '1' : '0.5';
 }
 
 function updateCapturedPieces() {
@@ -2784,6 +2808,23 @@ function closeMenuThenAuth() {
 // ── Load position from URL (from history page) ────────────────
 (function checkUrlParams() {
   const params = new URLSearchParams(window.location.search);
+
+  // Auto-start from matchmaking redirect: /play?autostart=white&difficulty=5
+  const autoColor = params.get('autostart');
+  const autoDiff  = parseInt(params.get('difficulty') || '5', 10);
+  if (autoColor === 'white' || autoColor === 'black') {
+    currentDifficulty = autoDiff;
+    // Wait for WASM to be ready then start
+    function tryAutoStart() {
+      var diffSel = document.getElementById('difficulty-select');
+      if (diffSel) diffSel.value = autoDiff;
+      startGame(autoColor);
+    }
+    // Small delay to let page finish rendering
+    setTimeout(tryAutoStart, 300);
+    return;
+  }
+
   const fen = params.get('analyse');
   if (!fen) return;
 

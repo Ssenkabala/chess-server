@@ -1711,13 +1711,34 @@ function connectLobby() {
 
   lobbyWs.onopen = () => {
     setLobbyStatus('Searching for ' + (window._timeControl || '5+0') + ' game...');
-    // Send preferred time control so server can match by TC in future
     lobbyWs.send(JSON.stringify({ type: 'time_control', tc: window._timeControl || '5+0' }));
     lobbyWs._ping = setInterval(() => {
       if (lobbyWs && lobbyWs.readyState === WebSocket.OPEN) {
         lobbyWs.send(JSON.stringify({ type: 'ping' }));
       }
     }, 20000);
+
+    // After 15s with no match, offer redirect to vs-bot
+    lobbyWs._noMatchTimer = setTimeout(() => {
+      if (!gameId) {
+        setLobbyStatus('No opponent found yet...');
+        const searchArea = document.getElementById('tc-searching');
+        if (searchArea && !document.getElementById('bot-fallback-prompt')) {
+          const prompt = document.createElement('div');
+          prompt.id = 'bot-fallback-prompt';
+          prompt.style.cssText = 'margin-top:16px;text-align:center;font-size:13px;color:#888;';
+          prompt.innerHTML =
+            '<p style="margin:0 0 10px;">No opponent found — play the engine while you wait?</p>' +
+            '<button onclick="redirectToBot()" style="background:#00ff9d;color:#000;border:none;' +
+            'padding:8px 20px;border-radius:3px;font-size:13px;font-weight:700;cursor:pointer;' +
+            'letter-spacing:0.08em;text-transform:uppercase;">Play Engine</button>' +
+            '<button onclick="this.parentElement.remove()" style="background:transparent;color:#555;' +
+            'border:1px solid #333;padding:8px 16px;border-radius:3px;font-size:13px;' +
+            'cursor:pointer;margin-left:8px;letter-spacing:0.08em;text-transform:uppercase;">Keep Waiting</button>';
+          searchArea.appendChild(prompt);
+        }
+      }
+    }, 15000);
   };
 
   lobbyWs.onmessage = (e) => {
@@ -1730,9 +1751,9 @@ function connectLobby() {
     }
 
     if (msg.type === 'matched') {
+      if (lobbyWs && lobbyWs._noMatchTimer) clearTimeout(lobbyWs._noMatchTimer);
       gameId   = msg.game_id;
       myColor  = msg.color;
-      // Server may confirm the time control used
       if (msg.time_control) window._timeControl = msg.time_control;
       setLobbyStatus('Opponent found! Starting game...');
       setTimeout(() => startGame(), 400);
@@ -1750,6 +1771,19 @@ function connectLobby() {
 function setLobbyStatus(msg) {
   const el = document.getElementById('lobby-status');
   if (el) el.textContent = msg;
+}
+
+function redirectToBot() {
+  // Close lobby WS cleanly
+  if (lobbyWs) {
+    if (lobbyWs._ping)       clearInterval(lobbyWs._ping);
+    if (lobbyWs._noMatchTimer) clearTimeout(lobbyWs._noMatchTimer);
+    lobbyWs.onclose = null;
+    lobbyWs.close();
+    lobbyWs = null;
+  }
+  // Go to vs-bot page — difficulty 5 (Hard), auto-start as white
+  window.location.href = '/play?autostart=white&difficulty=5';
 }
 
 function cancelLobby() {
@@ -1843,8 +1877,13 @@ function startGame() {
 
   resetClockDisplay();
   updateTurnIndicator();
-  // Clock tick starts on first move message, not here — prevents
-  // incorrect ticking before any moves have been made
+  // Clock tick starts on first move message, not here
+
+  // In tournament games, hide takeback (not allowed) and draw offer
+  const takebackBtn = document.getElementById('btn-takeback');
+  if (takebackBtn) takebackBtn.style.display = window._tournamentId ? 'none' : '';
+  const drawBtn = document.getElementById('btn-draw');
+  if (drawBtn) drawBtn.style.display = window._tournamentId ? 'none' : '';
 
   // Connect game websocket after board is ready
   gameWs = new WebSocket(WS_BASE + '/ws/game/' + gameId);
@@ -2366,6 +2405,11 @@ function returnToLive() {
 // ── Takeback ──────────────────────────────────────────────────────────────────
 function offerTakeback() {
   if (gameOver) return;
+  // Takebacks not allowed in tournament games
+  if (window._tournamentId) {
+    showGameStatus('Takebacks are not allowed in tournament games.', false);
+    return;
+  }
   // Can only offer takeback when it's the opponent's turn — meaning you just moved
   if (myTurn) {
     showGameStatus('You can only request a takeback after you have moved.', false);
@@ -2524,7 +2568,8 @@ function showOverlay(result, reason) {
     document.getElementById('rematch-status').textContent = '';
   }
 
-  // Save multiplayer game to history — delay 2s so opponent_profile has time to arrive
+  // Save multiplayer game to history
+  // Wait up to 4s for elo_update to arrive (it's sent before gameover but may be delayed)
   if (sb && currentUser && multiMoveHistory.length > 0) {
     var pgn = '';
     multiMoveHistory.forEach(function(uci, i) {
@@ -2534,6 +2579,8 @@ function showOverlay(result, reason) {
     var savedPgn    = pgn.trim();
     var savedResult = result;
     var savedColor  = myColor;
+    var savedProfile = myProfile ? Object.assign({}, myProfile) : null;
+    // Delay 4s — elo_update typically arrives within 1s but give it extra headroom
     setTimeout(function() {
       sb.from('games').insert({
         user_id:           currentUser.id,
@@ -2541,6 +2588,7 @@ function showOverlay(result, reason) {
         result:            savedResult,
         player_color:      savedColor,
         opponent:          opponentUsername ? 'human:' + opponentUsername : 'human',
+        // Use myProfile directly (not savedProfile) — elo_update may have updated it
         player_elo_before: myProfile ? (myProfile.eloBefore || myProfile.elo) : null,
         player_elo_after:  myProfile ? myProfile.elo : null,
         time_control:      window._timeControl || null,
@@ -2548,7 +2596,7 @@ function showOverlay(result, reason) {
         if (res.error) console.error('Multiplayer save failed:', res.error.message);
         else console.log('Multiplayer game saved. Opponent:', opponentUsername);
       });
-    }, 2000);
+    }, 4000);
   }
   multiMoveHistory = [];
 }

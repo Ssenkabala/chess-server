@@ -2837,9 +2837,10 @@ async def game_ws(ws: WebSocket, game_id: str):
                     asyncio.create_task(cleanup_game(game_id, delay=10))
 
             elif msg_type == "takeback_offer":
-                # Can only offer takeback if there are moves to take back
-                # and opponent hasn't already offered one
-                if game["board"].move_stack and not game.get("takeback_offered_by"):
+                # Takebacks not allowed in tournament games
+                if game.get("tournament_id"):
+                    await send(ws, {"type": "error", "detail": "Takebacks are not allowed in tournament games."})
+                elif game["board"].move_stack and not game.get("takeback_offered_by"):
                     game["takeback_offered_by"] = color
                     opponent_ws = game.get("black_game_ws") if color == "w" else game.get("white_game_ws")
                     if opponent_ws:
@@ -2851,11 +2852,13 @@ async def game_ws(ws: WebSocket, game_id: str):
                 if offered_by and offered_by != color and not game["over"]:
                     game["takeback_offered_by"] = None
                     board = game["board"]
-                    # Always pop exactly one move — the last move played.
-                    # The offerer just played and wants it back; the acceptor
-                    # agrees and now it becomes the offerer's turn again.
                     if board.move_stack:
                         board.pop()
+                        # Decrement moves_made to stay accurate
+                        game["moves_made"] = max(0, game.get("moves_made", 1) - 1)
+                    # Reset the clock timestamp so clock_loop doesn't count
+                    # time spent during/before the takeback as thinking time
+                    game["last_move_ts"] = time.time()
                     new_fen = board.fen()
                     await broadcast(game, {
                         "type":  "takeback",

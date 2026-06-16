@@ -148,28 +148,48 @@ const AfriChessAAC = (function() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     _recogniser = new SR();
     _recogniser.lang = S().speechCode;
-    _recogniser.continuous = false;
+    _recogniser.continuous = false;      // one utterance at a time
     _recogniser.interimResults = false;
+    _recogniser.maxAlternatives = 1;
 
     updateMicButton(true);
 
     _recogniser.onresult = function(e) {
       const transcript = e.results[0][0].transcript;
       updateMicButton(false);
+      _micEnabled = false;
       handleSpokenMove(transcript);
     };
-    _recogniser.onerror = function() {
+    _recogniser.onerror = function(e) {
+      // 'no-speech' = silence timeout — restart automatically if still enabled
+      if (e.error === 'no-speech' && _micEnabled) {
+        try { _recogniser.start(); return; } catch(err) {}
+      }
       speak(S().ui.notHeard);
       updateMicButton(false);
+      _micEnabled = false;
     };
     _recogniser.onend = function() {
+      // Auto-restart if user hasn't manually stopped
+      if (_micEnabled) {
+        try { _recogniser.start(); return; } catch(err) {}
+      }
       updateMicButton(false);
     };
-    _recogniser.start();
+    try {
+      _recogniser.start();
+    } catch(e) {
+      updateMicButton(false);
+      _micEnabled = false;
+    }
   }
 
   function stopListening() {
-    if (_recogniser) { try { _recogniser.stop(); } catch(e) {} _recogniser = null; }
+    _micEnabled = false;  // set BEFORE stop() so onend doesn't restart
+    if (_recogniser) {
+      try { _recogniser.abort(); } catch(e) {}
+      _recogniser = null;
+    }
     updateMicButton(false);
   }
 
@@ -216,12 +236,13 @@ const AfriChessAAC = (function() {
     panel.setAttribute('role', 'region');
     panel.setAttribute('aria-label', 'Voice Chess Controls');
 
-    // Position: top-right on mobile to avoid overlapping board
-    // On desktop: bottom-right above the toggle button
+    // Position: always bottom-left so it never conflicts with hamburger (top-right)
+    // Panel opens upward from the button
     const isMobile = window.innerWidth <= 600;
     panel.style.cssText = `
       position: fixed;
-      ${isMobile ? 'top: 56px; right: 8px;' : 'bottom: 76px; right: 16px;'}
+      bottom: ${isMobile ? '60px' : '76px'};
+      left: ${isMobile ? '8px' : '16px'};
       width: ${isMobile ? '200px' : '240px'};
       background: #0d0d0d;
       border: 1px solid #1e1e1e;
@@ -233,7 +254,7 @@ const AfriChessAAC = (function() {
       color: #aaa;
       box-shadow: 0 4px 24px rgba(0,0,0,0.8);
       display: none;
-      max-height: 80vh;
+      max-height: 70vh;
       overflow-y: auto;
     `;
 
@@ -365,8 +386,11 @@ const AfriChessAAC = (function() {
     const isMobile = window.innerWidth <= 600;
     btn.style.cssText = `
       position: fixed;
-      ${isMobile ? 'top: 8px; right: 8px; width: 36px; height: 36px; font-size: 16px;'
-                 : 'bottom: 20px; right: 16px; width: 44px; height: 44px; font-size: 20px;'}
+      bottom: ${isMobile ? '12px' : '20px'};
+      left: ${isMobile ? '8px' : '16px'};
+      width: ${isMobile ? '36px' : '44px'};
+      height: ${isMobile ? '36px' : '44px'};
+      font-size: ${isMobile ? '16px' : '20px'};
       border-radius: 50%;
       background: #111;
       color: #555;

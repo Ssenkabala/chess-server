@@ -25,15 +25,16 @@ const AfriChessAAC = (function() {
   function S() { return aacStrings(_lang); }
 
   // ── Speech Synthesis ────────────────────────────────────────────────────────
-  // safeSpeak: the ONLY way audio is produced.
-  // Stops mic, speaks, then restarts mic if it was on.
-  // _isSpeaking flag prevents onend from restarting the mic while still talking.
+  // speak: routes all TTS through here.
+  // Stops mic, speaks, then restarts mic automatically when speech ends.
+  // Uses BOTH utt.onend AND a timer fallback because mobile browsers
+  // often fail to fire onend reliably (known iOS/Android WebSpeech bug).
   function speak(text, priority) {
     if (!_enabled || !text) return;
     if (!window.speechSynthesis) return;
     if (priority === 'interrupt') window.speechSynthesis.cancel();
 
-    // Stop mic before speaking — sets _isSpeaking so onend knows not to auto-restart
+    // Stop mic — abort recogniser before speaking to prevent feedback
     _isSpeaking = true;
     if (_recogniser) {
       try { _recogniser.abort(); } catch(e) {}
@@ -41,10 +42,10 @@ const AfriChessAAC = (function() {
       updateMicButton(false);
     }
 
-    const utt   = new SpeechSynthesisUtterance(text);
-    utt.lang    = S().speechCode;
-    utt.rate    = 0.95;
-    utt.pitch   = 1.0;
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang  = S().speechCode;
+    utt.rate  = 0.95;
+    utt.pitch = 1.0;
 
     const voices  = window.speechSynthesis.getVoices();
     const primary = voices.find(v => v.lang.startsWith(S().speechCode.split('-')[0]));
@@ -52,25 +53,32 @@ const AfriChessAAC = (function() {
     if (primary) utt.voice = primary;
     else if (alt) utt.voice = alt;
 
-    utt.onend = function() {
-      _isSpeaking = false;
-      // Restart mic only if user had it on AND we're in the right state
-      // State machine decides whether to listen for move or for confirmation
-      if (_micEnabled && _gameActive) {
-        setTimeout(function() {
-          if (!_isSpeaking && _micEnabled && _gameActive) {
-            if (_voiceState === 'CONFIRMING') {
-              startConfirmationListener();
-            } else if (_voiceState === 'LISTENING') {
-              startListening();
-            }
-          }
-        }, 800);  // 800ms — enough for TTS audio to fully clear the mic
-      }
-    };
+    // Estimate how long this utterance will take (chars / 15 chars per second + 800ms buffer)
+    // This is the fallback for when utt.onend never fires on mobile
+    const estimatedMs = Math.max(1500, (text.length / 15) * 1000 + 800);
+    let micRestartScheduled = false;
 
-    // Catch synthesis failures (mobile sometimes fails silently)
-    utt.onerror = function() { _isSpeaking = false; };
+    function restartMicAfterSpeech() {
+      if (micRestartScheduled) return;
+      micRestartScheduled = true;
+      _isSpeaking = false;
+      if (_micEnabled && _gameActive) {
+        if (_voiceState === 'CONFIRMING') {
+          startConfirmationListener();
+        } else if (_voiceState === 'LISTENING') {
+          startListening();
+        }
+      }
+    }
+
+    // Primary: onend event (desktop browsers)
+    utt.onend   = function() { restartMicAfterSpeech(); };
+    // Backup:  timer (mobile browsers where onend never fires)
+    utt.onstart = function() {
+      setTimeout(restartMicAfterSpeech, estimatedMs);
+    };
+    // Error fallback
+    utt.onerror = function() { restartMicAfterSpeech(); };
 
     window.speechSynthesis.speak(utt);
   }

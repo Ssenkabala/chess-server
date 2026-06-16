@@ -1215,10 +1215,9 @@ global.Chessground = Nr;
       document.head.appendChild(s1);
     }
   </script>
-  <!-- AAC Voice Accessibility -->
-  <script src="/aac_strings.js"></script>
-  <script src="/aac.js"></script>
-  <script src="/aac_grid.js"></script>
+  <!-- Opening detection -->
+  <script src="/openings.js"></script>
+  <script src="/openings_detector.js"></script>
 </head>
 <body>
 
@@ -1323,9 +1322,12 @@ global.Chessground = Nr;
     <div class="controls">
       <button onclick="resetGame()">New Game</button>
       <button onclick="if(board) board.flip()">Flip Board</button>
+      <button id="btn-takeback-bot" onclick="takebackVsBot()" style="display:none;">↩ Take Back</button>
       <button id="btn-resign" onclick="resignGame()" style="display:none;background:#1a0000;color:#ff4444;border-color:#ff444433;">Resign</button>
       <button id="btn-replay" onclick="replayGame()" style="display:none;">Replay</button>
     </div>
+    <!-- Opening name display -->
+    <div id="opening-display" style="padding:2px 0 4px;min-height:16px;"></div>
   </div>
 
   <!-- ══════════════════ ANALYSIS PANEL ══════════════════ -->
@@ -1625,6 +1627,7 @@ var gameStarted = false;
 var moveHistory = [];   // SAN history for display
 var uciHistory  = [];   // UCI history for engine repetition detection
 var gameSessionId = 0;  // incremented on every new game — stale engine callbacks are discarded
+var takebackCount = 0;  // takebacks used this game (max 3)
 
 function setStatus(msg) { document.getElementById('status').textContent = msg; }
 
@@ -1696,8 +1699,10 @@ function executePlayerMove(source, target, promotion) {
   var uciMove = source + target + (move.promotion ? move.promotion : '');
   uciHistory.push(uciMove);
   if (cg) cg.set({ fen: game.fen(), lastMove: [source, target] });
-  // AAC: announce the move
-  if (typeof AfriChessAAC !== 'undefined') AfriChessAAC.onMove(move, game);
+  // Update opening display
+  if (typeof OpeningDetector !== 'undefined') {
+    OpeningDetector.render(uciHistory, document.getElementById('opening-display'));
+  }
   refreshDests();
   updateCapturedPieces();
   if (game.game_over()) { showResult(); return; }
@@ -1816,8 +1821,12 @@ function _applyEngineMove(uciMove) {
   moveHistory.push(engineMove.san);
   uciHistory.push(uciMove);
   if (cg) cg.set({ fen: game.fen(), lastMove: [from, to] });
-  // AAC: announce engine move
-  if (typeof AfriChessAAC !== 'undefined') AfriChessAAC.onMove(engineMove, game);
+  // Update opening display + show takeback button
+  if (typeof OpeningDetector !== 'undefined') {
+    OpeningDetector.render(uciHistory, document.getElementById('opening-display'));
+  }
+  var tbBtn = document.getElementById('btn-takeback-bot');
+  if (tbBtn) tbBtn.style.display = takebackCount < 3 && uciHistory.length >= 2 ? '' : 'none';
   engineThinking = false;
   refreshDests();
   updateCapturedPieces();
@@ -1951,6 +1960,37 @@ function closeGameOver() {
   document.getElementById('gameover-overlay').classList.remove('active');
 }
 
+function takebackVsBot() {
+  if (!gameStarted || engineThinking || takebackCount >= 3) return;
+  // Need at least 2 moves — engine response + player move
+  if (uciHistory.length < 2) return;
+
+  takebackCount++;
+
+  // Undo engine move + player move (2 half-moves)
+  game.undo(); game.undo();
+  moveHistory.splice(-2);
+  uciHistory.splice(-2);
+
+  // Update UI
+  if (cg) cg.set({
+    fen: game.fen(),
+    lastMove: uciHistory.length >= 2 ? [uciHistory[uciHistory.length-2].slice(0,2), uciHistory[uciHistory.length-2].slice(2,4)] : undefined,
+    movable: { color: playerColor === 'w' ? 'white' : 'black', dests: toDests() },
+  });
+
+  // Hide takeback button if limit reached or not enough moves
+  var tbBtn = document.getElementById('btn-takeback-bot');
+  if (tbBtn) tbBtn.style.display = takebackCount < 3 && uciHistory.length >= 2 ? '' : 'none';
+
+  // Update opening display
+  if (typeof OpeningDetector !== 'undefined') {
+    OpeningDetector.render(uciHistory, document.getElementById('opening-display'));
+  }
+
+  setStatus('Takeback (' + takebackCount + '/3 used). Your move.');
+}
+
 function resignGame() {
   if (!gameStarted || game.game_over()) return;
   var resultKey = playerColor === 'w' ? 'black' : 'white';
@@ -2005,17 +2045,18 @@ function startGame(color) {
   document.getElementById('status').style.display = 'none';
   moveHistory = [];
   uciHistory  = [];
+  takebackCount = 0;
   playerColor = (color === 'white') ? 'w' : 'b';
   gameStarted = true;
   engineThinking = false;
   gameSessionId++;
   game = new Chess();
-  // AAC: announce game start
-  if (typeof AfriChessAAC !== 'undefined') AfriChessAAC.onGameStart(playerColor);
   document.getElementById('btn-white').classList.toggle('active', color === 'white');
   document.getElementById('btn-black').classList.toggle('active', color === 'black');
   document.getElementById('btn-resign').style.display = '';
   document.getElementById('btn-replay').style.display = 'none';
+  var tbBtn = document.getElementById('btn-takeback-bot');
+  if (tbBtn) tbBtn.style.display = 'none'; // hidden until engine makes a move
 
   if (cg) { cg.destroy(); cg = null; }
   var boardEl = document.getElementById('board');
@@ -2846,16 +2887,6 @@ function closeMenuThenAuth() {
   document.getElementById('nav-overlay').classList.remove('open');
   setTimeout(openAuth, 50);
 }
-// ── AAC Voice Accessibility ──────────────────────────────────────────────────
-(function initAAC() {
-  if (typeof AfriChessAAC === 'undefined') return;
-  AfriChessAAC.init({
-    getGame:     function() { return game; },
-    executeMove: function(from, to, promo) { executePlayerMove(from, to, promo || undefined); },
-    getMyColor:  function() { return playerColor; },
-    getClocks:   function() { return null; },  // vs bot has no clock
-  });
-})();
 (function checkUrlParams() {
   const params = new URLSearchParams(window.location.search);
 

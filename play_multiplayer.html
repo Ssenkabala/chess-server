@@ -894,10 +894,9 @@ global.Chessground = Nr;
     }
     .tc-custom-ok:hover { background: #b8732e; }
   </style>
-  <!-- AAC Voice Accessibility -->
-  <script src="/aac_strings.js"></script>
-  <script src="/aac.js"></script>
-  <script src="/aac_grid.js"></script>
+  <!-- Opening detection -->
+  <script src="/openings.js"></script>
+  <script src="/openings_detector.js"></script>
 </head>
 <body>
 
@@ -1097,6 +1096,7 @@ global.Chessground = Nr;
 
       <!-- Move list -->
       <div class="move-list-wrap">
+        <div id="opening-display" style="font-size:10px;color:#00ff9d66;letter-spacing:0.1em;text-transform:uppercase;padding:2px 0 4px;min-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
         <div class="move-list" id="move-list"></div>
       </div>
 
@@ -2003,9 +2003,12 @@ function onGameMessage(e) {
   }
 
   if (msg.type === 'clock') {
+    // Server authoritative clock — resync and restart tick to prevent drift
     clocks.white = msg.white;
     clocks.black = msg.black;
     renderClocks();
+    // Restart tick so it counts from the server-corrected value
+    if (!gameOver) startClockTick();
   }
 
   if (msg.type === 'gameover') {
@@ -2022,10 +2025,6 @@ function onGameMessage(e) {
   if (msg.type === 'both_connected') {
     showGameStatus('Game started!', true);
     setTimeout(() => updateTurnIndicator(), 500);
-    // AAC: announce game start with player color
-    if (typeof AfriChessAAC !== 'undefined') {
-      AfriChessAAC.onGameStart(myColor === 'white' ? 'w' : 'b');
-    }
     // If white, show first-move deadline warning
     if (myColor === 'white' && msg.first_move_timeout) {
       const secs = msg.first_move_timeout;
@@ -2047,7 +2046,6 @@ function onGameMessage(e) {
     showGameStatus('⚠ ' + msg.detail);
   }
   if (msg.type === 'move') {
-    const prevFen = game.fen();
     game.load(msg.fen);
     if (cg) cg.set({ fen: msg.fen, lastMove: msg.move ? [msg.move.slice(0,2), msg.move.slice(2,4)] : undefined });
     highlightLastMove(msg.move);
@@ -2057,15 +2055,9 @@ function onGameMessage(e) {
     refreshDests();
     multiMoveHistory.push(msg.move);
     appendMove(msg.move);
-    // AAC: announce the move
-    if (typeof AfriChessAAC !== 'undefined') {
-      // Reconstruct move object from previous position
-      const tempGame = new Chess(prevFen);
-      if (msg.move) {
-        const moveObj = tempGame.move({ from: msg.move.slice(0,2), to: msg.move.slice(2,4),
-          promotion: msg.move[4] || undefined });
-        if (moveObj) AfriChessAAC.onMove(moveObj, game);
-      }
+    // Update opening display
+    if (typeof OpeningDetector !== 'undefined') {
+      OpeningDetector.render(multiMoveHistory.filter(Boolean), document.getElementById('opening-display'));
     }
     startClockTick();
   }
@@ -2647,19 +2639,6 @@ function goToLobby() {
 // ═══════════════════════════════════════════════════════════════
 //  BOOT
 // ═══════════════════════════════════════════════════════════════
-// ── AAC Voice Accessibility ──────────────────────────────────────────────────
-(function initAACMultiplayer() {
-  if (typeof AfriChessAAC === 'undefined') return;
-  AfriChessAAC.init({
-    getGame:     function() { return game; },
-    executeMove: function(from, to, promo) {
-      if (!myTurn || gameOver) return;
-      executeMove(from, to, promo || 'q');
-    },
-    getMyColor:  function() { return myColor === 'white' ? 'w' : 'b'; },
-    getClocks:   function() { return clocks; },
-  });
-})();
 
 bootAuth();
 </script>

@@ -65,7 +65,7 @@ const AfriChessAAC = (function() {
               startListening();
             }
           }
-        }, 300);
+        }, 800);  // 800ms — enough for TTS audio to fully clear the mic
       }
     };
 
@@ -237,23 +237,30 @@ const AfriChessAAC = (function() {
     confirmSR.interimResults = false;
 
     confirmSR.onresult = function(e) {
-      const ans = e.results[0][0].transcript.toLowerCase().trim();
-      const yes = S().voiceYes || ['yes'];
-      const no  = S().voiceNo  || ['no'];
+      const ans  = e.results[0][0].transcript.toLowerCase().trim();
+      const yes  = S().voiceYes || ['yes'];
+      const no   = S().voiceNo  || ['no'];
       const move = _pendingMove;
 
       if (yes.some(w => ans.includes(w))) {
-        _pendingMove  = null;
-        _voiceState   = 'LISTENING';
+        // Confirmed — execute the move
+        _pendingMove = null;
+        _voiceState  = 'LISTENING';
         _callbacks.executeMove(move.from, move.to, move.promotion || null);
-        // Mic will restart after move announcement via speak().utt.onend
+        // Mic restarts via speak(move announcement).utt.onend after engine responds
+
       } else if (no.some(w => ans.includes(w))) {
-        _pendingMove  = null;
-        _voiceState   = 'LISTENING';
-        if (_micEnabled && _gameActive) setTimeout(startListening, 200);
+        // Cancelled — go back to listening for a new move
+        _pendingMove = null;
+        _voiceState  = 'LISTENING';
+        if (_micEnabled && _gameActive) setTimeout(startListening, 300);
+
       } else {
-        // Didn't understand yes/no — ask again
-        if (_micEnabled && _gameActive) setTimeout(startConfirmationListener, 200);
+        // Heard something but it wasn't yes/no (e.g. tail of TTS, ambient noise)
+        // Stay in CONFIRMING, try again — do NOT reset _pendingMove
+        if (_micEnabled && _gameActive && _pendingMove) {
+          setTimeout(startConfirmationListener, 300);
+        }
       }
     };
 
@@ -285,40 +292,26 @@ const AfriChessAAC = (function() {
   }
 
   function processVoiceInput(transcript) {
+    // Only called from startListening.onresult — state is LISTENING here
     if (!_callbacks.getGame || !_callbacks.executeMove || !_gameActive) return;
+    if (_voiceState !== 'LISTENING') return;  // ignore if in confirmation flow
     const board = _callbacks.getGame();
     if (!board) return;
 
-    if (_voiceState === 'CONFIRMING' && _pendingMove) {
-      // User spoke during confirmation — treat as yes/no
-      const ans = transcript.toLowerCase().trim();
-      const yes = S().voiceYes || ['yes'];
-      const no  = S().voiceNo  || ['no'];
-      if (yes.some(w => ans.includes(w))) {
-        const move = _pendingMove;
-        _pendingMove = null; _voiceState = 'LISTENING';
-        _callbacks.executeMove(move.from, move.to, move.promotion || null);
-      } else {
-        _pendingMove = null; _voiceState = 'LISTENING';
-        if (_micEnabled && _gameActive) setTimeout(startListening, 200);
-      }
-      return;
-    }
-
-    // Parse move
     const move = parseSpokenMove(transcript, board);
     if (!move) {
-      // Nothing understood — restart listening silently, no speech
+      // Nothing understood — restart listening silently
       if (_micEnabled && _gameActive) setTimeout(startListening, 200);
       return;
     }
 
-    // Ask for confirmation
+    // Valid move — ask for confirmation
     _pendingMove = move;
     _voiceState  = 'CONFIRMING';
     const moveDesc = move.san || (move.from + move.to);
     speak(S().ui.confirm(moveDesc), 'interrupt');
-    // speak() will call startConfirmationListener() via utt.onend
+    // speak() sets _isSpeaking=true, stops mic
+    // utt.onend fires after TTS → startConfirmationListener()
   }
 
   function handleSpokenMove(transcript) {

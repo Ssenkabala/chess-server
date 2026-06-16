@@ -1215,6 +1215,10 @@ global.Chessground = Nr;
       document.head.appendChild(s1);
     }
   </script>
+  <!-- AAC Voice Accessibility -->
+  <script src="/aac_strings.js"></script>
+  <script src="/aac.js"></script>
+  <script src="/aac_grid.js"></script>
 </head>
 <body>
 
@@ -1692,6 +1696,8 @@ function executePlayerMove(source, target, promotion) {
   var uciMove = source + target + (move.promotion ? move.promotion : '');
   uciHistory.push(uciMove);
   if (cg) cg.set({ fen: game.fen(), lastMove: [source, target] });
+  // AAC: announce the move
+  if (typeof AfriChessAAC !== 'undefined') AfriChessAAC.onMove(move, game);
   refreshDests();
   updateCapturedPieces();
   if (game.game_over()) { showResult(); return; }
@@ -1810,6 +1816,8 @@ function _applyEngineMove(uciMove) {
   moveHistory.push(engineMove.san);
   uciHistory.push(uciMove);
   if (cg) cg.set({ fen: game.fen(), lastMove: [from, to] });
+  // AAC: announce engine move
+  if (typeof AfriChessAAC !== 'undefined') AfriChessAAC.onMove(engineMove, game);
   engineThinking = false;
   refreshDests();
   updateCapturedPieces();
@@ -1913,6 +1921,27 @@ function showResult() {
   document.getElementById('gameover-sub').textContent   = sub;
   document.getElementById('gameover-overlay').classList.add('active');
 
+  // Contextual nudge for guests — different message based on outcome
+  var nudge = document.getElementById('gameover-nudge');
+  var nudgeMsg = document.getElementById('gameover-nudge-msg');
+  if (nudge && nudgeMsg && !currentUser) {
+    var msg;
+    if (resultKey !== 'draw' && resultKey !== playerColor) {
+      // Player won
+      msg = '🏆 Nice game! Create a free account to save this win, build your ELO rating, and compete in live tournaments against players across Africa.';
+    } else if (resultKey === (playerColor === 'w' ? 'black' : 'white')) {
+      // Player lost
+      msg = '📈 Keep playing — every game makes you stronger. Sign up to track your progress, earn a rating, and compete in AfriChess tournaments.';
+    } else {
+      // Draw
+      msg = '♟ Good game! Create a free account to save your games, earn an ELO rating, and join live tournaments across Africa.';
+    }
+    nudgeMsg.textContent = msg;
+    nudge.style.display = '';
+  } else if (nudge) {
+    nudge.style.display = 'none';
+  }
+
   var pgn = buildPGN(game, resultKey);
   var colorName = playerColor === 'w' ? 'white' : 'black';
   saveGame(pgn, resultKey, colorName);
@@ -1937,6 +1966,16 @@ function resignGame() {
   document.getElementById('gameover-title').textContent = 'You resigned.';
   document.getElementById('gameover-sub').textContent   = 'Engine wins.';
   document.getElementById('gameover-overlay').classList.add('active');
+
+  // Guest nudge on resign
+  var nudge = document.getElementById('gameover-nudge');
+  var nudgeMsg = document.getElementById('gameover-nudge-msg');
+  if (nudge && nudgeMsg && !currentUser) {
+    nudgeMsg.textContent = '📈 Sign up to track your games, earn an ELO rating, and challenge real players across Africa in live tournaments.';
+    nudge.style.display = '';
+  } else if (nudge) {
+    nudge.style.display = 'none';
+  }
   setStatus('You resigned. Engine wins.');
 
   var pgn = buildPGN(game, resultKey);
@@ -1971,6 +2010,8 @@ function startGame(color) {
   engineThinking = false;
   gameSessionId++;
   game = new Chess();
+  // AAC: announce game start
+  if (typeof AfriChessAAC !== 'undefined') AfriChessAAC.onGameStart(playerColor);
   document.getElementById('btn-white').classList.toggle('active', color === 'white');
   document.getElementById('btn-black').classList.toggle('active', color === 'black');
   document.getElementById('btn-resign').style.display = '';
@@ -2805,7 +2846,16 @@ function closeMenuThenAuth() {
   document.getElementById('nav-overlay').classList.remove('open');
   setTimeout(openAuth, 50);
 }
-// ── Load position from URL (from history page) ────────────────
+// ── AAC Voice Accessibility ──────────────────────────────────────────────────
+(function initAAC() {
+  if (typeof AfriChessAAC === 'undefined') return;
+  AfriChessAAC.init({
+    getGame:     function() { return game; },
+    executeMove: function(from, to, promo) { executePlayerMove(from, to, promo || undefined); },
+    getMyColor:  function() { return playerColor; },
+    getClocks:   function() { return null; },  // vs bot has no clock
+  });
+})();
 (function checkUrlParams() {
   const params = new URLSearchParams(window.location.search);
 
@@ -2923,6 +2973,16 @@ function closeMenuThenAuth() {
     <div class="gameover-emoji" id="gameover-emoji">♟</div>
     <div class="gameover-title" id="gameover-title">Game Over</div>
     <div class="gameover-sub" id="gameover-sub"></div>
+    <!-- Guest nudge — hidden for signed-in users, shown contextually for guests -->
+    <div id="gameover-nudge" style="display:none;margin:0 0 18px;padding:12px 14px;
+         background:#0a1a0f;border:1px solid #00ff9d22;border-radius:4px;text-align:left;">
+      <div id="gameover-nudge-msg" style="font-size:12px;color:#888;margin-bottom:10px;line-height:1.6;"></div>
+      <button onclick="openAuth()" style="background:#00ff9d;color:#000;border:none;
+              padding:8px 18px;border-radius:3px;font-size:12px;font-weight:700;
+              cursor:pointer;letter-spacing:0.08em;text-transform:uppercase;width:100%;">
+        Create Free Account →
+      </button>
+    </div>
     <button class="gameover-btn" onclick="closeGameOver(); resetGame()">New Game</button>
     <button class="gameover-btn secondary" onclick="closeGameOver()">Review</button>
   </div>

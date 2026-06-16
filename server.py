@@ -3328,6 +3328,18 @@ def serve_book():
         raise HTTPException(status_code=404, detail="Opening book not found")
     return FileResponse("book.bin", media_type="application/octet-stream")
 
+@app.get("/aac_strings.js")
+def serve_aac_strings():
+    return FileResponse("aac_strings.js", media_type="application/javascript")
+
+@app.get("/aac.js")
+def serve_aac():
+    return FileResponse("aac.js", media_type="application/javascript")
+
+@app.get("/aac_grid.js")
+def serve_aac_grid():
+    return FileResponse("aac_grid.js", media_type="application/javascript")
+
 @app.get("/")
 def root():
     return FileResponse("landing.html")

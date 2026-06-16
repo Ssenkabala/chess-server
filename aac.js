@@ -8,46 +8,73 @@
 const AfriChessAAC = (function() {
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let _lang         = localStorage.getItem('aac_lang') || AAC_DEFAULT_LANG;
-  let _enabled      = localStorage.getItem('aac_enabled') === 'true'; // default OFF
-  let _micEnabled   = false;
-  let _recogniser   = null;
-  let _callbacks    = {};
-  let _scanMode     = false;   // never auto-start scanning
-  let _scanInterval = null;
-  let _scanIndex    = 0;
-  let _panelVisible = false;
-  let _gameActive   = false;   // true only when a game is actually in progress
+  let _lang              = localStorage.getItem('aac_lang') || AAC_DEFAULT_LANG;
+  let _enabled           = localStorage.getItem('aac_enabled') === 'true'; // default OFF
+  let _micEnabled        = false;
+  let _recogniser        = null;
+  let _callbacks         = {};
+  let _scanMode          = false;
+  let _scanInterval      = null;
+  let _scanIndex         = 0;
+  let _panelVisible      = false;
+  let _gameActive        = false;
+  let _isSpeaking        = false;  // true while TTS is playing — guards mic restart
+  let _voiceState        = 'IDLE'; // IDLE | LISTENING | CONFIRMING
+  let _pendingMove       = null;   // move awaiting yes/no confirmation
 
   function S() { return aacStrings(_lang); }
 
   // ── Speech Synthesis ────────────────────────────────────────────────────────
+  // safeSpeak: the ONLY way audio is produced.
+  // Stops mic, speaks, then restarts mic if it was on.
+  // _isSpeaking flag prevents onend from restarting the mic while still talking.
   function speak(text, priority) {
     if (!_enabled || !text) return;
     if (!window.speechSynthesis) return;
     if (priority === 'interrupt') window.speechSynthesis.cancel();
 
-    // Stop mic while speaking — prevents audio feedback loop.
-    // We do NOT auto-restart after speaking. The mic is only restarted
-    // by explicit user button press or after handleSpokenMove completes.
+    // Stop mic before speaking — sets _isSpeaking so onend knows not to auto-restart
+    _isSpeaking = true;
     if (_recogniser) {
-      _micEnabled = false;
       try { _recogniser.abort(); } catch(e) {}
       _recogniser = null;
       updateMicButton(false);
     }
 
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang  = S().speechCode;
-    utt.rate  = 0.95;
-    utt.pitch = 1.0;
+    const utt   = new SpeechSynthesisUtterance(text);
+    utt.lang    = S().speechCode;
+    utt.rate    = 0.95;
+    utt.pitch   = 1.0;
+
     const voices  = window.speechSynthesis.getVoices();
     const primary = voices.find(v => v.lang.startsWith(S().speechCode.split('-')[0]));
     const alt     = S().altCode ? voices.find(v => v.lang.startsWith(S().altCode.split('-')[0])) : null;
     if (primary) utt.voice = primary;
     else if (alt) utt.voice = alt;
+
+    utt.onend = function() {
+      _isSpeaking = false;
+      // Restart mic only if user had it on AND we're in the right state
+      // State machine decides whether to listen for move or for confirmation
+      if (_micEnabled && _gameActive) {
+        setTimeout(function() {
+          if (!_isSpeaking && _micEnabled && _gameActive) {
+            if (_voiceState === 'CONFIRMING') {
+              startConfirmationListener();
+            } else if (_voiceState === 'LISTENING') {
+              startListening();
+            }
+          }
+        }, 300);
+      }
+    };
+
+    // Catch synthesis failures (mobile sometimes fails silently)
+    utt.onerror = function() { _isSpeaking = false; };
+
     window.speechSynthesis.speak(utt);
   }
+
 
   // ── Move Announcer ──────────────────────────────────────────────────────────
   function announceMove(moveObj, board) {
@@ -148,10 +175,11 @@ const AfriChessAAC = (function() {
   }
 
   function startListening() {
-    if (!_gameActive) return;  // silent guard — no speech, no loop
+    if (!_gameActive || _isSpeaking) return;
     if (!window.SpeechRecognition && !window.webkitSpeechRecognition) return;
-    if (_recogniser) return;   // already listening
+    if (_recogniser) return;  // already active
 
+    _voiceState = 'LISTENING';
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     _recogniser = new SR();
     _recogniser.lang = S().speechCode;
@@ -162,34 +190,30 @@ const AfriChessAAC = (function() {
     updateMicButton(true);
 
     _recogniser.onresult = function(e) {
-      // Got a result — stop listening, process the move
-      // (speak() will have stopped the mic via abort anyway, this is belt-and-suspenders)
       const transcript = e.results[0][0].transcript;
       _recogniser = null;
       updateMicButton(false);
-      _micEnabled = false;
-      handleSpokenMove(transcript);
+      processVoiceInput(transcript);
     };
 
     _recogniser.onerror = function(e) {
+      _recogniser = null;
+      if (_isSpeaking) return;  // speaking caused this — onend will restart
       if (e.error === 'no-speech') {
-        // Silence — just restart quietly, no speak() call (that causes the loop)
-        _recogniser = null;
-        if (_micEnabled && _gameActive) {
-          setTimeout(startListening, 200);
-        }
+        // Timed out waiting — restart silently
+        if (_micEnabled && _gameActive) setTimeout(startListening, 200);
         return;
       }
-      // Real error
-      _recogniser = null;
-      _micEnabled = false;
       updateMicButton(false);
     };
 
     _recogniser.onend = function() {
-      // Only fires if not aborted — restart if still meant to be listening
-      if (_micEnabled && _gameActive && !_recogniser) {
+      _recogniser = null;
+      if (_isSpeaking) return;  // TTS caused abort — speak.utt.onend will restart
+      if (_micEnabled && _gameActive && _voiceState === 'LISTENING') {
         setTimeout(startListening, 200);
+      } else {
+        updateMicButton(false);
       }
     };
 
@@ -202,8 +226,57 @@ const AfriChessAAC = (function() {
     }
   }
 
+  function startConfirmationListener() {
+    if (!_gameActive || _isSpeaking || !_pendingMove) return;
+    if (!window.SpeechRecognition && !window.webkitSpeechRecognition) return;
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const confirmSR = new SR();
+    confirmSR.lang = S().speechCode;
+    confirmSR.continuous = false;
+    confirmSR.interimResults = false;
+
+    confirmSR.onresult = function(e) {
+      const ans = e.results[0][0].transcript.toLowerCase().trim();
+      const yes = S().voiceYes || ['yes'];
+      const no  = S().voiceNo  || ['no'];
+      const move = _pendingMove;
+
+      if (yes.some(w => ans.includes(w))) {
+        _pendingMove  = null;
+        _voiceState   = 'LISTENING';
+        _callbacks.executeMove(move.from, move.to, move.promotion || null);
+        // Mic will restart after move announcement via speak().utt.onend
+      } else if (no.some(w => ans.includes(w))) {
+        _pendingMove  = null;
+        _voiceState   = 'LISTENING';
+        if (_micEnabled && _gameActive) setTimeout(startListening, 200);
+      } else {
+        // Didn't understand yes/no — ask again
+        if (_micEnabled && _gameActive) setTimeout(startConfirmationListener, 200);
+      }
+    };
+
+    confirmSR.onerror = function() {
+      if (_isSpeaking) return;
+      if (_micEnabled && _gameActive) setTimeout(startConfirmationListener, 300);
+    };
+
+    confirmSR.onend = function() {
+      if (_isSpeaking) return;
+      // If still in confirmation state, restart confirmation listener
+      if (_micEnabled && _gameActive && _voiceState === 'CONFIRMING') {
+        setTimeout(startConfirmationListener, 200);
+      }
+    };
+
+    try { confirmSR.start(); } catch(e) {}
+  }
+
   function stopListening() {
-    _micEnabled = false;   // must be set BEFORE abort() so onend doesn't restart
+    _micEnabled  = false;
+    _voiceState  = 'IDLE';
+    _pendingMove = null;
     if (_recogniser) {
       try { _recogniser.abort(); } catch(e) {}
       _recogniser = null;
@@ -211,50 +284,47 @@ const AfriChessAAC = (function() {
     updateMicButton(false);
   }
 
-  function handleSpokenMove(transcript) {
+  function processVoiceInput(transcript) {
     if (!_callbacks.getGame || !_callbacks.executeMove || !_gameActive) return;
     const board = _callbacks.getGame();
     if (!board) return;
-    const move = parseSpokenMove(transcript, board);
 
-    if (!move) {
-      // No move parsed — restart listening silently (no speak, no loop)
-      if (_micEnabled && _gameActive) setTimeout(startListening, 300);
+    if (_voiceState === 'CONFIRMING' && _pendingMove) {
+      // User spoke during confirmation — treat as yes/no
+      const ans = transcript.toLowerCase().trim();
+      const yes = S().voiceYes || ['yes'];
+      const no  = S().voiceNo  || ['no'];
+      if (yes.some(w => ans.includes(w))) {
+        const move = _pendingMove;
+        _pendingMove = null; _voiceState = 'LISTENING';
+        _callbacks.executeMove(move.from, move.to, move.promotion || null);
+      } else {
+        _pendingMove = null; _voiceState = 'LISTENING';
+        if (_micEnabled && _gameActive) setTimeout(startListening, 200);
+      }
       return;
     }
 
+    // Parse move
+    const move = parseSpokenMove(transcript, board);
+    if (!move) {
+      // Nothing understood — restart listening silently, no speech
+      if (_micEnabled && _gameActive) setTimeout(startListening, 200);
+      return;
+    }
+
+    // Ask for confirmation
+    _pendingMove = move;
+    _voiceState  = 'CONFIRMING';
     const moveDesc = move.san || (move.from + move.to);
-    speak(S().ui.confirm(moveDesc), 'interrupt');  // speak() stops mic
-
-    // Start confirmation listener after synthesis has time to finish
-    // Use a generous delay so the mic doesn't pick up the TTS
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { _callbacks.executeMove(move.from, move.to, move.promotion || null); return; }
-
-    setTimeout(function() {
-      const confirmSR = new SR();
-      confirmSR.lang = S().speechCode;
-      confirmSR.onresult = function(e) {
-        const ans = e.results[0][0].transcript.toLowerCase().trim();
-        const yes = S().voiceYes || ['yes'];
-        const no  = S().voiceNo  || ['no'];
-        if (yes.some(w => ans.includes(w))) {
-          _callbacks.executeMove(move.from, move.to, move.promotion || null);
-          // After move: restart mic silently if user had it on
-          if (_micEnabled) setTimeout(startListening, 500);
-        } else if (no.some(w => ans.includes(w))) {
-          // Restart listening silently — no speak() to avoid another loop
-          if (_micEnabled && _gameActive) setTimeout(startListening, 300);
-        }
-        // Unrecognised answer: restart listening silently too
-        if (_micEnabled && _gameActive) setTimeout(startListening, 300);
-      };
-      confirmSR.onerror = function() {
-        if (_micEnabled && _gameActive) setTimeout(startListening, 300);
-      };
-      try { confirmSR.start(); } catch(e) {}
-    }, 1500);  // 1.5s — enough for TTS to finish speaking the confirmation
+    speak(S().ui.confirm(moveDesc), 'interrupt');
+    // speak() will call startConfirmationListener() via utt.onend
   }
+
+  function handleSpokenMove(transcript) {
+    processVoiceInput(transcript);
+  }
+
 
   // ── Panel ───────────────────────────────────────────────────────────────────
   function buildPanel() {
@@ -347,9 +417,14 @@ const AfriChessAAC = (function() {
     const btnCss = 'width:100%;padding:8px;margin-bottom:6px;background:#111;color:#888;border:1px solid #333;border-radius:3px;cursor:pointer;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;';
     micBtn.style.cssText = btnCss;
     micBtn.addEventListener('click', function(e) {
-      e.stopPropagation();  // prevent panel click-through
-      if (_micEnabled) { stopListening(); _micEnabled = false; }
-      else { _micEnabled = true; startListening(); }
+      e.stopPropagation();
+      if (_micEnabled) {
+        stopListening();  // stopListening sets _micEnabled=false and _voiceState=IDLE
+      } else {
+        _micEnabled = true;
+        _voiceState = 'LISTENING';
+        startListening();
+      }
     });
     panel.appendChild(micBtn);
 

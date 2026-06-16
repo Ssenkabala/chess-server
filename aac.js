@@ -26,6 +26,13 @@ const AfriChessAAC = (function() {
     if (!_enabled || !text) return;
     if (!window.speechSynthesis) return;
     if (priority === 'interrupt') window.speechSynthesis.cancel();
+
+    // Pause the mic while speaking — browser conflicts if both run together
+    // _micEnabled stays true so we know to restart after
+    if (_recogniser) {
+      try { _recogniser.abort(); } catch(e) {}
+      _recogniser = null;
+    }
     const utt = new SpeechSynthesisUtterance(text);
     utt.lang  = S().speechCode;
     utt.rate  = 0.95;
@@ -35,6 +42,21 @@ const AfriChessAAC = (function() {
     const alt     = S().altCode ? voices.find(v => v.lang.startsWith(S().altCode.split('-')[0])) : null;
     if (primary) utt.voice = primary;
     else if (alt) utt.voice = alt;
+
+    // When synthesis ends, restart mic if user had it on
+    utt.onend = function() {
+      if (_micEnabled && _gameActive) {
+        // Small delay so the mic doesn't pick up the tail of the TTS audio
+        setTimeout(function() {
+          if (_micEnabled && _gameActive && _recogniser) {
+            try { _recogniser.start(); } catch(e) {}
+          } else if (_micEnabled && _gameActive) {
+            startListening();
+          }
+        }, 400);
+      }
+    };
+
     window.speechSynthesis.speak(utt);
   }
 

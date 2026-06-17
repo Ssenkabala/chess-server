@@ -2047,18 +2047,38 @@ function onGameMessage(e) {
   if (msg.type === 'both_connected') {
     showGameStatus('Game started!', true);
     setTimeout(() => updateTurnIndicator(), 500);
-    // If white, show first-move deadline warning
-    if (myColor === 'white' && msg.first_move_timeout) {
-      const secs = msg.first_move_timeout;
-      let remaining = secs;
+    // Show the first-move countdown to whichever player actually needs to move —
+    // not hardcoded to white. Uses the server's real remaining time so a
+    // tournament game where the deadline was already ticking before this
+    // player connected shows an accurate countdown, not the full duration.
+    if (msg.first_move_remaining != null && myTurn) {
+      let remaining = msg.first_move_remaining;
+      if (window._firstMoveWarn) clearInterval(window._firstMoveWarn);
       const warn = setInterval(() => {
         remaining--;
-        if (remaining <= 10 && remaining > 0) {
-          showGameStatus(`Make your first move! ${remaining}s remaining…`, true);
+        if (remaining <= 15 && remaining > 0) {
+          showGameStatus(`Make your move! ${remaining}s remaining…`, true);
         }
         if (remaining <= 0) clearInterval(warn);
       }, 1000);
-      // Clear warning once a move is made
+      window._firstMoveWarn = warn;
+    }
+    return;
+  }
+
+  if (msg.type === 'first_move_started') {
+    // Black's response-deadline countdown — mirrors the both_connected
+    // countdown but fires after white's first move instead of at game start.
+    if (msg.first_move_remaining != null) {
+      let remaining = msg.first_move_remaining;
+      if (window._firstMoveWarn) clearInterval(window._firstMoveWarn);
+      const warn = setInterval(() => {
+        remaining--;
+        if (remaining <= 15 && remaining > 0) {
+          showGameStatus(`Make your move! ${remaining}s remaining…`, true);
+        }
+        if (remaining <= 0) clearInterval(warn);
+      }, 1000);
       window._firstMoveWarn = warn;
     }
     return;

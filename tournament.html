@@ -1548,6 +1548,24 @@ function connectTournamentWs(tid, tournament) {
       } else if (msg.type === 'bye') {
         hideArenaCountdown();
         showArenaStatus('⏸ ' + (msg.message || 'You have a bye this round — waiting for next pairing…'));
+      } else if (msg.type === 'paused_state_sync') {
+        // Silent server-initiated pause sync (e.g. after a no-show forfeit).
+        // No status message shown by design — the player simply stops
+        // getting paired and will see the Resume button if they check.
+        // This exists specifically to stop the client's automatic
+        // "available" ping (sent after every game_over) from undoing a
+        // pause the server just set — without this, the client kept
+        // re-marking itself available and could be re-paired and forfeit
+        // repeatedly in a tight loop with a small player pool.
+        _arenaPaused = !!msg.paused;
+        const icon  = document.getElementById('nav-pause-icon');
+        const label = document.getElementById('nav-pause-label');
+        const btn   = document.getElementById('btn-nav-pause');
+        if (_arenaPaused) {
+          if (icon)  icon.textContent  = '▶';
+          if (label) label.textContent = 'Resume';
+          if (btn)   { btn.classList.add('active-pause'); btn.disabled = false; }
+        }
       } else if (msg.type === 'paused') {
         _arenaPaused = true;
         const icon = document.getElementById('nav-pause-icon');

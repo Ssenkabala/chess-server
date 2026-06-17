@@ -1377,13 +1377,18 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
     }
 
 
-def tournament_handle_forfeit(game: dict, loser_id: str, winner_id: str):
+async def tournament_handle_forfeit(game: dict, loser_id: str, winner_id: str, result: str):
     """
     On a first-move-timeout forfeit in an arena tournament game:
       - The player who failed to move (loser) is silently paused —
         they will not be paired again until they click Resume.
       - The player who showed up (winner) is sent back into the pairing
         pool immediately, available for a new opponent.
+      - The tournament_games row is marked with the result, so the
+        pairings list stops showing a "Watch" link for a game that's
+        actually finished (previously this was never written for
+        forfeits, only for normal game-ends submitted via the client,
+        leaving forfeited games looking permanently in-progress).
     No-op for casual (non-tournament) games.
     """
     tid = game.get("tournament_id")
@@ -1392,9 +1397,39 @@ def tournament_handle_forfeit(game: dict, loser_id: str, winner_id: str):
     conns = tournament_connections.get(tid, {})
     pg    = tournament_player_game.setdefault(tid, {})
 
+    # Mark the tournament_games row so it stops appearing as in-progress.
+    # This mirrors what /api/tournament/result does for normal game-ends,
+    # but is called directly server-side since there's no client to call
+    # the endpoint when a player has forfeited by never connecting at all.
+    db_game_id = game.get("tournament_db_id")
+    if db_game_id and SUPABASE_SERVICE_KEY:
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.patch(
+                    f"{SUPABASE_URL}/rest/v1/tournament_games",
+                    params={"id": f"eq.{db_game_id}"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY,
+                             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                             "Content-Type": "application/json"},
+                    json={"result": result, "played_at": datetime.utcnow().isoformat()}
+                )
+        except Exception as e:
+            print(f"[arena] failed to write forfeit result for {db_game_id}: {e}", flush=True)
+
     if loser_id in conns:
         conns[loser_id]["available"] = False
         conns[loser_id]["paused"]    = True
+        # Silent state sync — not a visible message, just corrects the
+        # client's local _arenaPaused flag so it stops sending "available"
+        # automatically after this game. The player sees nothing; they'll
+        # simply notice they're not getting paired and can click Resume
+        # themselves when they're back, per the no-message-on-forfeit design.
+        loser_ws = conns[loser_id].get("ws")
+        if loser_ws:
+            try:
+                await arena_send(loser_ws, {"type": "paused_state_sync", "paused": True})
+            except Exception:
+                pass
     if loser_id in pg:
         pg[loser_id] = None
 
@@ -1445,7 +1480,7 @@ async def first_move_timeout_loop(game_id: str):
                 if not game.get("_elo_updated"):
                     game["_elo_updated"] = True
                     await update_elos(game, "black")
-                tournament_handle_forfeit(game, loser_id=game.get("white_id"), winner_id=game.get("black_id"))
+                await tournament_handle_forfeit(game, loser_id=game.get("white_id"), winner_id=game.get("black_id"), result="black")
                 await asyncio.sleep(1)
                 active_games.pop(game_id, None)
                 print(f"[game] {game_id} — white forfeited (no first move)", flush=True)
@@ -1455,6 +1490,16 @@ async def first_move_timeout_loop(game_id: str):
         # Phase 3: white just made move 1 — start black's deadline
         if moves_made == 1 and black_deadline is None:
             black_deadline = time.time() + game["first_move_timeout"]
+            # Tell black their response clock has started — without this,
+            # black has no visible countdown at all for their first-response
+            # deadline (this was previously silent, unlike white's deadline
+            # which at least had a client-side, if inaccurate, countdown).
+            black_ws = game.get("black_game_ws")
+            if black_ws:
+                await send(black_ws, {
+                    "type": "first_move_started",
+                    "first_move_remaining": game["first_move_timeout"],
+                })
             continue
 
         # Phase 4: black hasn't responded
@@ -1471,7 +1516,7 @@ async def first_move_timeout_loop(game_id: str):
                 if not game.get("_elo_updated"):
                     game["_elo_updated"] = True
                     await update_elos(game, "white")
-                tournament_handle_forfeit(game, loser_id=game.get("black_id"), winner_id=game.get("white_id"))
+                await tournament_handle_forfeit(game, loser_id=game.get("black_id"), winner_id=game.get("white_id"), result="white")
                 await asyncio.sleep(1)
                 active_games.pop(game_id, None)
                 print(f"[game] {game_id} — black forfeited (no first response)", flush=True)
@@ -2219,11 +2264,19 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
                 conns = tournament_connections.get(tournament_id, {})
                 pg    = tournament_player_game.get(tournament_id, {})
                 if user_id in conns:
-                    conns[user_id]["available"] = True
-                    conns[user_id]["paused"]    = False
-                    # Do NOT overwrite score from client — server already tracks it correctly
-                    # Only trust client score on initial connect (ident message)
-                if user_id in pg:
+                    # IMPORTANT: do NOT clear "paused" here. This message fires
+                    # automatically from the client after every game ends —
+                    # it does not represent the player explicitly choosing to
+                    # resume. If the server just paused this player for a
+                    # no-show/forfeit, this message must not undo that, or a
+                    # forfeited player gets silently re-paired against their
+                    # will and can forfeit repeatedly in a tight loop with a
+                    # small player pool. Only "available" -> True is honoured
+                    # here for players who were never paused in the first
+                    # place (the common case: just finished a normal game).
+                    if not conns[user_id].get("paused"):
+                        conns[user_id]["available"] = True
+                if user_id in pg and not conns.get(user_id, {}).get("paused"):
                     pg[user_id] = None
                 asyncio.create_task(arena_pair(tournament_id))
 
@@ -2691,8 +2744,18 @@ async def game_ws(ws: WebSocket, game_id: str):
         # from the moment they were paired — connecting here does not reset it,
         # so a late-but-within-timeout player doesn't get extra time at their
         # opponent's expense.
+        #
+        # Tell the client the ACTUAL remaining seconds, not just the configured
+        # total timeout — for tournament games the deadline may have already
+        # been ticking for a while before this player finished navigating from
+        # the lobby, so "first_move_timeout" alone would show a misleadingly
+        # large countdown (or none at all, since the old client only showed it
+        # for white).
+        deadline = game.get("first_move_deadline")
+        remaining_secs = max(0, int(deadline - time.time())) if deadline else game.get("first_move_timeout", 60)
         await broadcast(game, {"type": "both_connected",
-                               "first_move_timeout": game.get("first_move_timeout", 60)})
+                               "first_move_timeout": game.get("first_move_timeout", 60),
+                               "first_move_remaining": remaining_secs})
 
         # Push already-received profile to the late-connecting player
         if color == "w" and game.get("black_profile"):

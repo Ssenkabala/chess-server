@@ -1348,9 +1348,9 @@ def parse_clock_seconds(time_control: str | None) -> tuple[int, int]:
 def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
              white_id: str, black_id: str, time_control: str | None = None) -> dict:
     base_secs, inc_secs = parse_clock_seconds(time_control)
-    # First-move timeout = 25% of base time, minimum 10s
-    # e.g. 1+0 → 15s, 3+0 → 45s, 5+0 → 75s, 10+0 → 150s
-    first_move_timeout = max(10, int(base_secs * 0.25))
+    # First-move timeout = 20% of base time, minimum 10s
+    # e.g. 1+0 → 12s, 2+1 → 24s, 3+0 → 36s, 5+0 → 60s, 10+0 → 120s
+    first_move_timeout = max(10, int(base_secs * 0.20))
     # Connection grace period — separate from the move-thinking timeout above.
     # For arena games the forfeit clock now starts the instant pairing happens
     # (so a true no-show still forfeits on schedule), but that means page load,
@@ -1570,18 +1570,14 @@ async def broadcast(game: dict, msg: dict):
 def deduct_clock(game: dict) -> float:
     """
     Deduct elapsed time from the side that just moved, then add increment (Fischer).
-    On the very first move, just starts the clock without deducting.
+    The clock starts ticking from game creation (last_move_ts is set there now,
+    not just on first move) — so the connection-grace + first-move-timeout
+    window genuinely costs the player real clock time, the same as Lichess.
     Returns the remaining clock for the side that just moved (after increment).
     """
     now = time.time()
     game["moves_made"] = game.get("moves_made", 0) + 1
     inc = game.get("increment", 0)
-
-    if game["moves_made"] == 1:
-        # First move — start the clock, don't deduct. Add increment to white's time.
-        game["last_move_ts"] = now
-        game["clock"]["w"] = game["clock"]["w"] + inc
-        return game["clock"]["w"]
 
     last_ts = game.get("last_move_ts") or now
     elapsed = now - last_ts
@@ -1595,7 +1591,11 @@ def deduct_clock(game: dict) -> float:
 
 async def clock_loop(game_id: str):
     """Background task — checks for flag fall every second.
-    Does not tick until both players have connected AND the first move has been made.
+    Ticks from the moment last_move_ts is set (game creation for tournament
+    games, both-connected for casual lobby games) — NOT from the first move.
+    This means the connection-grace + first-move-timeout window genuinely
+    costs the player real clock time, same as Lichess, rather than being a
+    free period that doesn't touch their time control at all.
     """
     while True:
         await asyncio.sleep(1)
@@ -1607,16 +1607,15 @@ async def clock_loop(game_id: str):
         if not game.get("white_game_ws") or not game.get("black_game_ws"):
             continue
 
-        # Wait until first move has been made (first_move_timeout_loop handles pre-game)
-        if game.get("moves_made", 0) == 0:
-            continue
-
         last_ts = game.get("last_move_ts")
         if last_ts is None:
             continue
 
         now     = time.time()
         elapsed = now - last_ts
+        # Before the first move, it's always white's clock running (board.turn
+        # starts as WHITE) — same "whose turn is it" logic works whether or
+        # not any moves have been made yet.
         turn    = "w" if game["board"].turn == chess.WHITE else "b"
         remaining = game["clock"][turn] - elapsed
 

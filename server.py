@@ -4155,7 +4155,7 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
         r = await client.get(
             f"{SUPABASE_URL}/rest/v1/tournaments",
             params={"id": f"eq.{tournament_id}",
-                    "select": "country,region,max_players,status,prize_pool"},
+                    "select": "country,region,max_players,status,prize_pool,format"},
             headers={"apikey": SUPABASE_SERVICE_KEY,
                      "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
@@ -4164,7 +4164,16 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
             raise HTTPException(404, "Tournament not found")
         t = ts[0]
 
-        if t["status"] != "upcoming":
+        # Arena tournaments allow late joining while active — same as Lichess.
+        # You enter with 0 points and play whatever rounds remain.
+        # Swiss/round-robin formats stay closed once started, since their
+        # pairing system assumes a fixed player list from round 1.
+        is_arena = t.get("format") == "arena"
+        if t["status"] == "completed":
+            raise HTTPException(400, "Tournament has ended")
+        if t["status"] == "active" and not is_arena:
+            raise HTTPException(400, "This tournament has already started and is not open for late registration")
+        if t["status"] not in ("upcoming", "active"):
             raise HTTPException(400, "Tournament is not open for registration")
 
         has_prizes = bool(t.get("prize_pool") and float(t.get("prize_pool") or 0) > 0)

@@ -2146,6 +2146,34 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
     if not user_id:
         await ws.close(); return
 
+    # ── Registration gate ────────────────────────────────────────────────────
+    # Opening this WebSocket must NOT be sufficient to enter pairing. A player
+    # must have actually registered via /api/join-tournament (which enforces
+    # country/region eligibility, ban checks, capacity, and prize eligibility).
+    # Without this check, anyone who knows a tournament_id can connect directly
+    # and get paired into real games with real ELO/prize consequences, bypassing
+    # every eligibility check above.
+    try:
+        async with httpx.AsyncClient() as client:
+            reg_check = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"tournament_id": f"eq.{tournament_id}",
+                        "user_id": f"eq.{user_id}", "select": "id"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+        if not reg_check.json():
+            await arena_send(ws, {
+                "type": "error",
+                "detail": "You haven't joined this tournament yet. Go to the tournament page and click Join."
+            })
+            await ws.close()
+            return
+    except Exception as e:
+        print(f"[arena] registration check failed for {user_id} on {tournament_id}: {e}", flush=True)
+        await ws.close()
+        return
+
     tournament_connections.setdefault(tournament_id, {})
     tournament_player_game.setdefault(tournament_id, {})
     tournament_connections[tournament_id][user_id] = {

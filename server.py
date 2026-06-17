@@ -1377,6 +1377,37 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
     }
 
 
+def tournament_handle_forfeit(game: dict, loser_id: str, winner_id: str):
+    """
+    On a first-move-timeout forfeit in an arena tournament game:
+      - The player who failed to move (loser) is silently paused —
+        they will not be paired again until they click Resume.
+      - The player who showed up (winner) is sent back into the pairing
+        pool immediately, available for a new opponent.
+    No-op for casual (non-tournament) games.
+    """
+    tid = game.get("tournament_id")
+    if not tid:
+        return
+    conns = tournament_connections.get(tid, {})
+    pg    = tournament_player_game.setdefault(tid, {})
+
+    if loser_id in conns:
+        conns[loser_id]["available"] = False
+        conns[loser_id]["paused"]    = True
+    if loser_id in pg:
+        pg[loser_id] = None
+
+    if winner_id in conns:
+        conns[winner_id]["available"] = True
+        conns[winner_id]["paused"]    = False
+    if winner_id in pg:
+        pg[winner_id] = None
+
+    print(f"[arena] forfeit in {tid}: {loser_id} paused, {winner_id} returned to pool", flush=True)
+    asyncio.create_task(arena_pair(tid))
+
+
 async def first_move_timeout_loop(game_id: str):
     """
     Enforce first-move timeout for BOTH sides:
@@ -1414,6 +1445,7 @@ async def first_move_timeout_loop(game_id: str):
                 if not game.get("_elo_updated"):
                     game["_elo_updated"] = True
                     await update_elos(game, "black")
+                tournament_handle_forfeit(game, loser_id=game.get("white_id"), winner_id=game.get("black_id"))
                 await asyncio.sleep(1)
                 active_games.pop(game_id, None)
                 print(f"[game] {game_id} — white forfeited (no first move)", flush=True)
@@ -1439,6 +1471,7 @@ async def first_move_timeout_loop(game_id: str):
                 if not game.get("_elo_updated"):
                     game["_elo_updated"] = True
                     await update_elos(game, "white")
+                tournament_handle_forfeit(game, loser_id=game.get("black_id"), winner_id=game.get("white_id"))
                 await asyncio.sleep(1)
                 active_games.pop(game_id, None)
                 print(f"[game] {game_id} — black forfeited (no first response)", flush=True)
@@ -2016,6 +2049,11 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
                              "elo": white_info.get("elo", 1500), "user_id": white_id}
     game["black_profile"] = {"username": black_info["username"],
                              "elo": black_info.get("elo", 1500), "user_id": black_id}
+    # Start the first-move countdown immediately on pairing — do NOT wait for
+    # both players' WebSockets to connect. A player who never shows up must
+    # still forfeit on schedule, the same as one who connects but never moves.
+    game["last_move_ts"]       = time.time()
+    game["first_move_deadline"] = time.time() + game.get("first_move_timeout", 60)
     active_games[game_id] = game
     asyncio.create_task(clock_loop(game_id))
     asyncio.create_task(first_move_timeout_loop(game_id))
@@ -2616,10 +2654,15 @@ async def game_ws(ws: WebSocket, game_id: str):
 
     # Notify both players once both are connected
     if game.get("white_game_ws") and game.get("black_game_ws"):
-        # Set first-move deadline now that both players are present
-        game["last_move_ts"]        = time.time()
-        game["first_move_deadline"] = time.time() + game.get("first_move_timeout", 60)
-        asyncio.create_task(first_move_timeout_loop(game["id"]))
+        if not game.get("tournament_id"):
+            # Casual lobby games: deadline starts once both strangers are present
+            game["last_move_ts"]        = time.time()
+            game["first_move_deadline"] = time.time() + game.get("first_move_timeout", 60)
+            asyncio.create_task(first_move_timeout_loop(game["id"]))
+        # Tournament games already have their deadline + timeout loop running
+        # from the moment they were paired — connecting here does not reset it,
+        # so a late-but-within-timeout player doesn't get extra time at their
+        # opponent's expense.
         await broadcast(game, {"type": "both_connected",
                                "first_move_timeout": game.get("first_move_timeout", 60)})
 

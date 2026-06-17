@@ -2461,6 +2461,26 @@ function analysePosition() {
     wasmEng.ready()
       .then(function() { analysePosition(); })
       .catch(fallbackToServer);
+  } else if (window._wasmSupported && typeof SenkabalaEngine === 'undefined') {
+    // The engine scripts (senkabala.js → senkabala_wasm.js) are still loading
+    // asynchronously and SenkabalaEngine isn't defined yet. Rather than dropping
+    // straight to the single-move server fallback, wait briefly for the scripts
+    // to finish loading, then retry — this is what fixes the "first Load press
+    // gives one move, second press gives full multi-line" symptom.
+    setAnalysisStatus('⏳ Loading engine...');
+    var _waitAttempts = 0;
+    var _waitForEngine = function() {
+      _waitAttempts++;
+      if (typeof SenkabalaEngine !== 'undefined') {
+        analysePosition();  // engine script ready — retry properly
+      } else if (_waitAttempts < 40) {  // up to ~10s (40 × 250ms)
+        setTimeout(_waitForEngine, 250);
+      } else {
+        // Genuinely unavailable after waiting — use server fallback
+        fallbackToServer();
+      }
+    };
+    setTimeout(_waitForEngine, 250);
   } else {
     fallbackToServer();
   }

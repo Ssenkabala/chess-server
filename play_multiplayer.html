@@ -1175,6 +1175,19 @@ function tcCategory(tc) {
   } catch { return ''; }
 }
 
+// Returns the correct ELO for a given time control from a profile object
+// {elo, elo_bullet, elo_blitz, elo_rapid}. Mirrors server's elo_col_for_tc().
+function eloForTimeControl(profile, tc) {
+  if (!profile) return null;
+  const category = tcCategory(tc);
+  let val;
+  if (category === 'Bullet')    val = profile.elo_bullet;
+  else if (category === 'Blitz') val = profile.elo_blitz;
+  else if (category === 'Rapid') val = profile.elo_rapid;
+  else                            val = profile.elo;  // Classical / unknown
+  return val || profile.elo || 1500;
+}
+
 function selectPreset(btn) {
   document.querySelectorAll('.tc-preset').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
@@ -1841,7 +1854,8 @@ function startGame() {
   // Player labels — use separate name + elo elements
   const opponentColor = myColor === 'white' ? 'black' : 'white';
   const myName = myProfile ? myProfile.username : myId;
-  const myElo  = myProfile ? myProfile.elo : null;
+  // Show the ELO for the time control actually being played, not always classical
+  const myElo  = myProfile ? eloForTimeControl(myProfile, window._timeControl) : null;
 
   document.getElementById('name-me').textContent = myName;
   document.getElementById('elo-me').textContent  = myElo ? myElo : '';
@@ -1961,7 +1975,15 @@ function onGameMessage(e) {
   if (msg.type === 'elo_update') {
     const change = msg.new_elo - msg.old_elo;
     myEloChange = change;
-    if (myProfile) { myProfile.eloBefore = msg.old_elo; myProfile.elo = msg.new_elo; }
+    if (myProfile) {
+      // Write to the SAME field the server actually updated (elo / elo_bullet / elo_blitz / elo_rapid).
+      // Previously this always overwrote myProfile.elo regardless of time control,
+      // which corrupted the classical rating whenever a bullet/blitz/rapid game finished.
+      const col = msg.column || 'elo';
+      myProfile[col + 'Before'] = msg.old_elo;  // not persisted, just for this session's overlay
+      myProfile[col] = msg.new_elo;
+      myProfile.eloBefore = msg.old_elo;  // kept for any code still reading this generic field
+    }
     // Update my ELO on the player bar live
     const eloEl = document.getElementById('elo-me');
     if (eloEl) eloEl.textContent = msg.new_elo;

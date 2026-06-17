@@ -1348,20 +1348,18 @@ def parse_clock_seconds(time_control: str | None) -> tuple[int, int]:
 def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
              white_id: str, black_id: str, time_control: str | None = None) -> dict:
     base_secs, inc_secs = parse_clock_seconds(time_control)
-    # First-move timeout = 20% of base time, minimum 10s
+    # The clock starts the moment the game begins — same as a real chess
+    # clock starting the instant both sides sit down, whether or not anyone
+    # has touched a piece yet. If you're stuck in traffic, your clock is
+    # still running.
+    #
+    # first_move_timeout is an early-forfeit rule on top of that: if a player
+    # hasn't made their first move by the time 20% of their base time has
+    # elapsed, they forfeit outright — this catches genuine no-shows quickly
+    # instead of making their opponent wait out an entire clock (e.g. a full
+    # 5 minutes in a 5+0 game) for someone who was never going to show up.
     # e.g. 1+0 → 12s, 2+1 → 24s, 3+0 → 36s, 5+0 → 60s, 10+0 → 120s
     first_move_timeout = max(10, int(base_secs * 0.20))
-    # Connection grace period — separate from the move-thinking timeout above.
-    # For arena games the forfeit clock now starts the instant pairing happens
-    # (so a true no-show still forfeits on schedule), but that means page load,
-    # WASM/engine script loading, and the WebSocket handshake all eat into the
-    # SAME budget as "did they actually think about a move." For short time
-    # controls (e.g. 2+1 → 30s timeout) that pipeline alone can consume the
-    # entire window before a present, attentive player even sees the board —
-    # which is exactly what produced a false forfeit in testing. This flat
-    # grace period is added on top, so the real forfeit clock only starts
-    # ticking once there's been reasonable time to actually connect.
-    connection_grace = 15
     return {
         "id":                   game_id,
         "board":                chess.Board(),
@@ -1376,7 +1374,6 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
         "last_move_ts":         None,
         "first_move_timeout":   first_move_timeout,
         "first_move_deadline":  None,
-        "connection_grace":     connection_grace,
         "moves_made":           0,
         "over":                 False,
         "time_control":         time_control,
@@ -2105,16 +2102,13 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
                              "elo": white_info.get("elo", 1500), "user_id": white_id}
     game["black_profile"] = {"username": black_info["username"],
                              "elo": black_info.get("elo", 1500), "user_id": black_id}
-    # Start the first-move countdown immediately on pairing — do NOT wait for
-    # both players' WebSockets to connect. A player who never shows up must
-    # still forfeit on schedule, the same as one who connects but never moves.
-    # The grace period covers page load + script load + WS handshake time,
-    # which would otherwise eat directly into short time controls' deadlines
-    # (e.g. 2+1's 30s timeout could expire before either player even saw the
-    # board, producing a false forfeit against an attentive, present player).
+    # Clock starts the instant pairing happens — do NOT wait for both
+    # players' WebSockets to connect. This is exactly like a real chess
+    # clock: it's running the moment the game starts, whether or not either
+    # player has shown up yet. A genuine no-show forfeits when 20% of their
+    # base time has elapsed, same as anyone who connects but never moves.
     game["last_move_ts"]        = time.time()
-    grace = game.get("connection_grace", 15)
-    game["first_move_deadline"] = time.time() + grace + game.get("first_move_timeout", 60)
+    game["first_move_deadline"] = time.time() + game.get("first_move_timeout", 60)
     active_games[game_id] = game
     asyncio.create_task(clock_loop(game_id))
     asyncio.create_task(first_move_timeout_loop(game_id))

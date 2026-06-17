@@ -2732,13 +2732,16 @@ async def game_ws(ws: WebSocket, game_id: str):
                     continue
 
                 # Record move time for fair play analysis
+                # IMPORTANT: capture elapsed BEFORE deduct_clock() runs, since
+                # deduct_clock() reads last_move_ts itself to calculate the deduction.
+                # Overwriting last_move_ts here first would zero out the elapsed time
+                # used by the clock math, causing the clock to snap back to full TC.
                 _now = time.time()
                 if game.get("last_move_ts"):
                     _ms = int((_now - game["last_move_ts"]) * 1000)
                     game["move_times_w" if color == "w" else "move_times_b"].append(_ms)
-                game["last_move_ts"] = _now
 
-                # Deduct clock
+                # Deduct clock — this reads and then updates last_move_ts internally
                 remaining = deduct_clock(game)
                 fen = game["board"].fen()
 

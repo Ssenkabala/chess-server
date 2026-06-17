@@ -2052,16 +2052,7 @@ function onGameMessage(e) {
     // tournament game where the deadline was already ticking before this
     // player connected shows an accurate countdown, not the full duration.
     if (msg.first_move_remaining != null && myTurn) {
-      let remaining = msg.first_move_remaining;
-      if (window._firstMoveWarn) clearInterval(window._firstMoveWarn);
-      const warn = setInterval(() => {
-        remaining--;
-        if (remaining <= 15 && remaining > 0) {
-          showGameStatus(`Make your move! ${remaining}s remaining…`, true);
-        }
-        if (remaining <= 0) clearInterval(warn);
-      }, 1000);
-      window._firstMoveWarn = warn;
+      startFirstMoveCountdown(msg.first_move_remaining);
     }
     return;
   }
@@ -2070,16 +2061,7 @@ function onGameMessage(e) {
     // Black's response-deadline countdown — mirrors the both_connected
     // countdown but fires after white's first move instead of at game start.
     if (msg.first_move_remaining != null) {
-      let remaining = msg.first_move_remaining;
-      if (window._firstMoveWarn) clearInterval(window._firstMoveWarn);
-      const warn = setInterval(() => {
-        remaining--;
-        if (remaining <= 15 && remaining > 0) {
-          showGameStatus(`Make your move! ${remaining}s remaining…`, true);
-        }
-        if (remaining <= 0) clearInterval(warn);
-      }, 1000);
-      window._firstMoveWarn = warn;
+      startFirstMoveCountdown(msg.first_move_remaining);
     }
     return;
   }
@@ -2392,6 +2374,40 @@ function showGameStatus(msg, highlight) {
   el.className = 'status-bar' + (highlight ? ' highlight' : '');
 }
 
+// First-move / first-response deadline countdown.
+// Used both at game start (white must move) and after white's first move
+// (black must respond). Shows visible warnings progressively earlier so a
+// present player has real notice, instead of only the last 15 seconds —
+// the previous version gave no visible signal until 15s remained, which
+// felt like a sudden forfeit even though the server-side timeout was
+// always enforced correctly from the start.
+function startFirstMoveCountdown(totalRemaining) {
+  let remaining = totalRemaining;
+  if (window._firstMoveWarn) clearInterval(window._firstMoveWarn);
+
+  // Immediate notice if the window is already short (e.g. late join,
+  // short time control) so the player isn't caught off guard.
+  if (remaining <= 20) {
+    showGameStatus(`Make your move! ${remaining}s remaining…`, true);
+  }
+
+  const warn = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(warn);
+      return;
+    }
+    if (remaining <= 20) {
+      // Last 20s: visible every second, increasingly urgent styling
+      showGameStatus(`Make your move! ${remaining}s remaining…`, true);
+    } else if (remaining % 10 === 0) {
+      // Earlier on: a quieter reminder every 10s so it's not constant noise
+      showGameStatus(`Move within ${remaining}s or you'll forfeit this game.`, false);
+    }
+  }, 1000);
+  window._firstMoveWarn = warn;
+}
+
 // ── Move list & board history ─────────────────────────────────────────────────
 var sanHistory    = [];   // SAN strings in order
 var fenHistory    = [];   // FEN after each move (index 0 = start)
@@ -2579,11 +2595,21 @@ function showOverlay(result, reason) {
             time_control: window._timeControl || null,
           })
         })
-        .then(r => r.json())
-        .then(data => {
-          if (data.error) {
-            document.getElementById('rematch-status').textContent = 'Result submit failed.';
-          } else {
+        .then(async r => {
+          const body = await r.json().catch(() => ({}));
+          return { ok: r.ok, status: r.status, body };
+        })
+        .then(({ ok, status, body }) => {
+          // "Result already submitted" (400) means the forfeit path already
+          // wrote it server-side before this client got a chance to — that's
+          // expected and fine, not a real failure. Only show an error for
+          // genuine failures (network/auth/server errors).
+          const alreadySubmitted = status === 400 && /already submitted/i.test(body.detail || '');
+          if (!ok && !alreadySubmitted) {
+            document.getElementById('rematch-status').textContent =
+              'Result submit failed' + (body.detail ? ': ' + body.detail : '') + '.';
+            return;
+          }
             let secs = 5;
             const statusEl = document.getElementById('rematch-status');
             const countdown = setInterval(() => {
@@ -2598,7 +2624,6 @@ function showOverlay(result, reason) {
               clearInterval(countdown);
               window.location.href = '/tournaments#' + window._tournamentId;
             };
-          }
         })
         .catch(() => {
           document.getElementById('rematch-status').textContent = 'Could not submit result — check connection.';

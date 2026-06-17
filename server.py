@@ -1351,6 +1351,17 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
     # First-move timeout = 25% of base time, minimum 10s
     # e.g. 1+0 → 15s, 3+0 → 45s, 5+0 → 75s, 10+0 → 150s
     first_move_timeout = max(10, int(base_secs * 0.25))
+    # Connection grace period — separate from the move-thinking timeout above.
+    # For arena games the forfeit clock now starts the instant pairing happens
+    # (so a true no-show still forfeits on schedule), but that means page load,
+    # WASM/engine script loading, and the WebSocket handshake all eat into the
+    # SAME budget as "did they actually think about a move." For short time
+    # controls (e.g. 2+1 → 30s timeout) that pipeline alone can consume the
+    # entire window before a present, attentive player even sees the board —
+    # which is exactly what produced a false forfeit in testing. This flat
+    # grace period is added on top, so the real forfeit clock only starts
+    # ticking once there's been reasonable time to actually connect.
+    connection_grace = 15
     return {
         "id":                   game_id,
         "board":                chess.Board(),
@@ -1365,6 +1376,7 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
         "last_move_ts":         None,
         "first_move_timeout":   first_move_timeout,
         "first_move_deadline":  None,
+        "connection_grace":     connection_grace,
         "moves_made":           0,
         "over":                 False,
         "time_control":         time_control,
@@ -2097,8 +2109,13 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
     # Start the first-move countdown immediately on pairing — do NOT wait for
     # both players' WebSockets to connect. A player who never shows up must
     # still forfeit on schedule, the same as one who connects but never moves.
-    game["last_move_ts"]       = time.time()
-    game["first_move_deadline"] = time.time() + game.get("first_move_timeout", 60)
+    # The grace period covers page load + script load + WS handshake time,
+    # which would otherwise eat directly into short time controls' deadlines
+    # (e.g. 2+1's 30s timeout could expire before either player even saw the
+    # board, producing a false forfeit against an attentive, present player).
+    game["last_move_ts"]        = time.time()
+    grace = game.get("connection_grace", 15)
+    game["first_move_deadline"] = time.time() + grace + game.get("first_move_timeout", 60)
     active_games[game_id] = game
     asyncio.create_task(clock_loop(game_id))
     asyncio.create_task(first_move_timeout_loop(game_id))

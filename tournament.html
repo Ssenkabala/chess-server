@@ -362,6 +362,7 @@
     <a href="/history">History</a>
     <a href="/watch">Watch</a>
     <a href="/profile">Profile</a>
+    <a onclick="openFeedback()" style="cursor:pointer;color:#00ff9d;">💬 Feedback</a>
     <a id="nav-signin-t" onclick="openAuth()" style="display:none;cursor:pointer;">Sign In</a>
     <a id="nav-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
   </div>
@@ -376,6 +377,7 @@
   <a href="/leaderboard">Leaderboard</a>
   <a href="/history">History</a>
   <a href="/watch">Watch</a>
+  <a onclick="toggleMobileNav();openFeedback();" style="color:#00ff9d;cursor:pointer;">💬 Feedback</a>
   
   <a id="mob-signin-t" onclick="toggleMobileNav();openAuth();" style="display:none;color:#00ff9d;cursor:pointer;">Sign In</a>
   <a id="mobile-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
@@ -621,6 +623,25 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="feedback-modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeFeedback()">✕</button>
+    <div class="modal-title">Send Feedback</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;">
+      Found a bug or have a suggestion? Tell us what happened — every report helps.
+    </div>
+    <div class="field">
+      <textarea id="feedback-text" rows="5" placeholder="e.g. My game didn't pair me back after it ended, or the clock looked wrong..."
+        style="width:100%;resize:vertical;font-family:inherit;font-size:14px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input,#111);color:inherit;"></textarea>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px;">
+      <button class="btn" id="feedback-submit-btn" onclick="submitFeedback()">Send</button>
+      <button class="btn btn-outline" onclick="closeFeedback()">Cancel</button>
+    </div>
+    <div id="feedback-status" style="color:var(--muted);font-size:12px;margin-top:10px;"></div>
+  </div>
+</div>
+
 <script>
 const SUPABASE_URL  = 'https://nbskgzsvygdmlvwbetxn.supabase.co';
 const SUPABASE_ANON = 'sb_publishable_g5BEYnjhPatfmnHG3jNQTQ_fzgKOy4s';
@@ -683,8 +704,12 @@ function seqHTML(uid) {
 function streakHTML(uid, consecutiveWins) {
   // Use server-provided consecutive_wins if available, fall back to computed _playerStreak
   const s = (consecutiveWins != null ? consecutiveWins : null) ?? _playerStreak[uid] ?? 0;
-  if (s < 2) return '';
-  return `<span class="player-streak">🔥${s}</span>`;
+  // Only show the indicator once the streak bonus is actually active (3rd+
+  // consecutive win) — showing it earlier would imply a bonus that isn't
+  // really being earned yet, which is exactly the confusion this is meant
+  // to prevent.
+  if (s < 3) return '';
+  return `<span class="player-streak" title="${s}-game win streak — earning bonus points">🔥${s}</span>`;
 }
 
 function startTournamentTimer(t) {
@@ -1098,29 +1123,6 @@ async function viewTournament(id) {
   }
 
   let actionBtn = '';
-
-  // Shared eligibility check — used both for pre-start joining and
-  // late-joining an active arena tournament.
-  function eligibilityCheckedJoinButton() {
-    const userCountry = currentProfile ? currentProfile.country : null;
-    const allowedCountry = !t.country || userCountry === t.country;
-    const REGION_COUNTRIES = {
-      east_africa: ['UG','KE','TZ','RW','BI','ET','SS','SO','ER','DJ','SD'],
-      west_africa: ['NG','GH','SN','CI','CM','BJ','TG','GN','GW','SL','LR','GM','MR','CV','NE','BF','ML'],
-      north_africa: ['EG','LY','TN','DZ','MA'],
-      south_africa: ['ZA','ZW','ZM','MW','MZ','NA','BW','LS','SZ','AO','MG','MU','SC','KM','ST','CV'],
-      central_africa: ['CD','CG','CF','GA','GQ','TD'],
-    };
-    const allowedRegion = !t.region || (userCountry && (REGION_COUNTRIES[t.region]||[]).includes(userCountry));
-    if (allowedCountry && allowedRegion) {
-      return `<button class="btn btn-sm" id="btn-join-${id}" onclick="joinTournament('${id}')">Join</button>`;
-    } else if (!allowedCountry) {
-      return `<span style="font-size:11px;color:var(--muted)">Restricted to ${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country}</span>`;
-    } else {
-      return `<span style="font-size:11px;color:var(--muted)">Restricted to ${REGION_LABELS_JS[t.region] || t.region} players</span>`;
-    }
-  }
-
   if (currentUser) {
     const isCreator = t.created_by === currentUser.id;
     if (t.status === 'upcoming') {
@@ -1132,7 +1134,23 @@ async function viewTournament(id) {
       } else if (isRegistered) {
         actionBtn = `<button class="btn btn-outline btn-sm" id="btn-leave-${id}" onclick="leaveTournament('${id}')">Leave</button>`;
       } else if (!isFull) {
-        actionBtn = eligibilityCheckedJoinButton();
+        const userCountry = currentProfile ? currentProfile.country : null;
+        const allowedCountry = !t.country || userCountry === t.country;
+        const REGION_COUNTRIES = {
+          east_africa: ['UG','KE','TZ','RW','BI','ET','SS','SO','ER','DJ','SD'],
+          west_africa: ['NG','GH','SN','CI','CM','BJ','TG','GN','GW','SL','LR','GM','MR','CV','NE','BF','ML'],
+          north_africa: ['EG','LY','TN','DZ','MA'],
+          south_africa: ['ZA','ZW','ZM','MW','MZ','NA','BW','LS','SZ','AO','MG','MU','SC','KM','ST','CV'],
+          central_africa: ['CD','CG','CF','GA','GQ','TD'],
+        };
+        const allowedRegion = !t.region || (userCountry && (REGION_COUNTRIES[t.region]||[]).includes(userCountry));
+        if (allowedCountry && allowedRegion) {
+          actionBtn = `<button class="btn btn-sm" id="btn-join-${id}" onclick="joinTournament('${id}')">Join</button>`;
+        } else if (!allowedCountry) {
+          actionBtn = `<span style="font-size:11px;color:var(--muted)">Restricted to ${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country}</span>`;
+        } else {
+          actionBtn = `<span style="font-size:11px;color:var(--muted)">Restricted to ${REGION_LABELS_JS[t.region] || t.region} players</span>`;
+        }
       } else {
         actionBtn = `<span style="font-size:11px;color:var(--muted)">Tournament full</span>`;
       }
@@ -1143,12 +1161,6 @@ async function viewTournament(id) {
       actionBtn = pending === 0
         ? `<button class="btn btn-sm" onclick="nextRound('${id}')">${nextLabel}</button>`
         : `<span style="font-size:11px;color:var(--muted)">${pending} game(s) pending in round ${currentRound}</span>`;
-    } else if (t.status === 'active' && t.format === 'arena' && !isRegistered) {
-      // Late join — arena tournaments allow joining mid-event, same as Lichess.
-      // You enter with 0 points and play whatever rounds remain.
-      actionBtn = isFull
-        ? `<span style="font-size:11px;color:var(--muted)">Tournament full</span>`
-        : eligibilityCheckedJoinButton();
     }
   }
 
@@ -1396,6 +1408,47 @@ function closeCreate() {
   document.getElementById('create-error').textContent = '';
 }
 
+function openFeedback() {
+  // Deliberately does NOT require sign-in — feedback should work even if
+  // auth itself is the thing that's broken, which is exactly the kind of
+  // report we'd want to receive.
+  document.getElementById('feedback-text').value = '';
+  document.getElementById('feedback-status').textContent = '';
+  document.getElementById('feedback-modal').classList.add('active');
+}
+function closeFeedback() {
+  document.getElementById('feedback-modal').classList.remove('active');
+}
+async function submitFeedback() {
+  const text = document.getElementById('feedback-text').value.trim();
+  const statusEl = document.getElementById('feedback-status');
+  const btn = document.getElementById('feedback-submit-btn');
+  if (!text) { statusEl.textContent = 'Please write something first.'; statusEl.style.color = 'var(--red)'; return; }
+  btn.disabled = true;
+  statusEl.style.color = 'var(--muted)';
+  statusEl.textContent = 'Sending…';
+  try {
+    const r = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rating:  3,            // neutral placeholder — this form is for bug reports, not a star rating
+        message: text,
+        page:    'tournaments' + (currentTournamentId ? ('#' + currentTournamentId) : ''),
+      })
+    });
+    if (!r.ok) throw new Error('Request failed');
+    statusEl.style.color = 'var(--green)';
+    statusEl.textContent = 'Thanks — got it!';
+    setTimeout(closeFeedback, 1200);
+  } catch (e) {
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = 'Could not send — check your connection and try again.';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function onFormatChange() {
   const fmt = document.getElementById('t-format').value;
   document.getElementById('row-duration').style.display = fmt === 'arena' ? '' : 'none';
@@ -1548,24 +1601,6 @@ function connectTournamentWs(tid, tournament) {
       } else if (msg.type === 'bye') {
         hideArenaCountdown();
         showArenaStatus('⏸ ' + (msg.message || 'You have a bye this round — waiting for next pairing…'));
-      } else if (msg.type === 'paused_state_sync') {
-        // Silent server-initiated pause sync (e.g. after a no-show forfeit).
-        // No status message shown by design — the player simply stops
-        // getting paired and will see the Resume button if they check.
-        // This exists specifically to stop the client's automatic
-        // "available" ping (sent after every game_over) from undoing a
-        // pause the server just set — without this, the client kept
-        // re-marking itself available and could be re-paired and forfeit
-        // repeatedly in a tight loop with a small player pool.
-        _arenaPaused = !!msg.paused;
-        const icon  = document.getElementById('nav-pause-icon');
-        const label = document.getElementById('nav-pause-label');
-        const btn   = document.getElementById('btn-nav-pause');
-        if (_arenaPaused) {
-          if (icon)  icon.textContent  = '▶';
-          if (label) label.textContent = 'Resume';
-          if (btn)   { btn.classList.add('active-pause'); btn.disabled = false; }
-        }
       } else if (msg.type === 'paused') {
         _arenaPaused = true;
         const icon = document.getElementById('nav-pause-icon');

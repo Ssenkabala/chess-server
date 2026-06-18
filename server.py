@@ -2231,6 +2231,18 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
 
     tournament_connections.setdefault(tournament_id, {})
     tournament_player_game.setdefault(tournament_id, {})
+
+    # Preserve persistent state across reconnects. The tournament WebSocket
+    # gets torn down and recreated on every full page navigation — and the
+    # client navigates away to /multiplayer for each game, then back to
+    # /tournaments after it ends. Previously this dict was rebuilt from
+    # scratch on every single reconnect, silently wiping out any "paused"
+    # state that a forfeit had just set moments earlier. That meant a
+    # player who forfeited (no-show) got paused, immediately reconnected
+    # via the post-game redirect, and was treated as fresh/available again
+    # — letting them get paired and forfeit repeatedly with zero way to
+    # actually stay excluded from pairing until they explicitly resumed.
+    _existing = tournament_connections[tournament_id].get(user_id, {})
     tournament_connections[tournament_id][user_id] = {
         "ws":               ws,
         "username":         username,
@@ -2239,14 +2251,19 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
         "elo_blitz":        int(ident.get("elo_blitz",  elo)),
         "elo_rapid":        int(ident.get("elo_rapid",  elo)),
         "score":            score,
-        "available":        True,
-        "paused":           False,
-        "consecutive_wins": 0,   # arena streak bonus tracking
+        "available":        not _existing.get("paused", False),
+        "paused":           _existing.get("paused", False),
+        "consecutive_wins": _existing.get("consecutive_wins", 0),
     }
     if tournament_player_game[tournament_id].get(user_id):
         tournament_connections[tournament_id][user_id]["available"] = False
 
     await arena_send(ws, {"type": "connected", "user_id": user_id})
+    if _existing.get("paused"):
+        # Tell the reconnecting client it's still paused, so its UI (Resume
+        # button state) matches reality instead of assuming a fresh connect
+        # means available again.
+        await arena_send(ws, {"type": "paused_state_sync", "paused": True})
     print(f"[arena] {username} connected to {tournament_id}", flush=True)
 
     # If tournament already active, try pairing immediately
@@ -3699,6 +3716,22 @@ async def start_tournament(req: TournamentStartRequest, authorization: str = Hea
                 json={"status": "active"}
             )
 
+            # Tell every player already connected to this tournament's lobby
+            # that it just started — without this, a player who was sitting
+            # in the waiting room before start had no way to know anything
+            # changed until they manually refreshed the page. arena_pair()
+            # below only notifies players it successfully pairs in this pass;
+            # anyone left unpaired (odd count, still mid-connect, etc.) would
+            # otherwise see no update at all.
+            conns = tournament_connections.get(req.tournament_id, {})
+            for uid, info in list(conns.items()):
+                ws = info.get("ws")
+                if ws:
+                    try:
+                        await arena_send(ws, {"type": "tournament_started"})
+                    except Exception:
+                        pass
+
             # Arena: pairing via WebSocket engine
             if t.get("format") == "arena":
                 asyncio.create_task(arena_pair(req.tournament_id))
@@ -3714,7 +3747,7 @@ async def start_tournament(req: TournamentStartRequest, authorization: str = Hea
                         params={"tournament_id": f"eq.{req.tournament_id}", "user_id": f"eq.{white['user_id']}"},
                         headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                                  "Content-Type": "application/json"},
-                        json={"score": white.get("score", 0) + 1}
+                        json={"score": white.get("score", 0) + 2}  # bye = full win value
                     )
                     continue
                 games_to_insert.append({
@@ -3802,7 +3835,7 @@ async def next_round(req: TournamentStartRequest, authorization: str = Header(No
                         params={"tournament_id": f"eq.{req.tournament_id}", "user_id": f"eq.{white['user_id']}"},
                         headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                                  "Content-Type": "application/json"},
-                        json={"score": white.get("score", 0) + 1}
+                        json={"score": white.get("score", 0) + 2}  # bye = full win value
                     )
                     continue
                 games_to_insert.append({
@@ -3831,7 +3864,7 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
     """
     Submit a tournament game result.
     - Marks the game result in tournament_games
-    - Updates tournament_players.score (win=1, draw=0.5, loss=0)
+    - Updates tournament_players.score (win=2, draw=1, loss=0, +1 streak bonus on 2nd+ consecutive win)
     - Syncs tournament_players.elo snapshot from profiles (ELO already updated by update_elos via WS)
     - Does NOT recalculate ELO — that is handled by update_elos() when the game ends over WebSocket
     """
@@ -3931,18 +3964,18 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
         if req.result == 'white':
             w_bonus = streak_bonus(g['white_id'], won=True)
             b_bonus = streak_bonus(g['black_id'], won=False)
-            await add_score(g['white_id'], 1 + w_bonus, w_elo)
+            await add_score(g['white_id'], 2 + w_bonus, w_elo)
             await add_score(g['black_id'], 0,            b_elo)
         elif req.result == 'black':
             w_bonus = streak_bonus(g['white_id'], won=False)
             b_bonus = streak_bonus(g['black_id'], won=True)
             await add_score(g['white_id'], 0,            w_elo)
-            await add_score(g['black_id'], 1 + b_bonus,  b_elo)
+            await add_score(g['black_id'], 2 + b_bonus,  b_elo)
         else:
             streak_bonus(g['white_id'], won=False)   # draw resets streak
             streak_bonus(g['black_id'], won=False)
-            await add_score(g['white_id'], 0.5, w_elo)
-            await add_score(g['black_id'], 0.5, b_elo)
+            await add_score(g['white_id'], 1, w_elo)
+            await add_score(g['black_id'], 1, b_elo)
 
     # Arena: release players and re-pair
     try:

@@ -3986,20 +3986,44 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                 if uid in pg:
                     pg[uid] = None
                 if uid in conns:
-                    conns[uid]["available"] = True
-                    won = (req.result == "white" and uid == g['white_id']) or                            (req.result == "black" and uid == g['black_id'])
+                    # IMPORTANT: do not blindly set available=True here. If this
+                    # player was just paused by a forfeit (tournament_handle_forfeit
+                    # sets paused=True synchronously before this code can run),
+                    # the OTHER player's client independently calling this same
+                    # endpoint after receiving the gameover broadcast must not
+                    # undo that pause. This was the actual cause of forfeited
+                    # players keep getting re-paired indefinitely — the winner's
+                    # own result-submission was unconditionally re-enabling the
+                    # loser's pairing eligibility moments after it was correctly
+                    # disabled.
+                    if not conns[uid].get("paused"):
+                        conns[uid]["available"] = True
+                    won = (req.result == "white" and uid == g['white_id']) or \
+                          (req.result == "black" and uid == g['black_id'])
                     drew = req.result == "draw"
                     # Mirror the streak bonus calculated in the DB scoring above
                     streak = conns_now.get(uid, {}).get("consecutive_wins", 0)
                     bonus = 1 if (won and streak >= 2) else 0
-                    pts = (1 + bonus) if won else (0.5 if drew else 0)
+                    # Must match the scoring scheme used in add_score() above:
+                    # win=2, draw=1, loss=0, +1 streak bonus on 2nd+ consecutive win.
+                    # This in-memory value is what the lobby UI displays — it was
+                    # previously still using the OLD 1/0.5/0 scheme even after the
+                    # database scoring was updated, so the lobby showed different
+                    # numbers than what was actually saved.
+                    pts = (2 + bonus) if won else (1 if drew else 0)
                     conns[uid]["score"] = conns[uid].get("score", 0) + pts
                     # Include ELO change so tournament.html can display it
                     # (the elo_update WS msg goes to the game socket which closes on redirect)
                     tc_str = tc_rows[0].get("time_control") if tc_rows else None
                     elo_col = elo_col_for_tc(tc_str)
-                    p_info  = conns[uid]
-                    old_elo = p_info.get(elo_col) or p_info.get("elo", 1500)
+                    # Use the real ELO fetched fresh from Supabase earlier in this
+                    # function (w_elo/b_elo), not the in-memory conns[uid] value —
+                    # that was only ever a one-time snapshot taken when this player
+                    # first connected to the tournament WebSocket, and never gets
+                    # updated as their actual rating changes from playing games.
+                    # Showing it in the lobby produced exactly the "ELO looks wrong"
+                    # symptom, since it could be many games stale.
+                    old_elo = w_elo if uid == g['white_id'] else b_elo
                     await arena_send(conns[uid]["ws"], {
                         "type":       "game_over",
                         "result":     req.result,

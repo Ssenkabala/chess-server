@@ -1123,6 +1123,29 @@ async function viewTournament(id) {
   }
 
   let actionBtn = '';
+
+  // Shared eligibility check — used both for pre-start joining and
+  // late-joining an active arena tournament.
+  function eligibilityCheckedJoinButton() {
+    const userCountry = currentProfile ? currentProfile.country : null;
+    const allowedCountry = !t.country || userCountry === t.country;
+    const REGION_COUNTRIES = {
+      east_africa: ['UG','KE','TZ','RW','BI','ET','SS','SO','ER','DJ','SD'],
+      west_africa: ['NG','GH','SN','CI','CM','BJ','TG','GN','GW','SL','LR','GM','MR','CV','NE','BF','ML'],
+      north_africa: ['EG','LY','TN','DZ','MA'],
+      south_africa: ['ZA','ZW','ZM','MW','MZ','NA','BW','LS','SZ','AO','MG','MU','SC','KM','ST','CV'],
+      central_africa: ['CD','CG','CF','GA','GQ','TD'],
+    };
+    const allowedRegion = !t.region || (userCountry && (REGION_COUNTRIES[t.region]||[]).includes(userCountry));
+    if (allowedCountry && allowedRegion) {
+      return `<button class="btn btn-sm" id="btn-join-${id}" onclick="joinTournament('${id}')">Join</button>`;
+    } else if (!allowedCountry) {
+      return `<span style="font-size:11px;color:var(--muted)">Restricted to ${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country}</span>`;
+    } else {
+      return `<span style="font-size:11px;color:var(--muted)">Restricted to ${REGION_LABELS_JS[t.region] || t.region} players</span>`;
+    }
+  }
+
   if (currentUser) {
     const isCreator = t.created_by === currentUser.id;
     if (t.status === 'upcoming') {
@@ -1134,23 +1157,7 @@ async function viewTournament(id) {
       } else if (isRegistered) {
         actionBtn = `<button class="btn btn-outline btn-sm" id="btn-leave-${id}" onclick="leaveTournament('${id}')">Leave</button>`;
       } else if (!isFull) {
-        const userCountry = currentProfile ? currentProfile.country : null;
-        const allowedCountry = !t.country || userCountry === t.country;
-        const REGION_COUNTRIES = {
-          east_africa: ['UG','KE','TZ','RW','BI','ET','SS','SO','ER','DJ','SD'],
-          west_africa: ['NG','GH','SN','CI','CM','BJ','TG','GN','GW','SL','LR','GM','MR','CV','NE','BF','ML'],
-          north_africa: ['EG','LY','TN','DZ','MA'],
-          south_africa: ['ZA','ZW','ZM','MW','MZ','NA','BW','LS','SZ','AO','MG','MU','SC','KM','ST','CV'],
-          central_africa: ['CD','CG','CF','GA','GQ','TD'],
-        };
-        const allowedRegion = !t.region || (userCountry && (REGION_COUNTRIES[t.region]||[]).includes(userCountry));
-        if (allowedCountry && allowedRegion) {
-          actionBtn = `<button class="btn btn-sm" id="btn-join-${id}" onclick="joinTournament('${id}')">Join</button>`;
-        } else if (!allowedCountry) {
-          actionBtn = `<span style="font-size:11px;color:var(--muted)">Restricted to ${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country}</span>`;
-        } else {
-          actionBtn = `<span style="font-size:11px;color:var(--muted)">Restricted to ${REGION_LABELS_JS[t.region] || t.region} players</span>`;
-        }
+        actionBtn = eligibilityCheckedJoinButton();
       } else {
         actionBtn = `<span style="font-size:11px;color:var(--muted)">Tournament full</span>`;
       }
@@ -1161,6 +1168,12 @@ async function viewTournament(id) {
       actionBtn = pending === 0
         ? `<button class="btn btn-sm" onclick="nextRound('${id}')">${nextLabel}</button>`
         : `<span style="font-size:11px;color:var(--muted)">${pending} game(s) pending in round ${currentRound}</span>`;
+    } else if (t.status === 'active' && t.format === 'arena' && !isRegistered) {
+      // Late join — arena tournaments allow joining mid-event, same as Lichess.
+      // You enter with 0 points and play whatever rounds remain.
+      actionBtn = isFull
+        ? `<span style="font-size:11px;color:var(--muted)">Tournament full</span>`
+        : eligibilityCheckedJoinButton();
     }
   }
 
@@ -1611,6 +1624,25 @@ function connectTournamentWs(tid, tournament) {
         if (btn) { btn.classList.add('active-pause'); btn.disabled = false; }
         showArenaStatus('⏸ ' + (msg.message || "Paused — you won't be paired until you resume."));
         hideNotifyBar();
+      } else if (msg.type === 'paused_state_sync') {
+        // Silent server-initiated pause sync (e.g. after a no-show forfeit,
+        // or on reconnect after one). No status message shown by design —
+        // the player simply stops getting paired and will see the Resume
+        // button if they check. This exists specifically to stop the
+        // client's automatic "available" ping (sent after every game_over)
+        // from undoing a pause the server just set — without this, a
+        // forfeited player's client re-marks itself available and can be
+        // re-paired and forfeit repeatedly in a tight loop with a small
+        // player pool.
+        _arenaPaused = !!msg.paused;
+        const syncIcon  = document.getElementById('nav-pause-icon');
+        const syncLabel = document.getElementById('nav-pause-label');
+        const syncBtn   = document.getElementById('btn-nav-pause');
+        if (_arenaPaused) {
+          if (syncIcon)  syncIcon.textContent  = '▶';
+          if (syncLabel) syncLabel.textContent = 'Resume';
+          if (syncBtn)   { syncBtn.classList.add('active-pause'); syncBtn.disabled = false; }
+        }
       } else if (msg.type === 'resumed') {
         _arenaPaused = false;
         const icon = document.getElementById('nav-pause-icon');

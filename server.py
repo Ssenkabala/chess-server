@@ -1179,6 +1179,7 @@ tournament_player_game: dict = {}
 # player)" results for a player who actually did have an available opponent
 # a few milliseconds later.
 _arena_pair_locks: dict = {}
+_submit_result_locks: dict = {}
 
 
 # ΓöÇΓöÇ Helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -3911,197 +3912,205 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
     if req.result not in ('white', 'black', 'draw'):
         raise HTTPException(400, "Invalid result")
 
-    async with httpx.AsyncClient() as client:
-        # Get the game
-        r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournament_games",
-            params={"id": f"eq.{req.game_id}", "select": "*"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        games = r.json()
-        if not games:
-            raise HTTPException(404, "Game not found")
-        g = games[0]
-        if g.get('result'):
-            raise HTTPException(400, "Result already submitted")
-
-        # Only white or black player can submit
-        if user_id not in (g['white_id'], g['black_id']):
-            raise HTTPException(403, "Not a player in this game")
-
-        tid = g['tournament_id']
-
-        # Fetch tournament time_control to determine ELO column
-        tc_r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournaments",
-            params={"id": f"eq.{tid}", "select": "format,status,time_control"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        tc_rows = tc_r.json()
-        time_control = tc_rows[0].get("time_control") if tc_rows else None
-        elo_col = elo_col_for_tc(time_control)
-
-        # Mark game result
-        await client.patch(
-            f"{SUPABASE_URL}/rest/v1/tournament_games",
-            params={"id": f"eq.{req.game_id}"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                     "Content-Type": "application/json"},
-            json={"result": req.result, "played_at": datetime.utcnow().isoformat()}
-        )
-
-        # Fetch updated ELOs from the correct column (already written by update_elos over WS)
-        elo_r = await asyncio.gather(
-            client.get(
-                f"{SUPABASE_URL}/rest/v1/profiles",
-                params={"user_id": f"eq.{g['white_id']}", "select": elo_col},
+    # Both players' clients independently call this endpoint after receiving
+    # the same gameover broadcast. Without this lock, two near-simultaneous
+    # requests for the same game_id could each read tournament_games.result
+    # as still null (neither has committed yet) and both proceed to score
+    # the game — doubling every point awarded. Confirmed live: every win in
+    # a tournament was recorded at exactly double its correct value.
+    lock = _submit_result_locks.setdefault(req.game_id, asyncio.Lock())
+    async with lock:
+        async with httpx.AsyncClient() as client:
+            # Get the game
+            r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_games",
+                params={"id": f"eq.{req.game_id}", "select": "*"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-            ),
-            client.get(
-                f"{SUPABASE_URL}/rest/v1/profiles",
-                params={"user_id": f"eq.{g['black_id']}", "select": elo_col},
+            )
+            games = r.json()
+            if not games:
+                raise HTTPException(404, "Game not found")
+            g = games[0]
+            if g.get('result'):
+                raise HTTPException(400, "Result already submitted")
+
+            # Only white or black player can submit
+            if user_id not in (g['white_id'], g['black_id']):
+                raise HTTPException(403, "Not a player in this game")
+
+            tid = g['tournament_id']
+
+            # Fetch tournament time_control to determine ELO column
+            tc_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{tid}", "select": "format,status,time_control"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-            ),
-        )
-        w_elo = (elo_r[0].json()[0].get(elo_col) or 1500) if elo_r[0].json() else 1500
-        b_elo = (elo_r[1].json()[0].get(elo_col) or 1500) if elo_r[1].json() else 1500
+            )
+            tc_rows = tc_r.json()
+            time_control = tc_rows[0].get("time_control") if tc_rows else None
+            elo_col = elo_col_for_tc(time_control)
 
-        # Streak bonus: +1 extra point for every win once a streak reaches 3+
-        # consecutive wins (a loss resets it to 0). Tracked in-memory in
-        # tournament_connections so it survives across games without a DB
-        # round trip.
-        conns_now = tournament_connections.get(tid, {})
-
-        # Update tournament standings: score + ELO snapshot.
-        # IMPORTANT: uses the in-memory conns_now[uid]["score"] as the
-        # authoritative running total, NOT a fresh read from the database.
-        # The old version did read-current-then-write-current+pts as two
-        # separate HTTP round trips — if two games for the same player ended
-        # close together (entirely possible in a fast arena, and especially
-        # likely while the duplicate-pairing bug existed earlier this
-        # session), the second call's read could land before the first
-        # call's write had committed, silently dropping points. Mutating the
-        # in-memory dict has no such gap — it's a synchronous Python
-        # operation with no await between read and write, so it can't be
-        # interleaved by another coroutine on the same event loop.
-        async def add_score(uid, pts, elo_snapshot):
-            if uid not in conns_now:
-                # Player isn't connected right now (shouldn't normally happen
-                # mid-game, but fall back to a DB read so we don't silently
-                # lose points if it does)
-                r2 = await client.get(
-                    f"{SUPABASE_URL}/rest/v1/tournament_players",
-                    params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}", "select": "score"},
-                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-                )
-                current = r2.json()[0].get('score', 0) if r2.json() else 0
-            else:
-                current = conns_now[uid].get("score", 0)
-            new_score = current + pts
-            if uid in conns_now:
-                conns_now[uid]["score"] = new_score
+            # Mark game result
             await client.patch(
-                f"{SUPABASE_URL}/rest/v1/tournament_players",
-                params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}"},
+                f"{SUPABASE_URL}/rest/v1/tournament_games",
+                params={"id": f"eq.{req.game_id}"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                          "Content-Type": "application/json"},
-                json={"score": new_score, "elo": elo_snapshot}
+                json={"result": req.result, "played_at": datetime.utcnow().isoformat()}
             )
 
-        def streak_bonus(uid, won):
-            """Update streak counter and return bonus points.
-            Bonus applies to EVERY win once the streak reaches 3+ consecutive
-            wins, continuing until the player loses (which resets it to 0).
-            The 1st and 2nd wins in a streak are plain, no bonus yet."""
-            if uid not in conns_now:
-                return 0
-            if won:
-                conns_now[uid]["consecutive_wins"] = conns_now[uid].get("consecutive_wins", 0) + 1
-                streak = conns_now[uid]["consecutive_wins"]
-                return 1 if streak >= 3 else 0   # bonus on every win once streak hits 3+
+            # Fetch updated ELOs from the correct column (already written by update_elos over WS)
+            elo_r = await asyncio.gather(
+                client.get(
+                    f"{SUPABASE_URL}/rest/v1/profiles",
+                    params={"user_id": f"eq.{g['white_id']}", "select": elo_col},
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                ),
+                client.get(
+                    f"{SUPABASE_URL}/rest/v1/profiles",
+                    params={"user_id": f"eq.{g['black_id']}", "select": elo_col},
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                ),
+            )
+            w_elo = (elo_r[0].json()[0].get(elo_col) or 1500) if elo_r[0].json() else 1500
+            b_elo = (elo_r[1].json()[0].get(elo_col) or 1500) if elo_r[1].json() else 1500
+
+            # Streak bonus: +1 extra point for every win once a streak reaches 3+
+            # consecutive wins (a loss resets it to 0). Tracked in-memory in
+            # tournament_connections so it survives across games without a DB
+            # round trip.
+            conns_now = tournament_connections.get(tid, {})
+
+            # Update tournament standings: score + ELO snapshot.
+            # IMPORTANT: uses the in-memory conns_now[uid]["score"] as the
+            # authoritative running total, NOT a fresh read from the database.
+            # The old version did read-current-then-write-current+pts as two
+            # separate HTTP round trips — if two games for the same player ended
+            # close together (entirely possible in a fast arena, and especially
+            # likely while the duplicate-pairing bug existed earlier this
+            # session), the second call's read could land before the first
+            # call's write had committed, silently dropping points. Mutating the
+            # in-memory dict has no such gap — it's a synchronous Python
+            # operation with no await between read and write, so it can't be
+            # interleaved by another coroutine on the same event loop.
+            async def add_score(uid, pts, elo_snapshot):
+                if uid not in conns_now:
+                    # Player isn't connected right now (shouldn't normally happen
+                    # mid-game, but fall back to a DB read so we don't silently
+                    # lose points if it does)
+                    r2 = await client.get(
+                        f"{SUPABASE_URL}/rest/v1/tournament_players",
+                        params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}", "select": "score"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    )
+                    current = r2.json()[0].get('score', 0) if r2.json() else 0
+                else:
+                    current = conns_now[uid].get("score", 0)
+                new_score = current + pts
+                if uid in conns_now:
+                    conns_now[uid]["score"] = new_score
+                await client.patch(
+                    f"{SUPABASE_URL}/rest/v1/tournament_players",
+                    params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                             "Content-Type": "application/json"},
+                    json={"score": new_score, "elo": elo_snapshot}
+                )
+
+            def streak_bonus(uid, won):
+                """Update streak counter and return bonus points.
+                Bonus applies to EVERY win once the streak reaches 3+ consecutive
+                wins, continuing until the player loses (which resets it to 0).
+                The 1st and 2nd wins in a streak are plain, no bonus yet."""
+                if uid not in conns_now:
+                    return 0
+                if won:
+                    conns_now[uid]["consecutive_wins"] = conns_now[uid].get("consecutive_wins", 0) + 1
+                    streak = conns_now[uid]["consecutive_wins"]
+                    return 1 if streak >= 3 else 0   # bonus on every win once streak hits 3+
+                else:
+                    conns_now[uid]["consecutive_wins"] = 0
+                    return 0
+
+            if req.result == 'white':
+                w_bonus = streak_bonus(g['white_id'], won=True)
+                b_bonus = streak_bonus(g['black_id'], won=False)
+                await add_score(g['white_id'], 2 + w_bonus, w_elo)
+                await add_score(g['black_id'], 0,            b_elo)
+            elif req.result == 'black':
+                w_bonus = streak_bonus(g['white_id'], won=False)
+                b_bonus = streak_bonus(g['black_id'], won=True)
+                await add_score(g['white_id'], 0,            w_elo)
+                await add_score(g['black_id'], 2 + b_bonus,  b_elo)
             else:
-                conns_now[uid]["consecutive_wins"] = 0
-                return 0
+                streak_bonus(g['white_id'], won=False)   # draw resets streak
+                streak_bonus(g['black_id'], won=False)
+                await add_score(g['white_id'], 1, w_elo)
+                await add_score(g['black_id'], 1, b_elo)
 
-        if req.result == 'white':
-            w_bonus = streak_bonus(g['white_id'], won=True)
-            b_bonus = streak_bonus(g['black_id'], won=False)
-            await add_score(g['white_id'], 2 + w_bonus, w_elo)
-            await add_score(g['black_id'], 0,            b_elo)
-        elif req.result == 'black':
-            w_bonus = streak_bonus(g['white_id'], won=False)
-            b_bonus = streak_bonus(g['black_id'], won=True)
-            await add_score(g['white_id'], 0,            w_elo)
-            await add_score(g['black_id'], 2 + b_bonus,  b_elo)
-        else:
-            streak_bonus(g['white_id'], won=False)   # draw resets streak
-            streak_bonus(g['black_id'], won=False)
-            await add_score(g['white_id'], 1, w_elo)
-            await add_score(g['black_id'], 1, b_elo)
+        # Arena: release players and re-pair
+        try:
+            if tc_rows and tc_rows[0].get("format") == "arena" and tc_rows[0].get("status") == "active":
+                pg    = tournament_player_game.get(tid, {})
+                conns = tournament_connections.get(tid, {})
+                for uid in (g['white_id'], g['black_id']):
+                    if uid in pg:
+                        pg[uid] = None
+                    if uid in conns:
+                        # IMPORTANT: do not blindly set available=True here. If this
+                        # player was just paused by a forfeit (tournament_handle_forfeit
+                        # sets paused=True synchronously before this code can run),
+                        # the OTHER player's client independently calling this same
+                        # endpoint after receiving the gameover broadcast must not
+                        # undo that pause. This was the actual cause of forfeited
+                        # players keep getting re-paired indefinitely — the winner's
+                        # own result-submission was unconditionally re-enabling the
+                        # loser's pairing eligibility moments after it was correctly
+                        # disabled.
+                        if not conns[uid].get("paused"):
+                            conns[uid]["available"] = True
+                        won = (req.result == "white" and uid == g['white_id']) or \
+                              (req.result == "black" and uid == g['black_id'])
+                        # NOTE: do NOT recompute pts/streak and add to conns[uid]["score"]
+                        # here — add_score() above already updated this exact value
+                        # (conns_now and conns are the same dict, same tournament_id).
+                        # Doing it again here was a genuine double-count bug: every
+                        # game silently added its points TWICE to the in-memory score,
+                        # which is what the lobby UI displays. This is very likely why
+                        # an 8-game win streak showed fewer points than the formula
+                        # actually produces — some of the doubled increments were
+                        # then lost to the OTHER race (the old read-then-write DB
+                        # pattern in add_score, now also fixed), so the visible total
+                        # ended up an inconsistent mix of double-counted and dropped
+                        # points rather than cleanly wrong in one direction.
+                        streak = conns_now.get(uid, {}).get("consecutive_wins", 0)
+                        bonus = 1 if (won and streak >= 3) else 0
+                        # Include ELO change so tournament.html can display it
+                        # (the elo_update WS msg goes to the game socket which closes on redirect)
+                        tc_str = tc_rows[0].get("time_control") if tc_rows else None
+                        elo_col = elo_col_for_tc(tc_str)
+                        # Use the real ELO fetched fresh from Supabase earlier in this
+                        # function (w_elo/b_elo), not the in-memory conns[uid] value —
+                        # that was only ever a one-time snapshot taken when this player
+                        # first connected to the tournament WebSocket, and never gets
+                        # updated as their actual rating changes from playing games.
+                        # Showing it in the lobby produced exactly the "ELO looks wrong"
+                        # symptom, since it could be many games stale.
+                        old_elo = w_elo if uid == g['white_id'] else b_elo
+                        await arena_send(conns[uid]["ws"], {
+                            "type":       "game_over",
+                            "result":     req.result,
+                            "my_score":   conns[uid]["score"],
+                            "streak":     streak if won else 0,
+                            "streak_bonus": bonus,
+                            "old_elo":    old_elo,
+                            "elo_col":    elo_col,
+                        })
+                asyncio.create_task(arena_pair_delayed(tid))
+        except Exception as e:
+            print(f"[arena] re-pair error: {e}", flush=True)
 
-    # Arena: release players and re-pair
-    try:
-        if tc_rows and tc_rows[0].get("format") == "arena" and tc_rows[0].get("status") == "active":
-            pg    = tournament_player_game.get(tid, {})
-            conns = tournament_connections.get(tid, {})
-            for uid in (g['white_id'], g['black_id']):
-                if uid in pg:
-                    pg[uid] = None
-                if uid in conns:
-                    # IMPORTANT: do not blindly set available=True here. If this
-                    # player was just paused by a forfeit (tournament_handle_forfeit
-                    # sets paused=True synchronously before this code can run),
-                    # the OTHER player's client independently calling this same
-                    # endpoint after receiving the gameover broadcast must not
-                    # undo that pause. This was the actual cause of forfeited
-                    # players keep getting re-paired indefinitely — the winner's
-                    # own result-submission was unconditionally re-enabling the
-                    # loser's pairing eligibility moments after it was correctly
-                    # disabled.
-                    if not conns[uid].get("paused"):
-                        conns[uid]["available"] = True
-                    won = (req.result == "white" and uid == g['white_id']) or \
-                          (req.result == "black" and uid == g['black_id'])
-                    # NOTE: do NOT recompute pts/streak and add to conns[uid]["score"]
-                    # here — add_score() above already updated this exact value
-                    # (conns_now and conns are the same dict, same tournament_id).
-                    # Doing it again here was a genuine double-count bug: every
-                    # game silently added its points TWICE to the in-memory score,
-                    # which is what the lobby UI displays. This is very likely why
-                    # an 8-game win streak showed fewer points than the formula
-                    # actually produces — some of the doubled increments were
-                    # then lost to the OTHER race (the old read-then-write DB
-                    # pattern in add_score, now also fixed), so the visible total
-                    # ended up an inconsistent mix of double-counted and dropped
-                    # points rather than cleanly wrong in one direction.
-                    streak = conns_now.get(uid, {}).get("consecutive_wins", 0)
-                    bonus = 1 if (won and streak >= 3) else 0
-                    # Include ELO change so tournament.html can display it
-                    # (the elo_update WS msg goes to the game socket which closes on redirect)
-                    tc_str = tc_rows[0].get("time_control") if tc_rows else None
-                    elo_col = elo_col_for_tc(tc_str)
-                    # Use the real ELO fetched fresh from Supabase earlier in this
-                    # function (w_elo/b_elo), not the in-memory conns[uid] value —
-                    # that was only ever a one-time snapshot taken when this player
-                    # first connected to the tournament WebSocket, and never gets
-                    # updated as their actual rating changes from playing games.
-                    # Showing it in the lobby produced exactly the "ELO looks wrong"
-                    # symptom, since it could be many games stale.
-                    old_elo = w_elo if uid == g['white_id'] else b_elo
-                    await arena_send(conns[uid]["ws"], {
-                        "type":       "game_over",
-                        "result":     req.result,
-                        "my_score":   conns[uid]["score"],
-                        "streak":     streak if won else 0,
-                        "streak_bonus": bonus,
-                        "old_elo":    old_elo,
-                        "elo_col":    elo_col,
-                    })
-            asyncio.create_task(arena_pair_delayed(tid))
-    except Exception as e:
-        print(f"[arena] re-pair error: {e}", flush=True)
-
-    return {"ok": True, "result": req.result}
+        return {"ok": True, "result": req.result}
 
 
 

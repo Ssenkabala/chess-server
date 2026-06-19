@@ -2449,10 +2449,19 @@ function analysePosition() {
   // ─── Dispatch ─────────────────────────────────────────────────────────────
   if (wasmEng && _wasmReady()) {
     wasmEng._analysisInfoHandler = onInfo;
-    // Use analyse() for multi-line if available, fall back to bestMove() for old builds
+    // The engine's WASM code hasn't been JIT-warmed yet on the very first
+    // call after page load — the browser's JIT optimizes hot paths only
+    // after they've actually run a few times. That means the FIRST analyse()
+    // call genuinely does less real search work in the same time budget than
+    // every call after it, which can cause it to miss a deeper tactic (e.g.
+    // reporting a merely-good move instead of the mate it would find once
+    // warm). Give the first call extra time to compensate; subsequent calls
+    // use the normal budget once the JIT has caught up.
+    var _searchBudgetMs = window._engineWarmedUp ? 5000 : 8000;
+    window._engineWarmedUp = true;
     var analyseCall = typeof wasmEng.analyse === 'function'
-      ? wasmEng.analyse(fen, [], 5000, 3)
-      : wasmEng.bestMove(fen, [], 5000);
+      ? wasmEng.analyse(fen, [], _searchBudgetMs, 3)
+      : wasmEng.bestMove(fen, [], _searchBudgetMs);
     analyseCall
       .then(function(move) { onDone(move); })
       .catch(function()    { fallbackToServer(); });

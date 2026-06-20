@@ -2271,6 +2271,19 @@ function scheduleAutoAnalyse() {
 function analysePosition() {
   if (!analysisCg) initAnalysisBoard();
 
+  // The position has no legal moves at all (checkmate or stalemate) — there
+  // is nothing for the engine to suggest. Dispatching anyway is what exposed
+  // a real bug: the server's native-engine path could return a stale or
+  // malformed move from its UCI output for exactly this edge case, which
+  // then got highlighted on the board as if it were a real suggestion.
+  if (analysisGame.game_over && analysisGame.game_over()) {
+    setAnalysisStatus(analysisGame.in_checkmate() ? '♚ Checkmate — no moves to suggest.' : 'Game over — no moves to suggest.');
+    var wrap0 = document.getElementById('candidates-wrap');
+    if (wrap0) wrap0.classList.remove('visible');
+    document.getElementById('btn-coach').disabled = true;
+    return;
+  }
+
   var fen = analysisGame.fen();
   setAnalysisStatus('⏳ Engine analysing...');
   document.getElementById('btn-coach').disabled = true;

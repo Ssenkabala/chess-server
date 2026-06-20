@@ -881,6 +881,23 @@ def analyse_position(fen: str, think_time: float, moves: list[str] | None = None
     else:
         result["mate_in"] = None
 
+    # Validate best_move is actually legal in this exact position before
+    # returning it. The PV-to-SAN conversion above already checks legality
+    # move-by-move, but best_move itself was never checked — if the engine's
+    # UCI output ever returns something stale or malformed for an edge case
+    # (e.g. a position with zero legal moves, like checkmate/stalemate),
+    # this is what stops a bogus move from reaching the board. The client's
+    # existing `if (!finalMove)` fallback logic correctly handles None here,
+    # same as it already does for a missing/empty move from the WASM path.
+    bm = result.get("best_move")
+    if bm:
+        try:
+            if chess.Move.from_uci(bm) not in board.legal_moves:
+                print(f"[analyse] engine returned illegal move '{bm}' for fen={fen} — discarding", flush=True)
+                result["best_move"] = None
+        except Exception:
+            result["best_move"] = None
+
     return result
 
 
@@ -2489,8 +2506,16 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
         conns = tournament_connections.get(tournament_id, {})
         if user_id and user_id in conns:
             conns[user_id]["available"] = False
-            # Keep paused flag — if they reconnect they're still paused until they resume
-            del conns[user_id]
+            # Do NOT delete the entry — a reconnect (refresh, navigating to
+            # Watch and back, the redirect after a game ends) needs to find
+            # this entry still here so it can read paused/consecutive_wins
+            # and carry them forward. Deleting it here meant every single
+            # disconnect silently erased a player's pause state moments
+            # before the reconnect logic ran, even though that logic was
+            # specifically designed to preserve it. This was the actual
+            # cause of paused players coming back as available after any
+            # refresh, and of forfeited players getting re-paired
+            # immediately on their post-game redirect.
         print(f"[arena] {username} left {tournament_id}", flush=True)
 
 

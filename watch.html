@@ -541,12 +541,18 @@
   // ── Init ──────────────────────────────────────────────────────────────────
   // Direct link from tournament: /watch?game=GAME_ID
   const _directGame = new URLSearchParams(location.search).get('game');
+  console.log('[watch-debug] _directGame =', _directGame);
   if (_directGame) {
     // Load game info from live games list then jump to board
     fetch('/api/games/live')
-      .then(r => r.json())
+      .then(r => {
+        console.log('[watch-debug] /api/games/live responded, status=' + r.status);
+        return r.json();
+      })
       .then(games => {
+        console.log('[watch-debug] live games list:', games.map(g => g.id));
         const g = games.find(x => x.id === _directGame);
+        console.log('[watch-debug] match found?', !!g);
         if (g) {
           watchGame(g.id, g.white, g.black, g.white_elo, g.black_elo, g.time_control);
         } else {
@@ -557,7 +563,7 @@
           loadGames();
         }
       })
-      .catch(() => loadGames());
+      .catch((e) => { console.log('[watch-debug] fetch/parse FAILED:', e); loadGames(); });
   } else {
     loadGames();
   }

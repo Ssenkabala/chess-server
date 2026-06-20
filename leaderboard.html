@@ -460,29 +460,20 @@ function applyFilters() {
   // Sort by chosen TC ELO desc — all players shown, sorted purely by rating
   filtered.sort((a, b) => (b[col] || 1500) - (a[col] || 1500));
 
-  // Stats strip
-  const countries = new Set(filtered.map(p => p.country).filter(Boolean));
-  // Top ELO = highest rated player
-  const topEloPlayer = filtered.find(p => p.games_played > 0);
-  const topElo = topEloPlayer ? (topEloPlayer[col] || 0) : 0;
-  // Leading country = country of the #1 ranked player who played THIS TC
-  const leadingCountry = topEloPlayer ? topEloPlayer.country : null;
-
-  document.getElementById('stat-players').textContent   = filtered.length;
-  document.getElementById('stat-countries').textContent = countries.size;
-  document.getElementById('stat-top-elo').textContent   = topElo || '—';
-  document.getElementById('stat-top-country').textContent = leadingCountry
-    ? (FLAG(leadingCountry) + ' ' + (COUNTRY_NAMES[leadingCountry] || leadingCountry))
-    : '—';
-  document.getElementById('stats-strip').style.display = '';
-
+  // Compute the All-TC summed/sorted list up front so both the stats strip
+  // and the table below can use the same correct data when this view is
+  // active — previously the stats strip (player count, top ELO, leading
+  // country) always used the per-TC `filtered`/`col` values regardless of
+  // which view was showing, so switching to "All TCs" kept displaying
+  // whichever TC tab had been clicked last instead of recomputing for the
+  // actual combined ranking.
+  function eloSum(p) {
+    return (p.elo_bullet||1500) + (p.elo_blitz||1500) +
+           (p.elo_rapid||1500)  + (p.elo_classical||1500);
+  }
+  let allTcPlayers = null;
   if (currentView === 'all-tc') {
-    // All-TC view: sort by sum of all 4 TC ratings (highest total ELO = best overall)
-    function eloSum(p) {
-      return (p.elo_bullet||1500) + (p.elo_blitz||1500) +
-             (p.elo_rapid||1500)  + (p.elo_classical||1500);
-    }
-    let allTcPlayers = allPlayers.slice(); // show everyone
+    allTcPlayers = allPlayers.slice(); // show everyone
     if (regionSet) allTcPlayers = allTcPlayers.filter(p => regionSet.has(p.country));
     if (femaleOnly) allTcPlayers = allTcPlayers.filter(p => p.gender === 'female');
     if (q) allTcPlayers = allTcPlayers.filter(p =>
@@ -495,6 +486,31 @@ function applyFilters() {
       if (!aHas && bHas) return 1;
       return eloSum(b) - eloSum(a);
     });
+  }
+
+  // Stats strip — use the All-TC data when that view is active, otherwise
+  // the per-TC data, so the leading country/top rating always matches what
+  // the table below is actually showing.
+  const statsSource  = currentView === 'all-tc' ? allTcPlayers : filtered;
+  const statsCol      = currentView === 'all-tc' ? null : col; // null means "use eloSum"
+  const countries     = new Set(statsSource.map(p => p.country).filter(Boolean));
+  // Top ELO = highest rated player (by combined sum if All-TC, else by the active TC column)
+  const topEloPlayer = statsSource.find(p => p.games_played > 0);
+  const topElo = topEloPlayer
+    ? (statsCol ? (topEloPlayer[statsCol] || 0) : eloSum(topEloPlayer))
+    : 0;
+  // Leading country = country of the #1 ranked player in whichever ranking is currently shown
+  const leadingCountry = topEloPlayer ? topEloPlayer.country : null;
+
+  document.getElementById('stat-players').textContent   = statsSource.length;
+  document.getElementById('stat-countries').textContent = countries.size;
+  document.getElementById('stat-top-elo').textContent   = topElo || '—';
+  document.getElementById('stat-top-country').textContent = leadingCountry
+    ? (FLAG(leadingCountry) + ' ' + (COUNTRY_NAMES[leadingCountry] || leadingCountry))
+    : '—';
+  document.getElementById('stats-strip').style.display = '';
+
+  if (currentView === 'all-tc') {
     renderAllTc(allTcPlayers, eloSum);
   } else if (currentView === 'continental') {
     renderContinental(filtered, col);

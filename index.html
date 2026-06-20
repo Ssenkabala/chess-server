@@ -199,7 +199,7 @@ piece.fading {
   bottom: -4px;
   left: 24px;
   flex-flow: row;
-  width: 100%;
+  width: calc(100% - 24px);
   height: 16px;
   text-transform: uppercase;
   text-align: center;
@@ -2448,49 +2448,44 @@ function analysePosition() {
 
   // ─── Dispatch ─────────────────────────────────────────────────────────────
   if (wasmEng && _wasmReady()) {
+    console.log('[analysis-debug] Path: WASM analyse(). engine_warmed=' + !!window._engineWarmedUp +
+                ' analyse_is_fn=' + (typeof wasmEng.analyse === 'function'));
     wasmEng._analysisInfoHandler = onInfo;
-    // The engine's WASM code hasn't been JIT-warmed yet on the very first
-    // call after page load — the browser's JIT optimizes hot paths only
-    // after they've actually run a few times. That means the FIRST analyse()
-    // call genuinely does less real search work in the same time budget than
-    // every call after it, which can cause it to miss a deeper tactic (e.g.
-    // reporting a merely-good move instead of the mate it would find once
-    // warm). Give the first call extra time to compensate; subsequent calls
-    // use the normal budget once the JIT has caught up.
     var _searchBudgetMs = window._engineWarmedUp ? 5000 : 8000;
     window._engineWarmedUp = true;
     var analyseCall = typeof wasmEng.analyse === 'function'
       ? wasmEng.analyse(fen, [], _searchBudgetMs, 3)
       : wasmEng.bestMove(fen, [], _searchBudgetMs);
     analyseCall
-      .then(function(move) { onDone(move); })
-      .catch(function()    { fallbackToServer(); });
+      .then(function(move) { console.log('[analysis-debug] WASM call resolved, move=' + move); onDone(move); })
+      .catch(function(e)   { console.log('[analysis-debug] WASM call REJECTED:', e); fallbackToServer(); });
   } else if (wasmEng) {
+    console.log('[analysis-debug] Path: wasmEng exists but NOT ready yet — waiting on ready().');
     setAnalysisStatus('⏳ Loading engine...');
     wasmEng.ready()
-      .then(function() { analysePosition(); })
-      .catch(fallbackToServer);
+      .then(function() { console.log('[analysis-debug] ready() resolved, retrying analysePosition()'); analysePosition(); })
+      .catch(function(e) { console.log('[analysis-debug] ready() REJECTED:', e); fallbackToServer(); });
   } else if (window._wasmSupported && typeof SenkabalaEngine === 'undefined') {
-    // The engine scripts (senkabala.js → senkabala_wasm.js) are still loading
-    // asynchronously and SenkabalaEngine isn't defined yet. Rather than dropping
-    // straight to the single-move server fallback, wait briefly for the scripts
-    // to finish loading, then retry — this is what fixes the "first Load press
-    // gives one move, second press gives full multi-line" symptom.
+    console.log('[analysis-debug] Path: SenkabalaEngine class not yet defined — polling.');
     setAnalysisStatus('⏳ Loading engine...');
     var _waitAttempts = 0;
     var _waitForEngine = function() {
       _waitAttempts++;
       if (typeof SenkabalaEngine !== 'undefined') {
+        console.log('[analysis-debug] SenkabalaEngine now defined after ' + _waitAttempts + ' polls — retrying.');
         analysePosition();  // engine script ready — retry properly
       } else if (_waitAttempts < 40) {  // up to ~10s (40 × 250ms)
         setTimeout(_waitForEngine, 250);
       } else {
-        // Genuinely unavailable after waiting — use server fallback
+        console.log('[analysis-debug] Gave up waiting for SenkabalaEngine after 10s — using server fallback.');
         fallbackToServer();
       }
     };
     setTimeout(_waitForEngine, 250);
   } else {
+    console.log('[analysis-debug] Path: DIRECT server fallback. wasmSupported=' + !!window._wasmSupported +
+                ' SenkabalaEngine_defined=' + (typeof SenkabalaEngine !== 'undefined') +
+                ' wasmEng=' + !!wasmEng);
     fallbackToServer();
   }
 }

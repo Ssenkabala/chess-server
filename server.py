@@ -1458,7 +1458,14 @@ async def tournament_handle_forfeit(game: dict, loser_id: str, winner_id: str, r
         pg[winner_id] = None
 
     print(f"[arena] forfeit in {tid}: {loser_id} paused, {winner_id} returned to pool", flush=True)
-    asyncio.create_task(arena_pair(tid))
+    # No longer triggers arena_pair() directly — the single poller in
+    # arena_pairing_loop picks up this state change on its next tick (every
+    # 1.5s). This was the root cause of an entire class of bug: several
+    # different events (forfeits, both players' independent result
+    # submissions, reconnects) could all trigger pairing concurrently,
+    # racing each other against a half-updated in-memory dict. With exactly
+    # one caller on a fixed schedule, that race is structurally impossible —
+    # there's nothing left to race against.
 
 
 async def first_move_timeout_loop(game_id: str):
@@ -1936,7 +1943,16 @@ async def arena_auto_start(tournament_id: str):
                 json={"status": "active"}
             )
         print(f"[arena] auto-started {tournament_id}", flush=True)
-        await arena_pair(tournament_id)
+        conns = tournament_connections.get(tournament_id, {})
+        for uid, info in list(conns.items()):
+            ws = info.get("ws")
+            if ws:
+                try:
+                    await arena_send(ws, {"type": "tournament_started"})
+                except Exception:
+                    pass
+        if rows[0].get("format") == "arena":
+            asyncio.create_task(arena_pairing_loop(tournament_id))
     except Exception as e:
         print(f"[arena] auto-start error: {e}", flush=True)
     finally:
@@ -2004,18 +2020,44 @@ async def _arena_pair_impl(tournament_id: str):
                          "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             )
         # Count how many times each pair has played (for rematch avoidance preference)
+        # and each player's color balance (white_games - black_games) for color fairness.
+        # Without this, pairing has no concept of color at all — whichever player
+        # happens to sort earlier (by score/ELO) always becomes white against a
+        # given opponent, every single time they're paired. With only a couple of
+        # players cycling against each other repeatedly (a small arena), this
+        # produced one player playing black 5 games in a row against the same
+        # opponent — a real, meaningful disadvantage, not a cosmetic issue.
         pair_count: dict = {}
+        color_balance: dict = {}
         for g in r.json():
             key = tuple(sorted([g["white_id"], g["black_id"]]))
             pair_count[key] = pair_count.get(key, 0) + 1
+            color_balance[g["white_id"]] = color_balance.get(g["white_id"], 0) + 1
+            color_balance[g["black_id"]] = color_balance.get(g["black_id"], 0) - 1
     except Exception:
         pair_count = {}
+        color_balance = {}
 
     # Sort available players by score desc, then ELO desc
     available.sort(key=lambda uid: (-conns[uid].get("score", 0), -conns[uid].get("elo", 1500)))
 
     def times_played(p1, p2):
         return pair_count.get(tuple(sorted([p1, p2])), 0)
+
+    def assign_colors(p1, p2):
+        """Whoever has played MORE white games (higher balance) gets black this
+        time; whoever has played more black (lower balance) gets white. A tie
+        falls back to p1=white, p2=black (arbitrary but stable) — this only
+        matters on a player's very first pairing of the tournament, where
+        fairness can't be evaluated yet anyway."""
+        b1 = color_balance.get(p1, 0)
+        b2 = color_balance.get(p2, 0)
+        if b1 > b2:
+            return p2, p1   # p2 has played black more / white less -> p2 gets white
+        elif b2 > b1:
+            return p1, p2
+        else:
+            return p1, p2
 
     # Pair greedily: prefer opponents not yet played, then fewest rematches, then score proximity
     paired, used = [], set()
@@ -2034,7 +2076,8 @@ async def _arena_pair_impl(tournament_id: str):
                 best_p2   = p2
                 best_score = candidate
         if best_p2:
-            paired.append((p1, best_p2))
+            white_id, black_id = assign_colors(p1, best_p2)
+            paired.append((white_id, black_id))
             used.add(p1)
             used.add(best_p2)
 
@@ -2068,19 +2111,79 @@ async def _arena_pair_impl(tournament_id: str):
 
 async def arena_pair(tournament_id: str):
     """
-    Public entry point — serializes concurrent pairing attempts so a forfeit
-    handler and one or two /api/tournament/result calls (the winner's client
-    and sometimes the loser's, both reacting to the same game-over moment)
-    can't race each other and each see a half-updated conns dict. Without
-    this, multiple near-simultaneous calls could each independently decide
-    a player has "no available opponent" a few milliseconds before the other
-    call actually marks that opponent available — producing spurious
+    Serializes concurrent pairing attempts so a forfeit handler and one or
+    two /api/tournament/result calls (the winner's client and sometimes the
+    loser's, both reacting to the same game-over moment) can't race each
+    other and each see a half-updated conns dict. Without this, multiple
+    near-simultaneous calls could each independently decide a player has
+    "no available opponent" a few milliseconds before the other call
+    actually marks that opponent available — producing spurious
     "waiting (odd player)" results and wasted pairing passes even though a
     real opponent existed the whole time.
+
+    As of the single-poller rewrite, this function has exactly one caller:
+    arena_pairing_loop below. Nothing else should call this directly —
+    forfeits, result submissions, and reconnects only ever mutate state
+    (available/paused/pg) and let the loop's next tick handle pairing.
     """
     lock = _arena_pair_locks.setdefault(tournament_id, asyncio.Lock())
     async with lock:
         await _arena_pair_impl(tournament_id)
+
+
+# Tracks which tournaments currently have a poller loop running, so a
+# duplicate start_tournament/auto_start call (or a reconnect racing the
+# initial start) can't accidentally spin up two loops for the same
+# tournament_id.
+_active_pairing_loops: set = set()
+
+async def arena_pairing_loop(tournament_id: str):
+    """
+    The single background poller for one active arena tournament. Runs every
+    1.5 seconds for as long as the tournament is active, and is the ONLY
+    caller of arena_pair(). Every other event in the system (a forfeit, a
+    player resuming, a game ending) only ever updates state — available,
+    paused, pg — and waits for this loop's next tick to actually act on it.
+
+    This exists specifically to eliminate an entire class of race condition
+    that came up repeatedly: several different triggers (forfeit handler,
+    both players' independent result submissions, reconnects) could each
+    call pairing logic concurrently, racing each other against a
+    half-updated in-memory dict. With exactly one caller on a fixed
+    schedule, there's structurally nothing left to race against — every
+    pairing decision sees fully-settled state from whatever ran on the
+    previous tick.
+    """
+    if tournament_id in _active_pairing_loops:
+        return  # already running for this tournament — don't start a second one
+    _active_pairing_loops.add(tournament_id)
+    try:
+        while True:
+            await asyncio.sleep(1.5)
+            try:
+                async with httpx.AsyncClient() as client:
+                    r = await client.get(
+                        f"{SUPABASE_URL}/rest/v1/tournaments",
+                        params={"id": f"eq.{tournament_id}", "select": "status"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY,
+                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    )
+                    rows = r.json()
+                if not rows or rows[0].get("status") != "active":
+                    print(f"[arena] pairing loop stopping for {tournament_id} (status={rows[0].get('status') if rows else 'not found'})", flush=True)
+                    break
+            except Exception as e:
+                print(f"[arena] pairing loop status check error for {tournament_id}: {e}", flush=True)
+                continue  # transient DB error — try again next tick rather than stopping
+
+            try:
+                await arena_pair(tournament_id)
+            except Exception as e:
+                print(f"[arena] pairing loop tick error for {tournament_id}: {e}", flush=True)
+                # Don't break on a single bad tick — log and keep polling.
+    finally:
+        _active_pairing_loops.discard(tournament_id)
+        print(f"[arena] pairing loop ended for {tournament_id}", flush=True)
 
 
 async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
@@ -2315,7 +2418,7 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
             )
             rows = r.json()
         if rows and rows[0]["status"] == "active" and rows[0].get("format") == "arena":
-            asyncio.create_task(arena_pair(tournament_id))
+            pass  # state is set; arena_pairing_loop's next tick (≤1.5s) picks it up
     except Exception:
         pass
 
@@ -2343,7 +2446,7 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
                         conns[user_id]["available"] = True
                 if user_id in pg and not conns.get(user_id, {}).get("paused"):
                     pg[user_id] = None
-                asyncio.create_task(arena_pair(tournament_id))
+                # No direct arena_pair() call — the poller's next tick handles it.
 
             elif data.get("type") == "pause":
                 conns = tournament_connections.get(tournament_id, {})
@@ -2365,7 +2468,7 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
                 await arena_send(ws, {"type": "resumed",
                     "message": "You're back! Looking for an opponent…"})
                 print(f"[arena] {username} resumed in {tournament_id}", flush=True)
-                asyncio.create_task(arena_pair_delayed(tournament_id, delay=1.0))
+                # No direct pairing call — the poller picks this up on its next tick.
     except WebSocketDisconnect:
         pass
     finally:
@@ -3770,9 +3873,10 @@ async def start_tournament(req: TournamentStartRequest, authorization: str = Hea
                     except Exception:
                         pass
 
-            # Arena: pairing via WebSocket engine
+            # Arena: pairing via the single background poller (started here,
+            # runs every 1.5s for the lifetime of the active tournament)
             if t.get("format") == "arena":
-                asyncio.create_task(arena_pair(req.tournament_id))
+                asyncio.create_task(arena_pairing_loop(req.tournament_id))
                 return {"ok": True, "format": "arena", "players": len(players)}
 
             # Swiss: generate round 1
@@ -4106,7 +4210,9 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                             "old_elo":    old_elo,
                             "elo_col":    elo_col,
                         })
-                asyncio.create_task(arena_pair_delayed(tid))
+                # No direct pairing call — players were released above
+                # (available=True, pg cleared); the single poller's next
+                # tick (≤1.5s) handles the actual re-pairing.
         except Exception as e:
             print(f"[arena] re-pair error: {e}", flush=True)
 

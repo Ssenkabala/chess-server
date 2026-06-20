@@ -4054,7 +4054,13 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
             time_control = tc_rows[0].get("time_control") if tc_rows else None
             elo_col = elo_col_for_tc(time_control)
 
-            # Mark game result
+            tournament_status = tc_rows[0].get("status") if tc_rows else None
+
+            # Mark game result — this happens regardless of tournament status.
+            # It's what makes the tournament page stop showing this game as
+            # "ongoing" (the Watch button / live-games list both key off
+            # whether tournament_games.result is set), so it must always run
+            # even for a game that outlived its tournament.
             await client.patch(
                 f"{SUPABASE_URL}/rest/v1/tournament_games",
                 params={"id": f"eq.{req.game_id}"},
@@ -4062,6 +4068,20 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                          "Content-Type": "application/json"},
                 json={"result": req.result, "played_at": datetime.utcnow().isoformat()}
             )
+
+            if tournament_status != "active":
+                # The tournament ended while this game was still being played
+                # (its clock ran out, but the game itself plays to a real
+                # conclusion rather than being force-resolved). The game's own
+                # result is recorded above so it correctly stops showing as
+                # ongoing, but it no longer counts toward standings — the
+                # tournament is already over. ELO is unaffected: that's
+                # updated separately by update_elos() over the game's own
+                # WebSocket the moment it actually ends, independent of this
+                # endpoint and independent of tournament status.
+                print(f"[arena] game {req.game_id} finished after tournament {tid} ended — "
+                      f"result recorded, standings NOT updated", flush=True)
+                return {"ok": True, "result": req.result, "counted_toward_standings": False}
 
             # Fetch updated ELOs from the correct column (already written by update_elos over WS)
             elo_r = await asyncio.gather(

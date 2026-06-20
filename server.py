@@ -1799,50 +1799,64 @@ async def arena_send(ws, msg: dict):
 
 
 async def _grant_tournament_medals(tournament_id: str, client=None):
-    """Fetch final standings and award podium medals to top 3."""
+    """
+    Fetch final standings and award podium medals to top 3.
+
+    IMPORTANT: always creates its own httpx client internally, regardless of
+    whether a `client` was passed in. This function is always invoked via
+    asyncio.create_task() (fire-and-forget) by its callers — none of them
+    await it directly. That means if it borrows a client from a caller's
+    `async with httpx.AsyncClient() as client:` block, that block can exit
+    and close the client before this task actually gets scheduled to run,
+    since create_task() doesn't block the caller. This was confirmed live:
+    every auto-ended tournament hit "Cannot send a request, as the client
+    has been closed" and silently awarded zero medals. The `client` param
+    is kept for backwards compatibility but is no longer used.
+    """
     try:
-        # Get tournament info (name, scope)
-        t_r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournaments",
-            params={"id": f"eq.{tournament_id}", "select": "name,scope"},
-            headers={"apikey": SUPABASE_SERVICE_KEY,
-                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        t_data = t_r.json()
-        if not t_data:
-            return
-        t_name  = t_data[0].get("name", "Tournament")
-        t_scope = t_data[0].get("scope", "open")
+        async with httpx.AsyncClient() as client:
+            # Get tournament info (name, scope)
+            t_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{tournament_id}", "select": "name,scope"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            t_data = t_r.json()
+            if not t_data:
+                return
+            t_name  = t_data[0].get("name", "Tournament")
+            t_scope = t_data[0].get("scope", "open")
 
-        # Get final standings ordered by score desc, then elo desc for tiebreak
-        p_r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournament_players",
-            params={"tournament_id": f"eq.{tournament_id}",
-                    "select": "user_id,score,elo",
-                    "order":  "score.desc,elo.desc"},
-            headers={"apikey": SUPABASE_SERVICE_KEY,
-                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        players = p_r.json()
-        if not players:
-            return
+            # Get final standings ordered by score desc, then elo desc for tiebreak
+            p_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"tournament_id": f"eq.{tournament_id}",
+                        "select": "user_id,score,elo",
+                        "order":  "score.desc,elo.desc"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            players = p_r.json()
+            if not players:
+                return
 
-        # Award medals to top 3 (handles ties by elo tiebreak)
-        for pos, player in enumerate(players[:3], start=1):
-            uid = player.get("user_id")
-            if uid:
-                awarded = await award_medals(uid, pos, tournament_id, t_name, t_scope, client)
-                if awarded:
-                    # Also patch rank into tournament_players for record-keeping
-                    await client.patch(
-                        f"{SUPABASE_URL}/rest/v1/tournament_players",
-                        params={"tournament_id": f"eq.{tournament_id}",
-                                "user_id":        f"eq.{uid}"},
-                        headers={"apikey": SUPABASE_SERVICE_KEY,
-                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                                 "Content-Type": "application/json"},
-                        json={"rank": pos}
-                    )
+            # Award medals to top 3 (handles ties by elo tiebreak)
+            for pos, player in enumerate(players[:3], start=1):
+                uid = player.get("user_id")
+                if uid:
+                    awarded = await award_medals(uid, pos, tournament_id, t_name, t_scope, client)
+                    if awarded:
+                        # Also patch rank into tournament_players for record-keeping
+                        await client.patch(
+                            f"{SUPABASE_URL}/rest/v1/tournament_players",
+                            params={"tournament_id": f"eq.{tournament_id}",
+                                    "user_id":        f"eq.{uid}"},
+                            headers={"apikey": SUPABASE_SERVICE_KEY,
+                                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                     "Content-Type": "application/json"},
+                            json={"rank": pos}
+                        )
     except Exception as e:
         print(f"[medals] _grant_tournament_medals error {tournament_id}: {e}", flush=True)
 
@@ -2314,7 +2328,7 @@ async def _arena_end_exhausted(tournament_id: str):
             )
         print(f"[arena] exhausted — ended {tournament_id}", flush=True)
         conns = tournament_connections.get(tournament_id, {})
-        asyncio.create_task(_grant_tournament_medals(tournament_id, httpx.AsyncClient()))
+        asyncio.create_task(_grant_tournament_medals(tournament_id))
         msg = {"type": "tournament_ended",
                "reason": "All players have faced each other. Final standings are shown below."}
         for uid, info in list(conns.items()):

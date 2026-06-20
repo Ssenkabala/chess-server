@@ -1056,6 +1056,11 @@ async function viewTournament(id) {
   if (!t) { content.innerHTML = '<div class="empty">Tournament not found.</div>'; return; }
 
   const isRegistered = players && currentUser && players.some(p => p.user_id === currentUser.id);
+  console.log('[tournament-debug] currentUser?.id =', currentUser ? currentUser.id : null,
+              'typeof =', currentUser ? typeof currentUser.id : 'n/a');
+  console.log('[tournament-debug] players user_ids =', (players||[]).map(p => p.user_id + ' (' + typeof p.user_id + ')'));
+  console.log('[tournament-debug] isRegistered =', isRegistered, 'isActiveArena will be:',
+              t.status === 'active' && t.format === 'arena' && !!currentUser && isRegistered);
   const isFull = players && t.max_players && players.length >= t.max_players;
   const starts = new Date(t.starts_at);
   const timeStr = starts.toLocaleDateString('en-GB', {weekday:'short',day:'numeric',month:'short'}) +
@@ -1178,7 +1183,7 @@ async function viewTournament(id) {
   }
 
   // Determine which ELO column this tournament uses
-  const eloCol = t.time_control ? tcEloCol(t.time_control) : 'elo';
+  const eloCol = tcEloCol(t.time_control);  // tcEloCol already falls back to elo_blitz when t.time_control is falsy, matching the server's elo_col_for_tc
   const eloLabel = eloCol === 'elo_bullet' ? 'Bullet' : eloCol === 'elo_blitz' ? 'Blitz' : eloCol === 'elo_rapid' ? 'Rapid' : 'ELO';
 
   // Build per-player game sequence from games list (arena only)

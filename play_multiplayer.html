@@ -1482,7 +1482,18 @@ async function bootAuth() {
   const urlColor  = params.get('color');
   window._tournamentId   = params.get('tournament_id') || null;
   window._tournamentDbId = params.get('tournament_db_id') || null;
-  window._timeControl    = params.get('time_control') || '5+0';
+  window._timeControl    = params.get('time_control');
+  if (!window._timeControl) {
+    // This should never happen for a real tournament/lobby game — the
+    // server always includes time_control in game_ready and the matched
+    // message. If we land here, something upstream failed to pass it
+    // through, and falling back to a hardcoded value would silently show
+    // the wrong ELO column for any tournament that isn't actually 5+0 —
+    // exactly the kind of bug that's invisible when testing with 5+0
+    // specifically, since the old hardcoded fallback happened to match.
+    console.warn('[elo-debug] time_control missing from URL params — this is a real bug if this is a tournament/lobby game, not a fresh vs-bot session.');
+    window._timeControl = '5+0';
+  }
   const myRank  = params.get('my_rank');
   const oppRank = params.get('opponent_rank');
   if (myRank || oppRank) setTournamentRanks(myRank, oppRank);

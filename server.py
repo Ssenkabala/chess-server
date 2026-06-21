@@ -2222,6 +2222,32 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
     pg    = tournament_player_game.setdefault(tournament_id, {})
     if white_id not in conns or black_id not in conns:
         return
+    # Defensive guard: if either player is already committed to a REAL game
+    # (a genuine game_id, not the "pending" marker this exact pairing should
+    # have set), refuse to proceed. This protects against a player ending up
+    # in two simultaneous games regardless of how the duplicate pairing
+    # decision occurred upstream — the actual irreversible damage only
+    # happens here, at the point a second tournament_games row gets created,
+    # so this is the one place that needs to be unconditionally safe.
+    existing_white = pg.get(white_id)
+    existing_black = pg.get(black_id)
+    if existing_white not in (None, "pending") or existing_black not in (None, "pending"):
+        print(f"[arena] REFUSING duplicate launch for {tournament_id}: "
+              f"white={white_id} (pg={existing_white}), black={black_id} (pg={existing_black})", flush=True)
+        # Release whichever player ISN'T the one with a genuine conflicting
+        # game — they were marked pending/unavailable by the pairing
+        # decision that led to this call, and without this they'd be stuck
+        # forever with no path back into pairing, even though they did
+        # nothing wrong and have no real game of their own right now.
+        if existing_white not in (None, "pending") and white_id in conns:
+            pg[black_id] = None
+            if black_id in conns and not conns[black_id].get("paused"):
+                conns[black_id]["available"] = True
+        elif existing_black not in (None, "pending") and black_id in conns:
+            pg[white_id] = None
+            if white_id in conns and not conns[white_id].get("paused"):
+                conns[white_id]["available"] = True
+        return
     white_info = conns[white_id]
     black_info = conns[black_id]
     pg[white_id] = "pending"; pg[black_id] = "pending"
@@ -2436,6 +2462,38 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
         # button state) matches reality instead of assuming a fresh connect
         # means available again.
         await arena_send(ws, {"type": "paused_state_sync", "paused": True})
+
+    # If this player already has a real (non-pending) game waiting, resend
+    # game_ready now. The original send happens once, at the moment the game
+    # is created, directly to whatever WebSocket each player has open right
+    # then — if that's not their tournament-page socket (e.g. they're still
+    # sitting on the previous game's endgame popup, which has no tournament
+    # connection open at all), the message is silently lost with no resend.
+    # This was the actual cause of a player getting a new opponent with no
+    # visible transition: the game existed, they just never found out.
+    pending_game_id = tournament_player_game[tournament_id].get(user_id)
+    if pending_game_id and pending_game_id != "pending":
+        g = active_games.get(pending_game_id)
+        if g and not g.get("over"):
+            is_white = g.get("white_id") == user_id
+            opp_id = g.get("black_id") if is_white else g.get("white_id")
+            opp_info = tournament_connections.get(tournament_id, {}).get(opp_id, {})
+            conns_now = tournament_connections[tournament_id]
+            sorted_uids = sorted(conns_now.keys(),
+                                  key=lambda u: (-conns_now[u].get("score", 0), -conns_now[u].get("elo", 1500)))
+            uid_rank = {u: i + 1 for i, u in enumerate(sorted_uids)}
+            await arena_send(ws, {
+                "type": "game_ready", "game_id": pending_game_id,
+                "color": "white" if is_white else "black",
+                "opponent": opp_info.get("username", "Opponent"),
+                "opponent_elo": opp_info.get("elo", 1500),
+                "my_rank": uid_rank.get(user_id, 0),
+                "opponent_rank": uid_rank.get(opp_id, 0),
+                "tournament_db_id": g.get("tournament_db_id"),
+                "time_control": g.get("time_control", "5+0"),
+            })
+            print(f"[arena] resent game_ready to {username} for {pending_game_id} on reconnect", flush=True)
+
     print(f"[arena] {username} connected to {tournament_id}", flush=True)
 
     # If tournament already active, try pairing immediately

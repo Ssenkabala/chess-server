@@ -11,6 +11,7 @@ class SenkabalaEngine {
   constructor() {
     this._worker  = null;
     this._ready   = false;
+    this._failed  = false;  // true only on a genuine startup failure, never during normal startup
     this._pending = new Map();
     this._idSeq   = 0;
     this._readyWaiters = [];
@@ -59,6 +60,9 @@ class SenkabalaEngine {
     } catch(e) {
       console.warn('[SenkabalaWASM] Failed to start:', e);
       this._worker = null;
+      this._failed = true;
+      this._readyWaiters.forEach(fn => fn());
+      this._readyWaiters = [];
     }
   }
 
@@ -90,9 +94,17 @@ class SenkabalaEngine {
 
   ready() {
     if (this._ready) return Promise.resolve();
-    if (!this._worker) return Promise.reject(new Error('Engine unavailable'));
-    return new Promise((resolve) => {
-      this._readyWaiters.push(resolve);
+    if (this._failed) return Promise.reject(new Error('Engine unavailable'));
+    // _worker may legitimately still be null here — WASM compilation and
+    // worker spawn happen asynchronously in _start(), and ready() can be
+    // called before that's finished on a fresh page load. Queue as a
+    // waiter and resolve once startup actually completes (or rejects via
+    // the _failed check above, re-evaluated by whoever awaits this).
+    return new Promise((resolve, reject) => {
+      this._readyWaiters.push(() => {
+        if (this._failed) reject(new Error('Engine unavailable'));
+        else resolve();
+      });
     });
   }
 
@@ -107,7 +119,7 @@ class SenkabalaEngine {
   }
 
   _search(msgType, fen, moves, movetime, extra) {
-    if (!this._worker) return Promise.reject(new Error('Worker not available'));
+    if (this._failed) return Promise.reject(new Error('Engine unavailable'));
 
     if (!this._ready) {
       return this.ready().then(() => this._search(msgType, fen, moves, movetime, extra));

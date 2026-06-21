@@ -2573,6 +2573,47 @@ function showOverlay(result, reason) {
     overlayEloEl.style.display = '';
   }
 
+  // Save multiplayer game to history. Returns a promise that resolves once
+  // the insert completes (or fails) — needed so the tournament redirect
+  // below can wait for it instead of racing it on an independent timer.
+  // Still waits ~4s first for elo_update to actually arrive and update
+  // myProfile before reading the rating to record — elo_update is sent
+  // before gameover but can be delayed slightly, same as the original.
+  function saveMultiplayerGameToHistory() {
+    if (!(sb && currentUser && multiMoveHistory.length > 0)) return Promise.resolve();
+    var pgn = '';
+    multiMoveHistory.forEach(function(uci, i) {
+      if (i % 2 === 0) pgn += (Math.floor(i/2) + 1) + '. ';
+      pgn += uci + ' ';
+    });
+    var savedPgn    = pgn.trim();
+    var savedResult = result;
+    var savedColor  = myColor;
+    return new Promise(function(resolve) {
+      setTimeout(function() {
+        sb.from('games').insert({
+          user_id:           currentUser.id,
+          pgn:               savedPgn,
+          result:            savedResult,
+          player_color:      savedColor,
+          opponent:          opponentUsername ? 'human:' + opponentUsername : 'human',
+          // Read the per-TC column matching this game's actual time control
+          // (eloForTimeControl), not the generic classical `elo` field — the
+          // chart buckets games by time control, so recording the wrong
+          // field here meant bullet/rapid games either showed a frozen/wrong
+          // rating or never appeared on their own line at all.
+          player_elo_before: myProfile ? (myProfile.eloBefore || eloForTimeControl(myProfile, window._timeControl)) : null,
+          player_elo_after:  myProfile ? eloForTimeControl(myProfile, window._timeControl) : null,
+          time_control:      window._timeControl || null,
+        }).then(function(res) {
+          if (res.error) console.error('Multiplayer save failed:', res.error.message);
+          else console.log('Multiplayer game saved. Opponent:', opponentUsername);
+          resolve();
+        });
+      }, 4000);
+    });
+  }
+
   if (window._tournamentId) {
     // Show tournament buttons, hide regular
     const rematchArea = document.getElementById('rematch-area');
@@ -2621,20 +2662,27 @@ function showOverlay(result, reason) {
               'Result submit failed' + (body.detail ? ': ' + body.detail : '') + '.';
             return;
           }
-            let secs = 5;
-            const statusEl = document.getElementById('rematch-status');
-            const countdown = setInterval(() => {
-              if (statusEl) statusEl.textContent = `Returning to tournament in ${secs}s…`;
-              secs--;
-              if (secs < 0) {
+            // Wait for the games-history save to actually finish before
+            // starting the redirect countdown — previously these raced on
+            // independent timers, and the redirect could win, silently
+            // dropping this game from the rating-history chart since the
+            // page would navigate away mid-save.
+            saveMultiplayerGameToHistory().then(() => {
+              let secs = 5;
+              const statusEl = document.getElementById('rematch-status');
+              const countdown = setInterval(() => {
+                if (statusEl) statusEl.textContent = `Returning to tournament in ${secs}s…`;
+                secs--;
+                if (secs < 0) {
+                  clearInterval(countdown);
+                  window.location.href = '/tournaments#' + window._tournamentId;
+                }
+              }, 1000);
+              if (backBtn) backBtn.onclick = () => {
                 clearInterval(countdown);
                 window.location.href = '/tournaments#' + window._tournamentId;
-              }
-            }, 1000);
-            if (backBtn) backBtn.onclick = () => {
-              clearInterval(countdown);
-              window.location.href = '/tournaments#' + window._tournamentId;
-            };
+              };
+            });
         })
         .catch(() => {
           document.getElementById('rematch-status').textContent = 'Could not submit result — check connection.';
@@ -2654,37 +2702,9 @@ function showOverlay(result, reason) {
     document.getElementById('btn-rematch').disabled = false;
     document.getElementById('btn-rematch').onclick = offerRematch;
     document.getElementById('rematch-status').textContent = '';
-  }
-
-  // Save multiplayer game to history
-  // Wait up to 4s for elo_update to arrive (it's sent before gameover but may be delayed)
-  if (sb && currentUser && multiMoveHistory.length > 0) {
-    var pgn = '';
-    multiMoveHistory.forEach(function(uci, i) {
-      if (i % 2 === 0) pgn += (Math.floor(i/2) + 1) + '. ';
-      pgn += uci + ' ';
-    });
-    var savedPgn    = pgn.trim();
-    var savedResult = result;
-    var savedColor  = myColor;
-    var savedProfile = myProfile ? Object.assign({}, myProfile) : null;
-    // Delay 4s — elo_update typically arrives within 1s but give it extra headroom
-    setTimeout(function() {
-      sb.from('games').insert({
-        user_id:           currentUser.id,
-        pgn:               savedPgn,
-        result:            savedResult,
-        player_color:      savedColor,
-        opponent:          opponentUsername ? 'human:' + opponentUsername : 'human',
-        // Use myProfile directly (not savedProfile) — elo_update may have updated it
-        player_elo_before: myProfile ? (myProfile.eloBefore || myProfile.elo) : null,
-        player_elo_after:  myProfile ? myProfile.elo : null,
-        time_control:      window._timeControl || null,
-      }).then(function(res) {
-        if (res.error) console.error('Multiplayer save failed:', res.error.message);
-        else console.log('Multiplayer game saved. Opponent:', opponentUsername);
-      });
-    }, 4000);
+    // Casual game — no redirect race to worry about, save in the background
+    // same as before.
+    saveMultiplayerGameToHistory();
   }
   multiMoveHistory = [];
 }

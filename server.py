@@ -4172,12 +4172,25 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                 new_score = current + pts
                 if uid in conns_now:
                     conns_now[uid]["score"] = new_score
+                # Also update the per-TC column (elo_bullet/elo_blitz/elo_rapid)
+                # that matches this tournament's actual time control, in
+                # addition to the generic `elo` field. tournament_players'
+                # per-TC columns were only ever written once, at registration
+                # — never touched again as the player's real rating changed
+                # mid-tournament. The lobby standings table reads p[eloCol]
+                # (e.g. p.elo_blitz) specifically, so it kept showing each
+                # player's join-time snapshot indefinitely, while the generic
+                # `elo` field (and the profile page, which reads `profiles`
+                # directly) updated correctly the whole time.
+                patch_body = {"score": new_score, "elo": elo_snapshot}
+                if elo_col in ("elo_bullet", "elo_blitz", "elo_rapid"):
+                    patch_body[elo_col] = elo_snapshot
                 await client.patch(
                     f"{SUPABASE_URL}/rest/v1/tournament_players",
                     params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}"},
                     headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                              "Content-Type": "application/json"},
-                    json={"score": new_score, "elo": elo_snapshot}
+                    json=patch_body
                 )
 
             def streak_bonus(uid, won):

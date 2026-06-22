@@ -2460,45 +2460,44 @@ function analysePosition() {
   }
 
   // ─── Dispatch ─────────────────────────────────────────────────────────────
+  // Never fall back to the server-side engine just because WASM hasn't
+  // finished loading yet — always wait for the real engine instead. The
+  // analysis tab has no clock and no opponent; there is no time pressure
+  // that justifies settling for a weaker result. This also removes the
+  // server fallback's UCI-output parsing as a code path entirely for this
+  // feature, which was the only confirmed source of the illegal-move bug —
+  // the compiled engine itself was never the problem.
   if (wasmEng && _wasmReady()) {
-    console.log('[analysis-debug] Path: WASM analyse(). engine_warmed=' + !!window._engineWarmedUp +
-                ' analyse_is_fn=' + (typeof wasmEng.analyse === 'function'));
     wasmEng._analysisInfoHandler = onInfo;
-    var _searchBudgetMs = window._engineWarmedUp ? 5000 : 8000;
-    window._engineWarmedUp = true;
     var analyseCall = typeof wasmEng.analyse === 'function'
-      ? wasmEng.analyse(fen, [], _searchBudgetMs, 3)
-      : wasmEng.bestMove(fen, [], _searchBudgetMs);
+      ? wasmEng.analyse(fen, [], 5000, 3)
+      : wasmEng.bestMove(fen, [], 5000);
     analyseCall
-      .then(function(move) { console.log('[analysis-debug] WASM call resolved, move=' + move); onDone(move); })
-      .catch(function(e)   { console.log('[analysis-debug] WASM call REJECTED:', e); fallbackToServer(); });
-  } else if (wasmEng) {
-    console.log('[analysis-debug] Path: wasmEng exists but NOT ready yet — waiting on ready().');
+      .then(function(move) { onDone(move); })
+      .catch(function(e) {
+        console.warn('[analysis] engine call failed, retrying shortly:', e);
+        setAnalysisStatus('⏳ Engine hiccup — retrying...');
+        setTimeout(analysePosition, 1000);
+      });
+  } else if (window._wasmSupported) {
+    // Engine is supported but not ready yet — whether the worker hasn't
+    // finished starting, or the SenkabalaEngine script is still loading,
+    // the answer is the same either way: wait and retry. No fallback.
     setAnalysisStatus('⏳ Loading engine...');
-    wasmEng.ready()
-      .then(function() { console.log('[analysis-debug] ready() resolved, retrying analysePosition()'); analysePosition(); })
-      .catch(function(e) { console.log('[analysis-debug] ready() REJECTED:', e); fallbackToServer(); });
-  } else if (window._wasmSupported && typeof SenkabalaEngine === 'undefined') {
-    console.log('[analysis-debug] Path: SenkabalaEngine class not yet defined — polling.');
-    setAnalysisStatus('⏳ Loading engine...');
-    var _waitAttempts = 0;
-    var _waitForEngine = function() {
-      _waitAttempts++;
-      if (typeof SenkabalaEngine !== 'undefined') {
-        console.log('[analysis-debug] SenkabalaEngine now defined after ' + _waitAttempts + ' polls — retrying.');
-        analysePosition();  // engine script ready — retry properly
-      } else if (_waitAttempts < 40) {  // up to ~10s (40 × 250ms)
-        setTimeout(_waitForEngine, 250);
-      } else {
-        console.log('[analysis-debug] Gave up waiting for SenkabalaEngine after 10s — using server fallback.');
-        fallbackToServer();
-      }
-    };
-    setTimeout(_waitForEngine, 250);
+    if (!wasmEng) {
+      setTimeout(analysePosition, 250);
+    } else {
+      wasmEng.ready()
+        .then(function() { analysePosition(); })
+        .catch(function(e) {
+          console.warn('[analysis] engine failed to start, retrying:', e);
+          setTimeout(analysePosition, 500);
+        });
+    }
   } else {
-    console.log('[analysis-debug] Path: DIRECT server fallback. wasmSupported=' + !!window._wasmSupported +
-                ' SenkabalaEngine_defined=' + (typeof SenkabalaEngine !== 'undefined') +
-                ' wasmEng=' + !!wasmEng);
+    // WASM genuinely unsupported on this browser — a real, permanent
+    // limitation, not a loading race. The server fallback is appropriate
+    // here since there is no real engine to ever wait for.
     fallbackToServer();
   }
 }

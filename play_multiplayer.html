@@ -2521,6 +2521,16 @@ function hideTakebackBar() {
 }
 
 function showOverlay(result, reason) {
+  // Snapshot the move history NOW, synchronously, before either branch
+  // below runs. The tournament path's actual games-table save happens deep
+  // inside an async chain (getSession -> fetch -> .then) that may not
+  // execute until well after multiMoveHistory has already been reset to []
+  // at the end of this function. Without this snapshot, every tournament
+  // game's history save was silently skipped via saveMultiplayerGameToHistory's
+  // own "length > 0" guard, regardless of how many real moves were played —
+  // the array was already empty by the time that guard ever ran.
+  const _moveHistorySnapshot = multiMoveHistory.slice();
+
   const overlay = document.getElementById('overlay');
   overlay.classList.add('active');
 
@@ -2579,10 +2589,11 @@ function showOverlay(result, reason) {
   // Still waits ~4s first for elo_update to actually arrive and update
   // myProfile before reading the rating to record — elo_update is sent
   // before gameover but can be delayed slightly, same as the original.
-  function saveMultiplayerGameToHistory() {
-    if (!(sb && currentUser && multiMoveHistory.length > 0)) return Promise.resolve();
+  function saveMultiplayerGameToHistory(moveHistory) {
+    moveHistory = moveHistory || multiMoveHistory;
+    if (!(sb && currentUser && moveHistory.length > 0)) return Promise.resolve();
     var pgn = '';
-    multiMoveHistory.forEach(function(uci, i) {
+    moveHistory.forEach(function(uci, i) {
       if (i % 2 === 0) pgn += (Math.floor(i/2) + 1) + '. ';
       pgn += uci + ' ';
     });
@@ -2667,7 +2678,7 @@ function showOverlay(result, reason) {
             // independent timers, and the redirect could win, silently
             // dropping this game from the rating-history chart since the
             // page would navigate away mid-save.
-            saveMultiplayerGameToHistory().then(() => {
+            saveMultiplayerGameToHistory(_moveHistorySnapshot).then(() => {
               let secs = 5;
               const statusEl = document.getElementById('rematch-status');
               const countdown = setInterval(() => {
@@ -2704,7 +2715,7 @@ function showOverlay(result, reason) {
     document.getElementById('rematch-status').textContent = '';
     // Casual game — no redirect race to worry about, save in the background
     // same as before.
-    saveMultiplayerGameToHistory();
+    saveMultiplayerGameToHistory(_moveHistorySnapshot);
   }
   multiMoveHistory = [];
 }

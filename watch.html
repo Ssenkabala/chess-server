@@ -156,7 +156,8 @@
     }
 
     .cg-wrap {
-      width: 100%; padding-bottom: 100%; position: relative;
+      width: 100%; max-width: min(92vw, 480px); padding-bottom: 100%; position: relative;
+      margin: 0 auto;
     }
     cg-board { position: absolute; inset: 0; }
 
@@ -382,9 +383,18 @@
     const el = document.getElementById('cg-container');
     el.innerHTML = '';
 
-    function initBoardWhenReady() {
+    function initBoardWhenReady(attempt) {
+      attempt = attempt || 0;
       const rect = el.getBoundingClientRect();
-      if (rect.width < 10) { requestAnimationFrame(initBoardWhenReady); return; }
+      if (rect.width < 10) {
+        if (attempt > 180) {  // ~3s at 60fps
+          setStatus('Could not load board — try refreshing.');
+          console.error('[watch] cg-container never got a usable width:', rect);
+          return;
+        }
+        requestAnimationFrame(() => initBoardWhenReady(attempt + 1));
+        return;
+      }
       cg = Chessground(el, {
         viewOnly:    true,
         orientation: 'white',
@@ -397,7 +407,7 @@
       watchWs.onclose   = () => { setStatus('Disconnected.'); };
       watchWs.onerror   = () => { setStatus('Connection error.'); };
     }
-    requestAnimationFrame(() => requestAnimationFrame(initBoardWhenReady));
+    requestAnimationFrame(() => requestAnimationFrame(() => initBoardWhenReady(0)));
   }
 
   function onWatchMsg(e, white, black) {

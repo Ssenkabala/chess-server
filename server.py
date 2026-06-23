@@ -4,7 +4,8 @@ import chess.engine
 import anthropic
 import os
 import re
-from fastapi import FastAPI, HTTPException, Depends, Header
+import logging
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -17,28 +18,72 @@ import asyncio
 import uuid
 import time
 import hmac
+
+async def _sb_patch(client, url: str, params: dict, headers: dict, json: dict,
+                    retries: int = 3, backoff: float = 0.5) -> None:
+    """
+    Supabase PATCH with exponential backoff retry.
+    Handles transient connection pool exhaustion gracefully.
+    """
+    last_err = None
+    for attempt in range(retries):
+        try:
+            r = await client.patch(url, params=params, headers=headers, json=json)
+            if r.status_code < 500:
+                return r   # success or client error (don't retry 4xx)
+            last_err = f"HTTP {r.status_code}"
+        except Exception as e:
+            last_err = str(e)
+        wait = backoff * (2 ** attempt)
+        print(f"[supabase] patch retry {attempt+1}/{retries} after {wait}s: {last_err}", flush=True)
+        await asyncio.sleep(wait)
+    print(f"[supabase] patch failed after {retries} retries: {last_err}", flush=True)
 import hashlib
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio, uuid, time
-import logging
 
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app):
+    # Start engine pool before accepting requests
+    await engine_pool.start()
     asyncio.create_task(arena_auto_start_scheduler())
+    # Pre-warm stats cache so landing page shows real numbers on first visit
+    asyncio.create_task(_warm_stats_cache())
     yield
+    # Graceful shutdown — tell engine workers to quit cleanly
+    await engine_pool.stop()
 
-class EndpointFilter(logging.Filter):
-    SUPPRESS = {"/api/ping", "/api/stats", "/api/leaderboard"}
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        msg = record.getMessage()
-        return not any(path in msg for path in self.SUPPRESS)
-
-logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+async def _warm_stats_cache():
+    """Fetch DB totals at startup so the first landing page visit shows real numbers."""
+    try:
+        await asyncio.sleep(3)   # wait for DB connections to settle
+        await get_live_stats()
+        print("[startup] stats cache warmed", flush=True)
+    except Exception as e:
+        print(f"[startup] stats warm failed: {e}", flush=True)
 
 app = FastAPI(lifespan=lifespan)
+
+# Suppress high-frequency polling/heartbeat endpoints from the access log —
+# /api/ping, /api/stats, /api/leaderboard, and the tournament detail poll
+# fire constantly during any active tournament and bury the actually useful
+# lines (arena pairing/forfeit events, errors) in noise.
+class EndpointFilter(logging.Filter):
+    ALWAYS_SUPPRESS  = {"/api/ping", "/api/stats", "/api/leaderboard"}
+    # Only suppressed when the response was a clean 200 — a real error on
+    # this endpoint (500, 404, etc.) still shows up, since that's exactly
+    # the kind of thing worth seeing during a live tournament.
+    SUPPRESS_ON_200 = {"/api/tournaments/"}
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if any(path in msg for path in self.ALWAYS_SUPPRESS):
+            return False
+        if any(path in msg for path in self.SUPPRESS_ON_200) and '" 200 ' in msg:
+            return False
+        return True
+logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,6 +91,63 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve WASM engine files — Railway runs FastAPI, not a static file server,
+# so these files need explicit routes.
+@app.get("/senkabala.wasm")
+async def serve_wasm():
+    from fastapi.responses import FileResponse
+    return FileResponse("senkabala.wasm", media_type="application/wasm")
+
+@app.get("/senkabala.js")
+async def serve_wasm_js():
+    from fastapi.responses import FileResponse
+    return FileResponse("senkabala.js", media_type="application/javascript")
+
+@app.get("/senkabala_wasm.js")
+async def serve_wasm_wrapper():
+    from fastapi.responses import FileResponse
+    return FileResponse("senkabala_wasm.js", media_type="application/javascript")
+
+@app.get("/engine_worker.js")
+async def serve_engine_worker():
+    from fastapi.responses import FileResponse
+    return FileResponse("engine_worker.js", media_type="application/javascript")
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+
+class TimeoutMiddleware(BaseHTTPMiddleware):
+    """
+    Hard cap on HTTP request duration.
+    /move at level 8 can take up to 25s — cap at 30s.
+    Analysis (/analyse-position) can take up to 12s — cap at 35s.
+    Everything else caps at 15s.
+    WebSocket upgrade requests are excluded (they're long-lived by design).
+    """
+    LIMITS = {
+        "/move":              30,
+        "/analyse-position":  35,
+        "/free-coach":        20,
+        "/coach":             20,
+    }
+    DEFAULT = 15
+
+    async def dispatch(self, request, call_next):
+        # Skip WebSocket upgrades
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+        limit = self.LIMITS.get(request.url.path, self.DEFAULT)
+        try:
+            return await asyncio.wait_for(call_next(request), timeout=limit)
+        except asyncio.TimeoutError:
+            print(f"[timeout] {request.url.path} exceeded {limit}s", flush=True)
+            return JSONResponse(
+                {"detail": "Request timed out — please try again."},
+                status_code=504
+            )
+
+app.add_middleware(TimeoutMiddleware)
 
 ENGINE_PATH = "./engines/engine.exe" if os.name == "nt" else "./engines/engine"
 ANTHROPIC_API_KEY    = os.getenv("ANTHROPIC_API_KEY", "your-key-here")
@@ -190,43 +292,56 @@ async def award_medals(user_id: str, finish_pos: int, tournament_id: str,
     return new_medals
 
 
-async def grant_pioneer_medal(user_id: str, client) -> bool:
-    """Award '1st 100 Founder' badge to players who joined when total users <= 100."""
-    count_r = await client.get(
-        f"{SUPABASE_URL}/rest/v1/profiles",
-        params={"select": "count"},
-        headers={"apikey": SUPABASE_SERVICE_KEY,
-                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                 "Prefer": "count=exact", "Range": "0-0"}
-    )
-    total_users = int(count_r.headers.get("content-range", "0/0").split("/")[-1] or 9999)
-    if total_users > 100:
+async def grant_pioneer_medal(user_id: str, client=None) -> bool:
+    """
+    Award '1st 100 Founder' badge to players who joined when total users <= 100.
+    Always opens its own httpx client — safe to run as an asyncio.create_task()
+    because it never borrows a caller's client that may already be closed.
+    """
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=10) as c:
+            count_r = await c.get(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"select": "count"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Prefer": "count=exact", "Range": "0-0"}
+            )
+            total_users = int(count_r.headers.get("content-range", "0/0").split("/")[-1] or 9999)
+            if total_users > 100:
+                return False
+
+            profile_r = await c.get(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{user_id}", "select": "medals"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            rows = profile_r.json()
+            if not rows:
+                return False
+            current_medals = rows[0].get("medals") or []
+            if any(m.get("id") == "pioneer" for m in current_medals):
+                return False
+
+            now = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+            await c.patch(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{user_id}"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"},
+                json={"medals": current_medals + [{"id": "pioneer", "label": "1st 100 Founder",
+                      "img": "pioneer",
+                      "reason": f"Among the first {total_users} players to join AfriChess",
+                      "tag": "founder", "awarded_at": now}]}
+            )
+            print(f"[medals] pioneer badge awarded to {user_id} (user #{total_users})", flush=True)
+            return True
+    except Exception as e:
+        print(f"[medals] pioneer grant failed for {user_id}: {e}", flush=True)
         return False
-    profile_r = await client.get(
-        f"{SUPABASE_URL}/rest/v1/profiles",
-        params={"user_id": f"eq.{user_id}", "select": "medals"},
-        headers={"apikey": SUPABASE_SERVICE_KEY,
-                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-    )
-    rows = profile_r.json()
-    if not rows:
-        return False
-    current_medals = rows[0].get("medals") or []
-    if any(m.get("id") == "pioneer" for m in current_medals):
-        return False
-    now = __import__("datetime").datetime.utcnow().isoformat() + "Z"
-    await client.patch(
-        f"{SUPABASE_URL}/rest/v1/profiles",
-        params={"user_id": f"eq.{user_id}"},
-        headers={"apikey": SUPABASE_SERVICE_KEY,
-                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                 "Content-Type": "application/json", "Prefer": "return=minimal"},
-        json={"medals": current_medals + [{"id": "pioneer", "label": "1st 100 Founder",
-              "img": "pioneer", "reason": f"Among the first {total_users} players to join AfriChess",
-              "tag": "founder", "awarded_at": now}]}
-    )
-    print(f"[medals] pioneer badge awarded to {user_id} (user #{total_users})", flush=True)
-    return True
 
 # ── Page presence tracker ─────────────────────────────────────────────────────
 # Maps session_token → last_seen timestamp (float).
@@ -366,8 +481,9 @@ async def supabase_update_elo(user_id: str, new_elo: int, time_control: str | No
         patch: dict = {col: new_elo, "games_played": current_gp + 1}
         if rd    is not None: patch["rd"]    = rd
         if sigma is not None: patch["sigma"] = sigma
-        await client.patch(
-            f"{SUPABASE_URL}/rest/v1/profiles",
+        await _sb_patch(
+            client,
+            url=f"{SUPABASE_URL}/rest/v1/profiles",
             params={"user_id": f"eq.{user_id}"},
             headers={
                 "apikey": SUPABASE_SERVICE_KEY,
@@ -408,17 +524,22 @@ TIER_LIMITS = {
 # Times in ms sent as wtime/btime with movestogo=1
 # Engine adds 200ms buffer to movetime, so we use wtime directly
 DIFFICULTY_SETTINGS = {
-    1: 100,    # engine gets 100ms ΓÇö genuinely weak
-    2: 300,
-    3: 800,
-    4: 2000,
-    5: 5000,
+    # Levels 1–3: think time is irrelevant — weakness comes from random_chance below
+    # Levels 4–8: pure engine, increasing think time gives more depth = stronger play
+    1: 200,    # Beginner     — mostly random moves
+    2: 200,    # Beginner+    — mostly random moves
+    3: 500,    # Easy         — occasional best move
+    4: 1000,   # Intermediate — full engine, shallow search
+    5: 2000,   # Hard         — full engine, 2s
+    6: 4000,   # Hard+        — full engine, 4s
+    7: 8000,   # Expert       — full engine, 8s
+    8: 15000,  # Master       — full engine, 15s (~2050 ELO)
 }
 
 class MoveRequest(BaseModel):
     fen: str
     think_time: float = 1.0
-    difficulty: int = 3  # 1=Beginner → 5=Expert
+    difficulty: int = 3  # 1=Beginner → 8=Master
     moves: list[str] = []  # full UCI move history for repetition detection
 
 class CoachRequest(BaseModel):
@@ -481,15 +602,234 @@ def verify_key(x_api_key: str = Header(...)):
 
     return {"email": email, "tier": tier}
 
-# ΓöÇΓöÇΓöÇ Engine helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Engine process pool ───────────────────────────────────────────────────────
+# Pre-spawns N persistent engine processes that stay alive between moves.
+# Each process handles one request at a time (UCI is stateful).
+# Pool workers are checked out via asyncio.Queue — callers await a worker,
+# use it, then return it. If a worker dies it is replaced automatically.
+#
+# Benefits over spawn-per-call:
+#   - Eliminates ~50-100ms process startup cost per move
+#   - Reduces OS process churn under load
+#   - Can be extracted to a separate Railway service later (just change
+#     _pool_send to make an HTTP call instead of writing to stdin)
+
+import subprocess as _subprocess
+import threading as _threading
+
+POOL_SIZE = int(os.getenv("ENGINE_POOL_SIZE", "4"))  # tune via Railway env var
+
+class _EngineWorker:
+    """A single persistent engine process with send/receive helpers."""
+
+    def __init__(self):
+        self.proc   = None
+        self.lock   = _threading.Lock()
+        self._start()
+
+    def _start(self):
+        try:
+            self.proc = _subprocess.Popen(
+                [ENGINE_PATH],
+                stdin=_subprocess.PIPE, stdout=_subprocess.PIPE,
+                stderr=_subprocess.PIPE, text=True, bufsize=1
+            )
+            # Handshake
+            self.proc.stdin.write("uci\n")
+            self.proc.stdin.flush()
+            for _ in range(50):
+                line = self.proc.stdout.readline()
+                if line.strip() == "uciok":
+                    break
+            print(f"[pool] engine worker started (pid {self.proc.pid})", flush=True)
+        except Exception as e:
+            print(f"[pool] failed to start engine worker: {e}", flush=True)
+            self.proc = None
+
+    def alive(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def run(self, pos_cmd: str, think_ms: int) -> tuple[str, str]:
+        """Send a position + go command, collect output. Thread-safe."""
+        if not self.alive():
+            self._start()
+        if not self.alive():
+            return "", ""
+        try:
+            # Reset engine state between games
+            self.proc.stdin.write(f"ucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n")
+            self.proc.stdin.flush()
+
+            stdout_lines = []
+            stderr_lines = []
+            deadline = _time.time() + think_ms / 1000 + 10
+
+            # Read stdout until bestmove
+            while _time.time() < deadline:
+                line = self.proc.stdout.readline()
+                if not line:
+                    break
+                stdout_lines.append(line)
+                if line.startswith("bestmove"):
+                    break
+
+            # Drain stderr (non-blocking via threads would be cleaner but this works)
+            # stderr has info lines — read what's available without blocking
+            import select as _select
+            while _time.time() < deadline:
+                r, _, _ = _select.select([self.proc.stderr], [], [], 0.01)
+                if not r:
+                    break
+                line = self.proc.stderr.readline()
+                if line:
+                    stderr_lines.append(line)
+
+            return "".join(stdout_lines), "".join(stderr_lines)
+        except Exception as e:
+            print(f"[pool] worker error: {e} — restarting", flush=True)
+            try:
+                self.proc.kill()
+            except Exception:
+                pass
+            self.proc = None
+            return "", ""
+
+
+class _EnginePool:
+    """
+    Async queue of EngineWorkers.
+    Usage:
+        async with engine_pool.acquire() as worker:
+            stdout, stderr = worker.run(pos_cmd, think_ms)
+    """
+    def __init__(self, size: int):
+        self._queue: asyncio.Queue = None   # initialised in start()
+        self._workers: list[_EngineWorker] = []
+        self._size = size
+
+    async def start(self):
+        self._queue = asyncio.Queue()
+        for _ in range(self._size):
+            w = _EngineWorker()
+            self._workers.append(w)
+            await self._queue.put(w)
+        print(f"[pool] {self._size} engine workers ready", flush=True)
+
+    async def stop(self):
+        for w in self._workers:
+            try:
+                if w.proc:
+                    w.proc.stdin.write("quit\n")
+                    w.proc.stdin.flush()
+                    w.proc.wait(timeout=2)
+            except Exception:
+                pass
+        print("[pool] engine pool stopped", flush=True)
+
+    class _Ctx:
+        def __init__(self, pool):
+            self._pool   = pool
+            self._worker = None
+        async def __aenter__(self):
+            if self._pool._queue is None:
+                raise RuntimeError("Engine pool not started yet")
+            self._worker = await asyncio.wait_for(
+                self._pool._queue.get(), timeout=30)
+            return self._worker
+        async def __aexit__(self, *_):
+            if self._worker is None:
+                return
+            # Replace dead workers before returning to pool
+            if not self._worker.alive():
+                print("[pool] replacing dead worker", flush=True)
+                self._worker = _EngineWorker()
+            await self._pool._queue.put(self._worker)
+
+    def acquire(self):
+        return self._Ctx(self)
+
+
+engine_pool = _EnginePool(POOL_SIZE)
+
+
+def _run_engine(pos_cmd: str, think_ms: int) -> tuple[str, str]:
+    """
+    Legacy sync wrapper — used by analyse_position (called via run_in_executor).
+    Uses the pool if available, falls back to spawn-per-call if pool not ready.
+    """
+    if engine_pool._queue is not None and not engine_pool._queue.empty():
+        # Can't await here (sync context) — use spawn for analysis path
+        pass
+    import subprocess
+    commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
+    try:
+        proc = subprocess.Popen(
+            [ENGINE_PATH],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1
+        )
+        stdout_data, stderr_data = proc.communicate(
+            input=commands, timeout=think_ms / 1000 + 10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout_data, stderr_data = proc.communicate()
+    except Exception:
+        stdout_data, stderr_data = "", ""
+    return stdout_data, stderr_data
+
+
+def _parse_engine_output(stdout_data: str, stderr_data: str) -> dict:
+    """Parse bestmove + highest-depth info line from engine output."""
+    best_move = None
+    score     = 0
+    pv_moves  = []
+    best_depth = -1
+
+    for line in stdout_data.splitlines():
+        if line.startswith("bestmove"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
+                best_move = parts[1]
+            break
+
+    for line in stderr_data.splitlines():
+        if "depth" not in line:
+            continue
+        try:
+            parts = line.split()
+            depth = int(parts[parts.index("depth") + 1])
+            if "score" not in parts or depth <= best_depth:
+                continue
+            si = parts.index("score")
+            stype, sval = parts[si + 1], int(parts[si + 2])
+            best_depth = depth
+            # score mate N → large cp value; score cp N → raw centipawns
+            score = sval if stype == "cp" else (10000 - abs(sval)) * 100 * (1 if sval > 0 else -1)
+            if "pv" in parts:
+                pvi = parts.index("pv")
+                pv_moves = parts[pvi + 1: pvi + 7]   # 6 moves for full continuation
+        except (ValueError, IndexError):
+            continue
+
+    if not best_move and pv_moves:
+        best_move = pv_moves[0]
+
+    return {"best_move": best_move, "score_cp": score, "pv": pv_moves, "depth": best_depth}
+
 
 def analyse_position(fen: str, think_time: float, moves: list[str] | None = None):
     """
     Talk directly to SenkabalaIII via raw subprocess.
     SenkabalaIII non-standard output: bestmove → stdout, info → stderr.
-    Sends full move history so engine posHistory[] tracks repetitions.
+
+    Two-pass mate search:
+      Pass 1 — normal search at think_time.
+      Pass 2 — if the position looks winning (eval > +5 pawns for the side to move),
+               re-search at 5× the time so the engine has enough depth to find
+               forced mates instead of just playing any winning move.
+               Pass 2 result replaces Pass 1 only if it found a better or equal move.
     """
-    import subprocess
+    import subprocess  # noqa: F401 (imported for _run_engine)
 
     board = chess.Board()
     if moves:
@@ -503,101 +843,156 @@ def analyse_position(fen: str, think_time: float, moves: list[str] | None = None
         board = chess.Board(fen)
 
     think_ms = int(max(think_time, 1.0) * 1000)
-    pos_cmd = f"position startpos moves {' '.join(moves)}" if moves else f"position fen {fen}"
-    commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
+    pos_cmd  = (f"position startpos moves {' '.join(moves)}"
+                if moves else f"position fen {fen}")
 
-    try:
-        proc = subprocess.Popen(
-            [ENGINE_PATH],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1
-        )
-        stdout_data, stderr_data = proc.communicate(input=commands, timeout=think_ms/1000 + 8)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        stdout_data, stderr_data = proc.communicate()
+    # ── Pass 1: normal search ─────────────────────────────────────────────
+    stdout1, stderr1 = _run_engine(pos_cmd, think_ms)
+    result = _parse_engine_output(stdout1, stderr1)
 
-    best_move = None
-    score = 0
-    pv_moves = []
-    best_depth = -1
+    # Flip score to always be from the side to move's perspective for the threshold check
+    raw_score = result["score_cp"]
+    stm_score = -raw_score if board.turn == chess.BLACK else raw_score
 
-    # bestmove on stdout
-    for line in stdout_data.splitlines():
-        if line.startswith("bestmove"):
-            parts = line.split()
-            if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
-                best_move = parts[1]
-            break
+    # ── Pass 2: deep mate search if position looks winning ─────────────────
+    # Lower threshold: +100cp (not +500) — even a slight advantage warrants
+    # a deep mate search so forced mates like Qh3# aren't missed.
+    # Skip if engine already returned a mate score (>900000).
+    WINNING_THRESHOLD = 100     # centipawns — was 500, lowered to catch more mates
+    MATE_SCORE_FLOOR  = 900000
 
-    # info lines on stderr
-    for line in stderr_data.splitlines():
-        if "depth" not in line:
-            continue
-        try:
-            parts = line.split()
-            depth = int(parts[parts.index("depth") + 1])
-            if "score" not in parts or depth <= best_depth:
-                continue
-            si = parts.index("score")
-            stype, sval = parts[si+1], int(parts[si+2])
-            best_depth = depth
-            score = sval if stype == "cp" else (10000 - abs(sval)) * 100 * (1 if sval > 0 else -1)
-            if "pv" in parts:
-                pvi = parts.index("pv")
-                pv_moves = parts[pvi+1:pvi+6]
-        except (ValueError, IndexError):
-            continue
+    if stm_score > WINNING_THRESHOLD and abs(raw_score) < MATE_SCORE_FLOOR:
+        mate_ms = max(think_ms * 8, 8000)  # at least 8s for mate search (was 5×)
+        stdout2, stderr2 = _run_engine(pos_cmd, mate_ms)
+        result2 = _parse_engine_output(stdout2, stderr2)
+        # Use deep result if it found a move (it always should)
+        if result2["best_move"]:
+            result = result2
+            print(f"[analyse] mate-search pass used "
+                  f"(pass1 score={stm_score}cp, depth={result2['depth']})", flush=True)
 
+    # Normalise score to White's perspective for the API response
     if board.turn == chess.BLACK:
-        score = -score
-    if not best_move and pv_moves:
-        best_move = pv_moves[0]
+        result["score_cp"] = -result["score_cp"]
 
-    return {"best_move": best_move, "score_cp": score, "pv": pv_moves}
+    # Convert PV from UCI to SAN for display and coaching
+    pv_san = []
+    try:
+        pv_board = board.copy()
+        for uci in result.get("pv", []):
+            move = chess.Move.from_uci(uci)
+            if move in pv_board.legal_moves:
+                pv_san.append(pv_board.san(move))
+                pv_board.push(move)
+            else:
+                break
+    except Exception:
+        pass
+    result["pv_san"] = pv_san
+
+    # Build mate score — SenkabalaIII uses raw cp, not UCI "score mate N"
+    # MATE constant = 999000. Mate in N at ply (2N-1): score = 999000 - (2N-1)
+    # So N = (999000 - abs(score) + 1) // 2
+    score_cp = result["score_cp"]
+    SENKABALA_MATE = 999000
+    if abs(score_cp) >= 900000:
+        mate_in = (SENKABALA_MATE - abs(score_cp) + 1) // 2
+        result["mate_in"] = mate_in * (1 if score_cp > 0 else -1)
+    else:
+        result["mate_in"] = None
+
+    # Validate best_move is actually legal in this exact position before
+    # returning it. The PV-to-SAN conversion above already checks legality
+    # move-by-move, but best_move itself was never checked — if the engine's
+    # UCI output ever returns something stale or malformed for an edge case
+    # (e.g. a position with zero legal moves, like checkmate/stalemate),
+    # this is what stops a bogus move from reaching the board. The client's
+    # existing `if (!finalMove)` fallback logic correctly handles None here,
+    # same as it already does for a missing/empty move from the WASM path.
+    bm = result.get("best_move")
+    if bm:
+        try:
+            if chess.Move.from_uci(bm) not in board.legal_moves:
+                print(f"[analyse] engine returned illegal move '{bm}' for fen={fen} — discarding", flush=True)
+                result["best_move"] = None
+        except Exception:
+            result["best_move"] = None
+
+    return result
 
 
 # ΓöÇΓöÇΓöÇ Original /move endpoint (unchanged) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-engine_semaphore = asyncio.Semaphore(3)
+# Separate semaphores so bot games and analysis don't starve each other
+bot_semaphore      = asyncio.Semaphore(6)   # bot games (random moves bypass this entirely)
+analysis_semaphore = asyncio.Semaphore(2)   # analysis board + coach
+engine_semaphore   = analysis_semaphore     # legacy alias
 _engine_failures = 0          # consecutive engine failures
 _ENGINE_FAILURE_LIMIT = 3     # after this many, log loudly and reset count
 
 @app.post("/move")
 async def get_move(req: MoveRequest):
     global _engine_failures
-    async with engine_semaphore:
-        try:
-            # Validate FEN
-            board = chess.Board(req.fen)
-            if board.is_game_over():
-                return {
-                    "move": None, "fen": req.fen,
-                    "is_game_over": True,
-                    "outcome": str(board.outcome()),
-                    "score_cp": 0, "eval_pawns": 0, "candidates": []
-                }
+    import random
 
-            import random
-            think_ms = DIFFICULTY_SETTINGS.get(req.difficulty, int(req.think_time * 1000))
+    try:
+        # Validate FEN — no semaphore needed for this
+        board = chess.Board(req.fen)
+        if board.is_game_over():
+            return {
+                "move": None, "fen": req.fen,
+                "is_game_over": True,
+                "outcome": str(board.outcome()),
+                "score_cp": 0, "eval_pawns": 0, "candidates": []
+            }
 
-            # Reconstruct game board from full move history (needed for repetition detection)
-            game_board = chess.Board()
-            if req.moves:
-                for uci in req.moves:
-                    try:
-                        game_board.push_uci(uci)
-                    except Exception:
-                        game_board = chess.Board(req.fen)
-                        break
-            else:
-                game_board = chess.Board(req.fen)
+        think_ms = DIFFICULTY_SETTINGS.get(req.difficulty, int(req.think_time * 1000))
 
-            # Low difficulties: random legal move
-            random_chance = {1: 0.75, 2: 0.40, 3: 0.15, 4: 0.0, 5: 0.0}
-            if random.random() < random_chance.get(req.difficulty, 0):
-                move = random.choice(list(game_board.legal_moves))
-                move_uci = move.uci()
-            else:
+        # Reconstruct game board from full move history (needed for repetition detection)
+        game_board = chess.Board()
+        if req.moves:
+            for uci in req.moves:
+                try:
+                    game_board.push_uci(uci)
+                except Exception:
+                    game_board = chess.Board(req.fen)
+                    break
+        else:
+            game_board = chess.Board(req.fen)
+
+        # Initialise all result variables so both the random AND engine paths
+        # always define them — avoids NameError on random move path (the 500 bug)
+        score_cp   = 0
+        candidates = []
+        move       = None
+        move_uci   = None
+
+        # random_chance: probability of playing a random legal move instead of engine best.
+        # Levels 1–3 use randomisation as the PRIMARY weakness mechanism.
+        # These bypass the semaphore entirely — no engine spawn needed.
+        random_chance = {
+            1: 0.90,   # Beginner   — 90% random, 10% engine
+            2: 0.65,   # Beginner+  — 65% random
+            3: 0.25,   # Easy       — 25% random
+            4: 0.0,    # Intermediate — always engine
+            5: 0.0,    # Hard
+            6: 0.0,    # Hard+
+            7: 0.0,    # Expert
+            8: 0.0,    # Master
+        }
+        # Initialise these before the if/else so both paths always define them
+        score_cp   = 0
+        candidates = []
+        move       = None
+        move_uci   = None
+
+        if random.random() < random_chance.get(req.difficulty, 0):
+            # Random move — instant, no engine, no semaphore
+            move = random.choice(list(game_board.legal_moves))
+            move_uci = move.uci()
+            candidates = [{"move": move_uci, "eval_pawns": 0}]
+        else:
+            # Engine move — acquire bot semaphore to limit concurrent engine processes
+            async with bot_semaphore:
                 # Use raw subprocess so we can send the full position command.
                 # python-chess engine.play() only sends `position fen <fen>` internally,
                 # which means the engine's posHistory[] never gets populated — it can't
@@ -609,84 +1004,95 @@ async def get_move(req: MoveRequest):
                     pos_cmd = f"position fen {req.fen}"
 
                 commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
+                move_uci   = None
+                # Give the engine generous grace: think time + 18s
+                # (server engine can extend search via instability heuristic)
+                hard_limit = think_ms / 1000 + 18
+
+                # Use pool worker — no process startup cost
                 move_uci = None
-                for _attempt in range(2):   # retry once on failure
-                    try:
-                        proc = subprocess.Popen(
-                            [ENGINE_PATH],
-                            stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            text=True,
-                            bufsize=1
+                try:
+                    if engine_pool._queue is None:
+                        raise RuntimeError("pool not ready")
+                    async with engine_pool.acquire() as worker:
+                        loop = asyncio.get_event_loop()
+                        # Cap at hard_limit; worker.run already sends `stop` internally
+                        stdout_data, _ = await asyncio.wait_for(
+                            loop.run_in_executor(None, worker.run, pos_cmd, think_ms),
+                            timeout=hard_limit
                         )
-                        stdout_data, _ = proc.communicate(
-                            input=commands,
-                            timeout=think_ms / 1000 + 8
-                        )
-                        for line in stdout_data.splitlines():
-                            if line.startswith("bestmove"):
-                                parts = line.split()
-                                if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
-                                    move_uci = parts[1]
-                                break
-                        if move_uci:
-                            _engine_failures = 0   # reset on success
+                    for line in stdout_data.splitlines():
+                        if line.startswith("bestmove"):
+                            parts = line.split()
+                            if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
+                                move_uci = parts[1]
                             break
-                        # No bestmove — engine returned empty; retry
+                    if move_uci:
+                        _engine_failures = 0
+                    else:
                         _engine_failures += 1
-                        print(f"[engine] no bestmove on attempt {_attempt+1}, failures={_engine_failures}", flush=True)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.communicate()
-                        _engine_failures += 1
-                        print(f"[engine] timeout on attempt {_attempt+1}, failures={_engine_failures}", flush=True)
-                    except Exception as eng_err:
-                        _engine_failures += 1
-                        print(f"[engine] error on attempt {_attempt+1}: {eng_err}, failures={_engine_failures}", flush=True)
+                        print("[engine] no bestmove from pool worker", flush=True)
+                except asyncio.TimeoutError:
+                    _engine_failures += 1
+                    print(f"[engine] pool worker timeout after {hard_limit}s — "
+                          f"difficulty={req.difficulty} think_ms={think_ms}", flush=True)
+                except Exception as eng_err:
+                    _engine_failures += 1
+                    print(f"[engine] pool worker error: {eng_err}", flush=True)
+                    # Spawn-per-call fallback if pool not ready
+                    if not move_uci:
+                        print("[engine] falling back to spawn-per-call", flush=True)
+                        import subprocess as _sp
+                        try:
+                            commands = f"uci\nucinewgame\n{pos_cmd}\ngo movetime {think_ms}\n"
+                            p = _sp.Popen([ENGINE_PATH], stdin=_sp.PIPE,
+                                          stdout=_sp.PIPE, stderr=_sp.PIPE, text=True)
+                            out, _ = p.communicate(input=commands, timeout=hard_limit)
+                            for line in out.splitlines():
+                                if line.startswith("bestmove"):
+                                    parts = line.split()
+                                    if len(parts) >= 2 and parts[1] not in ("(none)", "0000"):
+                                        move_uci = parts[1]
+                                    break
+                        except Exception as spawn_err:
+                            print(f"[engine] spawn fallback also failed: {spawn_err}", flush=True)
 
                 if _engine_failures >= _ENGINE_FAILURE_LIMIT:
-                    print(f"[engine] ALERT: {_engine_failures} consecutive failures — check binary at {ENGINE_PATH}", flush=True)
-                    _engine_failures = 0  # reset so we keep trying rather than silently dying
+                    print(f"[engine] ALERT: {_engine_failures} consecutive failures", flush=True)
+                    _engine_failures = 0
 
                 if not move_uci:
-                    # Fallback: any legal move
-                    move_uci = random.choice(list(game_board.legal_moves)).uci()
-
-                # Convert UCI string to chess.Move for pushing
+                    legal = list(game_board.legal_moves)
+                    if not legal:
+                        return {"move": None, "fen": game_board.fen(),
+                                "is_game_over": True, "score_cp": 0, "eval_pawns": 0, "candidates": []}
+                    move_uci = random.choice(legal).uci()
+                    print("[engine] fallback random move used", flush=True)
                 move = chess.Move.from_uci(move_uci)
 
-            # Candidate moves — analyse current position
-            fen_board = chess.Board(req.fen)
-            candidates = []
-            try:
-                with chess.engine.SimpleEngine.popen_uci(ENGINE_PATH) as engine2:
-                    infos = engine2.analyse(fen_board, chess.engine.Limit(time=0.5), multipv=5)
-                    info_list = infos if isinstance(infos, list) else [infos]
-                    for info in info_list:
-                        if info.get("pv"):
-                            cp = info["score"].white().score(mate_score=10000)
-                            candidates.append({
-                                "move": info["pv"][0].uci(),
-                                "eval_pawns": round(cp / 100, 2) if cp is not None else 0
-                            })
-            except Exception:
-                pass
+        # Final guard — move must be legal
+        if move is None or move not in game_board.legal_moves:
+            legal = list(game_board.legal_moves)
+            if not legal:
+                return {"move": None, "fen": game_board.fen(),
+                        "is_game_over": True, "score_cp": 0, "eval_pawns": 0, "candidates": []}
+            print(f"[engine] illegal move {move} — using random", flush=True)
+            move = random.choice(legal)
 
-            score_cp = int(candidates[0]["eval_pawns"] * 100) if candidates else 0
-
-            game_board.push(move)
-            return {
-                "move":         move.uci(),
-                "fen":          game_board.fen(),
-                "is_game_over": game_board.is_game_over(),
-                "outcome":      str(game_board.outcome()) if game_board.is_game_over() else None,
-                "score_cp":     score_cp,
-                "eval_pawns":   round(score_cp / 100, 2),
-                "candidates":   candidates
-            }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        game_board.push(move)
+        return {
+            "move":         move.uci(),
+            "fen":          game_board.fen(),
+            "is_game_over": game_board.is_game_over(),
+            "outcome":      str(game_board.outcome()) if game_board.is_game_over() else None,
+            "score_cp":     score_cp,
+            "eval_pawns":   round(score_cp / 100, 2),
+            "candidates":   candidates
+        }
+    except Exception as e:
+        import traceback
+        print(f"[/move] 500 error: {e}\n{traceback.format_exc()}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
 # ΓöÇΓöÇΓöÇ /coach endpoint ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 @app.post("/coach")
@@ -705,14 +1111,23 @@ def coach(req: CoachRequest, user=Depends(verify_key)):
     board = chess.Board(req.fen)
     turn = "White" if board.turn == chess.WHITE else "Black"
 
+    pv_san_list = analysis.get("pv_san", [])
+    continuation = ' '.join(pv_san_list[:5]) if pv_san_list else ' '.join(pv[:5])
+    mate_in = analysis.get("mate_in")
+    eval_display = (f"Mate in {abs(mate_in)}" if mate_in else
+                    f"{'+' if score_pawns >= 0 else ''}{score_pawns} pawns (White's perspective)")
+
     prompt = f"""You are Senkabala, an expert chess coach powered by a 2050 ELO engine.
 Analyze this position and give coaching advice to a club-level player.
 
 Position (FEN): {req.fen}
 Side to move: {turn}
-Engine evaluation: {'+' if score_pawns >= 0 else ''}{score_pawns} pawns (from White's perspective)
+Engine evaluation: {eval_display}
 Engine best move: {best_move}
-Suggested continuation: {' '.join(pv)}
+Engine continuation (5 moves): {continuation}
+
+These are the EXACT engine-calculated moves. Base your explanation on this line only.
+Do not invent moves or variations not listed above.
 """
 
     if req.played_move and req.played_move != best_move:
@@ -733,6 +1148,7 @@ This is not the engine's top choice. Briefly explain why {best_move} is better.
 Respond in this exact format:
 ASSESSMENT: (1 sentence on who stands better and why)
 BEST MOVE: (explain the engine's best move in plain English)
+CONTINUATION: (walk through the next 4-5 moves from the engine continuation, one short phrase per move)
 PLAN: (2-3 sentences on the strategic plan going forward)
 TIP: (one practical chess principle this position illustrates)
 """
@@ -780,11 +1196,27 @@ active_games: dict = {}         # game_id ΓåÆ game state dict
 
 CLOCK_SECONDS = 300             # 5 minutes each side
 
+# ── Challenge (invite link) state ────────────────────────────────
+# pending_challenges[code] = {
+#   "code": str, "creator_id": str, "creator_name": str,
+#   "time_control": str, "ws": WebSocket | None, "created_at": float
+# }
+pending_challenges: dict = {}
+
 # ── Arena tournament state ──────────────────────────────────────
 # tournament_connections[tid][user_id] = {ws, username, elo, score, available}
 tournament_connections: dict = {}
 # tournament_player_game[tid][user_id] = game_id | None
 tournament_player_game: dict = {}
+# Per-tournament lock so concurrent triggers (a forfeit, plus both players'
+# independent /api/tournament/result calls) can't race arena_pair() against
+# each other and each snapshot a half-updated conns dict. Without this, the
+# same pairing pass could run 2-3 times in quick succession, each reading
+# slightly different in-flight state, producing spurious "waiting (odd
+# player)" results for a player who actually did have an available opponent
+# a few milliseconds later.
+_arena_pair_locks: dict = {}
+_submit_result_locks: dict = {}
 
 
 # ΓöÇΓöÇ Helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -962,9 +1394,18 @@ def parse_clock_seconds(time_control: str | None) -> tuple[int, int]:
 def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
              white_id: str, black_id: str, time_control: str | None = None) -> dict:
     base_secs, inc_secs = parse_clock_seconds(time_control)
-    # First-move timeout = 25% of base time, minimum 10s
-    # e.g. 1+0 → 15s, 3+0 → 45s, 5+0 → 75s, 10+0 → 150s
-    first_move_timeout = max(10, int(base_secs * 0.25))
+    # The clock starts the moment the game begins — same as a real chess
+    # clock starting the instant both sides sit down, whether or not anyone
+    # has touched a piece yet. If you're stuck in traffic, your clock is
+    # still running.
+    #
+    # first_move_timeout is an early-forfeit rule on top of that: if a player
+    # hasn't made their first move by the time 20% of their base time has
+    # elapsed, they forfeit outright — this catches genuine no-shows quickly
+    # instead of making their opponent wait out an entire clock (e.g. a full
+    # 5 minutes in a 5+0 game) for someone who was never going to show up.
+    # e.g. 1+0 → 12s, 2+1 → 24s, 3+0 → 36s, 5+0 → 60s, 10+0 → 120s
+    first_move_timeout = max(10, int(base_secs * 0.20))
     return {
         "id":                   game_id,
         "board":                chess.Board(),
@@ -984,7 +1425,84 @@ def new_game(game_id: str, white_ws: WebSocket, black_ws: WebSocket,
         "time_control":         time_control,
         "white_profile":        None,
         "black_profile":        None,
+        "spectators":           [],   # list of WebSocket connections watching this game
+        "takeback_offered_by":  None, # color ("w"/"b") that offered takeback, or None
+        "move_times_w":         [],   # ms per white move for fair play analysis
+        "move_times_b":         [],   # ms per black move for fair play analysis
     }
+
+
+async def tournament_handle_forfeit(game: dict, loser_id: str, winner_id: str, result: str):
+    """
+    On a first-move-timeout forfeit in an arena tournament game:
+      - The player who failed to move (loser) is silently paused —
+        they will not be paired again until they click Resume.
+      - The player who showed up (winner) is sent back into the pairing
+        pool immediately, available for a new opponent.
+      - The tournament_games row is marked with the result, so the
+        pairings list stops showing a "Watch" link for a game that's
+        actually finished (previously this was never written for
+        forfeits, only for normal game-ends submitted via the client,
+        leaving forfeited games looking permanently in-progress).
+    No-op for casual (non-tournament) games.
+    """
+    tid = game.get("tournament_id")
+    if not tid:
+        return
+    conns = tournament_connections.get(tid, {})
+    pg    = tournament_player_game.setdefault(tid, {})
+
+    # Mark the tournament_games row so it stops appearing as in-progress.
+    # This mirrors what /api/tournament/result does for normal game-ends,
+    # but is called directly server-side since there's no client to call
+    # the endpoint when a player has forfeited by never connecting at all.
+    db_game_id = game.get("tournament_db_id")
+    if db_game_id and SUPABASE_SERVICE_KEY:
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.patch(
+                    f"{SUPABASE_URL}/rest/v1/tournament_games",
+                    params={"id": f"eq.{db_game_id}"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY,
+                             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                             "Content-Type": "application/json"},
+                    json={"result": result, "played_at": datetime.utcnow().isoformat()}
+                )
+        except Exception as e:
+            print(f"[arena] failed to write forfeit result for {db_game_id}: {e}", flush=True)
+
+    if loser_id in conns:
+        conns[loser_id]["available"] = False
+        conns[loser_id]["paused"]    = True
+        # Silent state sync — not a visible message, just corrects the
+        # client's local _arenaPaused flag so it stops sending "available"
+        # automatically after this game. The player sees nothing; they'll
+        # simply notice they're not getting paired and can click Resume
+        # themselves when they're back, per the no-message-on-forfeit design.
+        loser_ws = conns[loser_id].get("ws")
+        if loser_ws:
+            try:
+                await arena_send(loser_ws, {"type": "paused_state_sync", "paused": True})
+            except Exception:
+                pass
+    if loser_id in pg:
+        pg[loser_id] = None
+
+    if winner_id in conns:
+        conns[winner_id]["available"] = True
+        conns[winner_id]["paused"]    = False
+    if winner_id in pg:
+        pg[winner_id] = None
+
+    print(f"[arena] forfeit in {tid}: {loser_id} paused, {winner_id} returned to pool", flush=True)
+    # No longer triggers arena_pair() directly — the single poller in
+    # arena_pairing_loop picks up this state change on its next tick (every
+    # 1.5s). This was the root cause of an entire class of bug: several
+    # different events (forfeits, both players' independent result
+    # submissions, reconnects) could all trigger pairing concurrently,
+    # racing each other against a half-updated in-memory dict. With exactly
+    # one caller on a fixed schedule, that race is structurally impossible —
+    # there's nothing left to race against.
 
 
 async def first_move_timeout_loop(game_id: str):
@@ -1024,6 +1542,7 @@ async def first_move_timeout_loop(game_id: str):
                 if not game.get("_elo_updated"):
                     game["_elo_updated"] = True
                     await update_elos(game, "black")
+                await tournament_handle_forfeit(game, loser_id=game.get("white_id"), winner_id=game.get("black_id"), result="black")
                 await asyncio.sleep(1)
                 active_games.pop(game_id, None)
                 print(f"[game] {game_id} — white forfeited (no first move)", flush=True)
@@ -1033,6 +1552,16 @@ async def first_move_timeout_loop(game_id: str):
         # Phase 3: white just made move 1 — start black's deadline
         if moves_made == 1 and black_deadline is None:
             black_deadline = time.time() + game["first_move_timeout"]
+            # Tell black their response clock has started — without this,
+            # black has no visible countdown at all for their first-response
+            # deadline (this was previously silent, unlike white's deadline
+            # which at least had a client-side, if inaccurate, countdown).
+            black_ws = game.get("black_game_ws")
+            if black_ws:
+                await send(black_ws, {
+                    "type": "first_move_started",
+                    "first_move_remaining": game["first_move_timeout"],
+                })
             continue
 
         # Phase 4: black hasn't responded
@@ -1049,6 +1578,7 @@ async def first_move_timeout_loop(game_id: str):
                 if not game.get("_elo_updated"):
                     game["_elo_updated"] = True
                     await update_elos(game, "white")
+                await tournament_handle_forfeit(game, loser_id=game.get("black_id"), winner_id=game.get("white_id"), result="white")
                 await asyncio.sleep(1)
                 active_games.pop(game_id, None)
                 print(f"[game] {game_id} — black forfeited (no first response)", flush=True)
@@ -1075,23 +1605,29 @@ async def broadcast(game: dict, msg: dict):
         await send(w_ws, msg)
     if b_ws:
         await send(b_ws, msg)
+    # Also broadcast to spectators (read-only watchers)
+    dead = []
+    for spec_ws in game.get("spectators", []):
+        try:
+            await spec_ws.send_json(msg)
+        except Exception:
+            dead.append(spec_ws)
+    for d in dead:
+        try: game["spectators"].remove(d)
+        except ValueError: pass
 
 
 def deduct_clock(game: dict) -> float:
     """
     Deduct elapsed time from the side that just moved, then add increment (Fischer).
-    On the very first move, just starts the clock without deducting.
+    The clock starts ticking from game creation (last_move_ts is set there now,
+    not just on first move) — so the connection-grace + first-move-timeout
+    window genuinely costs the player real clock time, the same as Lichess.
     Returns the remaining clock for the side that just moved (after increment).
     """
     now = time.time()
     game["moves_made"] = game.get("moves_made", 0) + 1
     inc = game.get("increment", 0)
-
-    if game["moves_made"] == 1:
-        # First move — start the clock, don't deduct. Add increment to white's time.
-        game["last_move_ts"] = now
-        game["clock"]["w"] = game["clock"]["w"] + inc
-        return game["clock"]["w"]
 
     last_ts = game.get("last_move_ts") or now
     elapsed = now - last_ts
@@ -1105,7 +1641,11 @@ def deduct_clock(game: dict) -> float:
 
 async def clock_loop(game_id: str):
     """Background task — checks for flag fall every second.
-    Does not tick until both players have connected AND the first move has been made.
+    Ticks from the moment last_move_ts is set (game creation for tournament
+    games, both-connected for casual lobby games) — NOT from the first move.
+    This means the connection-grace + first-move-timeout window genuinely
+    costs the player real clock time, same as Lichess, rather than being a
+    free period that doesn't touch their time control at all.
     """
     while True:
         await asyncio.sleep(1)
@@ -1117,16 +1657,15 @@ async def clock_loop(game_id: str):
         if not game.get("white_game_ws") or not game.get("black_game_ws"):
             continue
 
-        # Wait until first move has been made (first_move_timeout_loop handles pre-game)
-        if game.get("moves_made", 0) == 0:
-            continue
-
         last_ts = game.get("last_move_ts")
         if last_ts is None:
             continue
 
         now     = time.time()
         elapsed = now - last_ts
+        # Before the first move, it's always white's clock running (board.turn
+        # starts as WHITE) — same "whose turn is it" logic works whether or
+        # not any moves have been made yet.
         turn    = "w" if game["board"].turn == chess.WHITE else "b"
         remaining = game["clock"][turn] - elapsed
 
@@ -1143,7 +1682,7 @@ async def clock_loop(game_id: str):
             if not game.get("_elo_updated"):
                 game["_elo_updated"] = True
                 await update_elos(game, winner)
-            # Delay removal so gameover message is delivered before WS closes
+            fairplay_log(game, winner)
             await asyncio.sleep(1)
             active_games.pop(game_id, None)
             return
@@ -1174,12 +1713,25 @@ async def update_elos(game: dict, result: str):
     """
     Calculate and persist ELO changes for both players using Glicko-2
     and the correct per-time-control column.
+    Only runs when BOTH players are registered (non-guest) accounts.
+    Guest IDs start with "guest_" — playing a guest never affects ELO.
     """
     wp = game.get("white_profile")
     bp = game.get("black_profile")
     if not wp or not bp:
         return
-    if not wp.get("user_id") or not bp.get("user_id"):
+
+    def _is_registered(uid: str | None) -> bool:
+        """True only for real Supabase UUIDs (36 chars with hyphens)."""
+        if not uid:
+            return False
+        if uid.startswith("guest_"):
+            return False
+        # Supabase UUIDs: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        return len(uid) == 36 and uid.count("-") == 4
+
+    if not _is_registered(wp.get("user_id")) or not _is_registered(bp.get("user_id")):
+        print(f"[elo] skipping — guest player in game {game.get('id', '?')}", flush=True)
         return
 
     tc  = game.get("time_control")
@@ -1233,6 +1785,46 @@ async def update_elos(game: dict, result: str):
 # ΓöÇΓöÇ WebSocket: Lobby (matchmaking) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 # ═══════════════════════════════════════════════════════════════
+#  FAIR PLAY — MOVE TIME ANALYSIS
+# ═══════════════════════════════════════════════════════════════
+
+def analyse_move_times(move_times_ms: list) -> dict:
+    """Score 0.0-1.0. >= 0.6 log for review. >= 0.85 check before prize payout."""
+    if len(move_times_ms) < 10:
+        return {"score": 0.0, "flags": []}
+    import statistics
+    flags = []; score = 0.0; times = move_times_ms
+    mean = statistics.mean(times)
+    if mean <= 0: return {"score": 0.0, "flags": []}
+    stdev = statistics.stdev(times) if len(times) > 1 else 0
+    cv = stdev / mean
+    if cv < 0.25 and mean > 3000: flags.append("low_variance"); score += 0.35
+    fast = sum(1 for t in times if t < 3000) / len(times)
+    if fast < 0.05 and len(times) > 12: flags.append("no_fast_moves"); score += 0.25
+    slow = sum(1 for t in times if t > 45000) / len(times)
+    if slow < 0.02 and len(times) > 15: flags.append("no_slow_moves"); score += 0.15
+    band = sum(1 for t in times if 5000 <= t <= 25000) / len(times)
+    if band > 0.80: flags.append("consistent_band"); score += 0.25
+    return {"score": round(min(score, 1.0), 2), "flags": flags}
+
+
+def fairplay_log(game: dict, result: str):
+    """Log suspicious move time patterns to Railway logs for manual review."""
+    gid = game.get("id", "?")
+    for color, pkey, tkey in [("white","white_profile","move_times_w"),("black","black_profile","move_times_b")]:
+        times = game.get(tkey, [])
+        if not times: continue
+        a = analyse_move_times(times)
+        if a["score"] >= 0.6:
+            p = game.get(pkey) or {}
+            level = "SUSPICIOUS" if a["score"] >= 0.85 else "REVIEW"
+            print(f"[fairplay] {level} game={gid} {color}={p.get('username','?')} "
+                  f"uid={p.get('user_id','?')} result={result} "
+                  f"score={a['score']} flags={a['flags']} "
+                  f"moves={len(times)} mean={int(sum(times)/len(times))}ms", flush=True)
+
+
+# ═══════════════════════════════════════════════════════════════
 #  ARENA ENGINE
 # ═══════════════════════════════════════════════════════════════
 
@@ -1243,51 +1835,65 @@ async def arena_send(ws, msg: dict):
         pass
 
 
-async def _grant_tournament_medals(tournament_id: str, client):
-    """Fetch final standings and award podium medals to top 3."""
+async def _grant_tournament_medals(tournament_id: str, client=None):
+    """
+    Fetch final standings and award podium medals to top 3.
+
+    IMPORTANT: always creates its own httpx client internally, regardless of
+    whether a `client` was passed in. This function is always invoked via
+    asyncio.create_task() (fire-and-forget) by its callers — none of them
+    await it directly. That means if it borrows a client from a caller's
+    `async with httpx.AsyncClient() as client:` block, that block can exit
+    and close the client before this task actually gets scheduled to run,
+    since create_task() doesn't block the caller. This was confirmed live:
+    every auto-ended tournament hit "Cannot send a request, as the client
+    has been closed" and silently awarded zero medals. The `client` param
+    is kept for backwards compatibility but is no longer used.
+    """
     try:
-        # Get tournament info (name, scope)
-        t_r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournaments",
-            params={"id": f"eq.{tournament_id}", "select": "name,scope"},
-            headers={"apikey": SUPABASE_SERVICE_KEY,
-                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        t_data = t_r.json()
-        if not t_data:
-            return
-        t_name  = t_data[0].get("name", "Tournament")
-        t_scope = t_data[0].get("scope", "open")
+        async with httpx.AsyncClient() as client:
+            # Get tournament info (name, scope)
+            t_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{tournament_id}", "select": "name,scope"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            t_data = t_r.json()
+            if not t_data:
+                return
+            t_name  = t_data[0].get("name", "Tournament")
+            t_scope = t_data[0].get("scope", "open")
 
-        # Get final standings ordered by score desc, then elo desc for tiebreak
-        p_r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournament_players",
-            params={"tournament_id": f"eq.{tournament_id}",
-                    "select": "user_id,score,elo",
-                    "order":  "score.desc,elo.desc"},
-            headers={"apikey": SUPABASE_SERVICE_KEY,
-                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        players = p_r.json()
-        if not players:
-            return
+            # Get final standings ordered by score desc, then elo desc for tiebreak
+            p_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"tournament_id": f"eq.{tournament_id}",
+                        "select": "user_id,score,elo",
+                        "order":  "score.desc,elo.desc"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            players = p_r.json()
+            if not players:
+                return
 
-        # Award medals to top 3 (handles ties by elo tiebreak)
-        for pos, player in enumerate(players[:3], start=1):
-            uid = player.get("user_id")
-            if uid:
-                awarded = await award_medals(uid, pos, tournament_id, t_name, t_scope, client)
-                if awarded:
-                    # Also patch rank into tournament_players for record-keeping
-                    await client.patch(
-                        f"{SUPABASE_URL}/rest/v1/tournament_players",
-                        params={"tournament_id": f"eq.{tournament_id}",
-                                "user_id":        f"eq.{uid}"},
-                        headers={"apikey": SUPABASE_SERVICE_KEY,
-                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                                 "Content-Type": "application/json"},
-                        json={"rank": pos}
-                    )
+            # Award medals to top 3 (handles ties by elo tiebreak)
+            for pos, player in enumerate(players[:3], start=1):
+                uid = player.get("user_id")
+                if uid:
+                    awarded = await award_medals(uid, pos, tournament_id, t_name, t_scope, client)
+                    if awarded:
+                        # Also patch rank into tournament_players for record-keeping
+                        await client.patch(
+                            f"{SUPABASE_URL}/rest/v1/tournament_players",
+                            params={"tournament_id": f"eq.{tournament_id}",
+                                    "user_id":        f"eq.{uid}"},
+                            headers={"apikey": SUPABASE_SERVICE_KEY,
+                                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                     "Content-Type": "application/json"},
+                            json={"rank": pos}
+                        )
     except Exception as e:
         print(f"[medals] _grant_tournament_medals error {tournament_id}: {e}", flush=True)
 
@@ -1388,14 +1994,23 @@ async def arena_auto_start(tournament_id: str):
                 json={"status": "active"}
             )
         print(f"[arena] auto-started {tournament_id}", flush=True)
-        await arena_pair(tournament_id)
+        conns = tournament_connections.get(tournament_id, {})
+        for uid, info in list(conns.items()):
+            ws = info.get("ws")
+            if ws:
+                try:
+                    await arena_send(ws, {"type": "tournament_started"})
+                except Exception:
+                    pass
+        if rows[0].get("format") == "arena":
+            asyncio.create_task(arena_pairing_loop(tournament_id))
     except Exception as e:
         print(f"[arena] auto-start error: {e}", flush=True)
     finally:
         _tournament_locks.discard(lock_key)
 
 
-async def arena_pair(tournament_id: str):
+async def _arena_pair_impl(tournament_id: str):
     conns = tournament_connections.get(tournament_id, {})
     pg    = tournament_player_game.setdefault(tournament_id, {})
     available = [uid for uid, info in conns.items()
@@ -1456,18 +2071,44 @@ async def arena_pair(tournament_id: str):
                          "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             )
         # Count how many times each pair has played (for rematch avoidance preference)
+        # and each player's color balance (white_games - black_games) for color fairness.
+        # Without this, pairing has no concept of color at all — whichever player
+        # happens to sort earlier (by score/ELO) always becomes white against a
+        # given opponent, every single time they're paired. With only a couple of
+        # players cycling against each other repeatedly (a small arena), this
+        # produced one player playing black 5 games in a row against the same
+        # opponent — a real, meaningful disadvantage, not a cosmetic issue.
         pair_count: dict = {}
+        color_balance: dict = {}
         for g in r.json():
             key = tuple(sorted([g["white_id"], g["black_id"]]))
             pair_count[key] = pair_count.get(key, 0) + 1
+            color_balance[g["white_id"]] = color_balance.get(g["white_id"], 0) + 1
+            color_balance[g["black_id"]] = color_balance.get(g["black_id"], 0) - 1
     except Exception:
         pair_count = {}
+        color_balance = {}
 
     # Sort available players by score desc, then ELO desc
     available.sort(key=lambda uid: (-conns[uid].get("score", 0), -conns[uid].get("elo", 1500)))
 
     def times_played(p1, p2):
         return pair_count.get(tuple(sorted([p1, p2])), 0)
+
+    def assign_colors(p1, p2):
+        """Whoever has played MORE white games (higher balance) gets black this
+        time; whoever has played more black (lower balance) gets white. A tie
+        falls back to p1=white, p2=black (arbitrary but stable) — this only
+        matters on a player's very first pairing of the tournament, where
+        fairness can't be evaluated yet anyway."""
+        b1 = color_balance.get(p1, 0)
+        b2 = color_balance.get(p2, 0)
+        if b1 > b2:
+            return p2, p1   # p2 has played black more / white less -> p2 gets white
+        elif b2 > b1:
+            return p1, p2
+        else:
+            return p1, p2
 
     # Pair greedily: prefer opponents not yet played, then fewest rematches, then score proximity
     paired, used = [], set()
@@ -1486,7 +2127,8 @@ async def arena_pair(tournament_id: str):
                 best_p2   = p2
                 best_score = candidate
         if best_p2:
-            paired.append((p1, best_p2))
+            white_id, black_id = assign_colors(p1, best_p2)
+            paired.append((white_id, black_id))
             used.add(p1)
             used.add(best_p2)
 
@@ -1503,13 +2145,128 @@ async def arena_pair(tournament_id: str):
                 break
 
     for white_id, black_id in paired:
+        # Mark both players as committed to this pairing IMMEDIATELY, inside
+        # the lock — not later inside arena_launch_game (which only runs as
+        # a separately-scheduled task and could be delayed). Without this,
+        # a second concurrent call to arena_pair() could acquire the lock
+        # after this one releases it but BEFORE the first arena_launch_game
+        # task actually executes, find both players still showing pg=None,
+        # and pair the exact same two people again — producing two separate
+        # games for one pair simultaneously. This was confirmed in testing:
+        # the same two players got launched into two back-to-back games,
+        # both timing out together.
+        pg[white_id] = "pending"
+        pg[black_id] = "pending"
         asyncio.create_task(arena_launch_game(tournament_id, white_id, black_id))
+
+
+async def arena_pair(tournament_id: str):
+    """
+    Serializes concurrent pairing attempts so a forfeit handler and one or
+    two /api/tournament/result calls (the winner's client and sometimes the
+    loser's, both reacting to the same game-over moment) can't race each
+    other and each see a half-updated conns dict. Without this, multiple
+    near-simultaneous calls could each independently decide a player has
+    "no available opponent" a few milliseconds before the other call
+    actually marks that opponent available — producing spurious
+    "waiting (odd player)" results and wasted pairing passes even though a
+    real opponent existed the whole time.
+
+    As of the single-poller rewrite, this function has exactly one caller:
+    arena_pairing_loop below. Nothing else should call this directly —
+    forfeits, result submissions, and reconnects only ever mutate state
+    (available/paused/pg) and let the loop's next tick handle pairing.
+    """
+    lock = _arena_pair_locks.setdefault(tournament_id, asyncio.Lock())
+    async with lock:
+        await _arena_pair_impl(tournament_id)
+
+
+# Tracks which tournaments currently have a poller loop running, so a
+# duplicate start_tournament/auto_start call (or a reconnect racing the
+# initial start) can't accidentally spin up two loops for the same
+# tournament_id.
+_active_pairing_loops: set = set()
+
+async def arena_pairing_loop(tournament_id: str):
+    """
+    The single background poller for one active arena tournament. Runs every
+    1.5 seconds for as long as the tournament is active, and is the ONLY
+    caller of arena_pair(). Every other event in the system (a forfeit, a
+    player resuming, a game ending) only ever updates state — available,
+    paused, pg — and waits for this loop's next tick to actually act on it.
+
+    This exists specifically to eliminate an entire class of race condition
+    that came up repeatedly: several different triggers (forfeit handler,
+    both players' independent result submissions, reconnects) could each
+    call pairing logic concurrently, racing each other against a
+    half-updated in-memory dict. With exactly one caller on a fixed
+    schedule, there's structurally nothing left to race against — every
+    pairing decision sees fully-settled state from whatever ran on the
+    previous tick.
+    """
+    if tournament_id in _active_pairing_loops:
+        return  # already running for this tournament — don't start a second one
+    _active_pairing_loops.add(tournament_id)
+    try:
+        while True:
+            await asyncio.sleep(1.5)
+            try:
+                async with httpx.AsyncClient() as client:
+                    r = await client.get(
+                        f"{SUPABASE_URL}/rest/v1/tournaments",
+                        params={"id": f"eq.{tournament_id}", "select": "status"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY,
+                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    )
+                    rows = r.json()
+                if not rows or rows[0].get("status") != "active":
+                    print(f"[arena] pairing loop stopping for {tournament_id} (status={rows[0].get('status') if rows else 'not found'})", flush=True)
+                    break
+            except Exception as e:
+                print(f"[arena] pairing loop status check error for {tournament_id}: {e}", flush=True)
+                continue  # transient DB error — try again next tick rather than stopping
+
+            try:
+                await arena_pair(tournament_id)
+            except Exception as e:
+                print(f"[arena] pairing loop tick error for {tournament_id}: {e}", flush=True)
+                # Don't break on a single bad tick — log and keep polling.
+    finally:
+        _active_pairing_loops.discard(tournament_id)
+        print(f"[arena] pairing loop ended for {tournament_id}", flush=True)
 
 
 async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
     conns = tournament_connections.get(tournament_id, {})
     pg    = tournament_player_game.setdefault(tournament_id, {})
     if white_id not in conns or black_id not in conns:
+        return
+    # Defensive guard: if either player is already committed to a REAL game
+    # (a genuine game_id, not the "pending" marker this exact pairing should
+    # have set), refuse to proceed. This protects against a player ending up
+    # in two simultaneous games regardless of how the duplicate pairing
+    # decision occurred upstream — the actual irreversible damage only
+    # happens here, at the point a second tournament_games row gets created,
+    # so this is the one place that needs to be unconditionally safe.
+    existing_white = pg.get(white_id)
+    existing_black = pg.get(black_id)
+    if existing_white not in (None, "pending") or existing_black not in (None, "pending"):
+        print(f"[arena] REFUSING duplicate launch for {tournament_id}: "
+              f"white={white_id} (pg={existing_white}), black={black_id} (pg={existing_black})", flush=True)
+        # Release whichever player ISN'T the one with a genuine conflicting
+        # game — they were marked pending/unavailable by the pairing
+        # decision that led to this call, and without this they'd be stuck
+        # forever with no path back into pairing, even though they did
+        # nothing wrong and have no real game of their own right now.
+        if existing_white not in (None, "pending") and white_id in conns:
+            pg[black_id] = None
+            if black_id in conns and not conns[black_id].get("paused"):
+                conns[black_id]["available"] = True
+        elif existing_black not in (None, "pending") and black_id in conns:
+            pg[white_id] = None
+            if white_id in conns and not conns[white_id].get("paused"):
+                conns[white_id]["available"] = True
         return
     white_info = conns[white_id]
     black_info = conns[black_id]
@@ -1563,6 +2320,13 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
                              "elo": white_info.get("elo", 1500), "user_id": white_id}
     game["black_profile"] = {"username": black_info["username"],
                              "elo": black_info.get("elo", 1500), "user_id": black_id}
+    # Clock starts the instant pairing happens — do NOT wait for both
+    # players' WebSockets to connect. This is exactly like a real chess
+    # clock: it's running the moment the game starts, whether or not either
+    # player has shown up yet. A genuine no-show forfeits when 20% of their
+    # base time has elapsed, same as anyone who connects but never moves.
+    game["last_move_ts"]        = time.time()
+    game["first_move_deadline"] = time.time() + game.get("first_move_timeout", 60)
     active_games[game_id] = game
     asyncio.create_task(clock_loop(game_id))
     asyncio.create_task(first_move_timeout_loop(game_id))
@@ -1627,7 +2391,7 @@ async def _arena_end_exhausted(tournament_id: str):
             )
         print(f"[arena] exhausted — ended {tournament_id}", flush=True)
         conns = tournament_connections.get(tournament_id, {})
-        asyncio.create_task(_grant_tournament_medals(tournament_id, httpx.AsyncClient()))
+        asyncio.create_task(_grant_tournament_medals(tournament_id))
         msg = {"type": "tournament_ended",
                "reason": "All players have faced each other. Final standings are shown below."}
         for uid, info in list(conns.items()):
@@ -1655,8 +2419,48 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
     if not user_id:
         await ws.close(); return
 
+    # ── Registration gate ────────────────────────────────────────────────────
+    # Opening this WebSocket must NOT be sufficient to enter pairing. A player
+    # must have actually registered via /api/join-tournament (which enforces
+    # country/region eligibility, ban checks, capacity, and prize eligibility).
+    # Without this check, anyone who knows a tournament_id can connect directly
+    # and get paired into real games with real ELO/prize consequences, bypassing
+    # every eligibility check above.
+    try:
+        async with httpx.AsyncClient() as client:
+            reg_check = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_players",
+                params={"tournament_id": f"eq.{tournament_id}",
+                        "user_id": f"eq.{user_id}", "select": "id"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+        if not reg_check.json():
+            await arena_send(ws, {
+                "type": "error",
+                "detail": "You haven't joined this tournament yet. Go to the tournament page and click Join."
+            })
+            await ws.close()
+            return
+    except Exception as e:
+        print(f"[arena] registration check failed for {user_id} on {tournament_id}: {e}", flush=True)
+        await ws.close()
+        return
+
     tournament_connections.setdefault(tournament_id, {})
     tournament_player_game.setdefault(tournament_id, {})
+
+    # Preserve persistent state across reconnects. The tournament WebSocket
+    # gets torn down and recreated on every full page navigation — and the
+    # client navigates away to /multiplayer for each game, then back to
+    # /tournaments after it ends. Previously this dict was rebuilt from
+    # scratch on every single reconnect, silently wiping out any "paused"
+    # state that a forfeit had just set moments earlier. That meant a
+    # player who forfeited (no-show) got paused, immediately reconnected
+    # via the post-game redirect, and was treated as fresh/available again
+    # — letting them get paired and forfeit repeatedly with zero way to
+    # actually stay excluded from pairing until they explicitly resumed.
+    _existing = tournament_connections[tournament_id].get(user_id, {})
     tournament_connections[tournament_id][user_id] = {
         "ws":               ws,
         "username":         username,
@@ -1665,14 +2469,51 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
         "elo_blitz":        int(ident.get("elo_blitz",  elo)),
         "elo_rapid":        int(ident.get("elo_rapid",  elo)),
         "score":            score,
-        "available":        True,
-        "paused":           False,
-        "consecutive_wins": 0,   # arena streak bonus tracking
+        "available":        not _existing.get("paused", False),
+        "paused":           _existing.get("paused", False),
+        "consecutive_wins": _existing.get("consecutive_wins", 0),
     }
     if tournament_player_game[tournament_id].get(user_id):
         tournament_connections[tournament_id][user_id]["available"] = False
 
     await arena_send(ws, {"type": "connected", "user_id": user_id})
+    if _existing.get("paused"):
+        # Tell the reconnecting client it's still paused, so its UI (Resume
+        # button state) matches reality instead of assuming a fresh connect
+        # means available again.
+        await arena_send(ws, {"type": "paused_state_sync", "paused": True})
+
+    # If this player already has a real (non-pending) game waiting, resend
+    # game_ready now. The original send happens once, at the moment the game
+    # is created, directly to whatever WebSocket each player has open right
+    # then — if that's not their tournament-page socket (e.g. they're still
+    # sitting on the previous game's endgame popup, which has no tournament
+    # connection open at all), the message is silently lost with no resend.
+    # This was the actual cause of a player getting a new opponent with no
+    # visible transition: the game existed, they just never found out.
+    pending_game_id = tournament_player_game[tournament_id].get(user_id)
+    if pending_game_id and pending_game_id != "pending":
+        g = active_games.get(pending_game_id)
+        if g and not g.get("over"):
+            is_white = g.get("white_id") == user_id
+            opp_id = g.get("black_id") if is_white else g.get("white_id")
+            opp_info = tournament_connections.get(tournament_id, {}).get(opp_id, {})
+            conns_now = tournament_connections[tournament_id]
+            sorted_uids = sorted(conns_now.keys(),
+                                  key=lambda u: (-conns_now[u].get("score", 0), -conns_now[u].get("elo", 1500)))
+            uid_rank = {u: i + 1 for i, u in enumerate(sorted_uids)}
+            await arena_send(ws, {
+                "type": "game_ready", "game_id": pending_game_id,
+                "color": "white" if is_white else "black",
+                "opponent": opp_info.get("username", "Opponent"),
+                "opponent_elo": opp_info.get("elo", 1500),
+                "my_rank": uid_rank.get(user_id, 0),
+                "opponent_rank": uid_rank.get(opp_id, 0),
+                "tournament_db_id": g.get("tournament_db_id"),
+                "time_control": g.get("time_control", "5+0"),
+            })
+            print(f"[arena] resent game_ready to {username} for {pending_game_id} on reconnect", flush=True)
+
     print(f"[arena] {username} connected to {tournament_id}", flush=True)
 
     # If tournament already active, try pairing immediately
@@ -1686,7 +2527,7 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
             )
             rows = r.json()
         if rows and rows[0]["status"] == "active" and rows[0].get("format") == "arena":
-            asyncio.create_task(arena_pair(tournament_id))
+            pass  # state is set; arena_pairing_loop's next tick (≤1.5s) picks it up
     except Exception:
         pass
 
@@ -1700,13 +2541,21 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
                 conns = tournament_connections.get(tournament_id, {})
                 pg    = tournament_player_game.get(tournament_id, {})
                 if user_id in conns:
-                    conns[user_id]["available"] = True
-                    conns[user_id]["paused"]    = False
-                    # Do NOT overwrite score from client — server already tracks it correctly
-                    # Only trust client score on initial connect (ident message)
-                if user_id in pg:
+                    # IMPORTANT: do NOT clear "paused" here. This message fires
+                    # automatically from the client after every game ends —
+                    # it does not represent the player explicitly choosing to
+                    # resume. If the server just paused this player for a
+                    # no-show/forfeit, this message must not undo that, or a
+                    # forfeited player gets silently re-paired against their
+                    # will and can forfeit repeatedly in a tight loop with a
+                    # small player pool. Only "available" -> True is honoured
+                    # here for players who were never paused in the first
+                    # place (the common case: just finished a normal game).
+                    if not conns[user_id].get("paused"):
+                        conns[user_id]["available"] = True
+                if user_id in pg and not conns.get(user_id, {}).get("paused"):
                     pg[user_id] = None
-                asyncio.create_task(arena_pair(tournament_id))
+                # No direct arena_pair() call — the poller's next tick handles it.
 
             elif data.get("type") == "pause":
                 conns = tournament_connections.get(tournament_id, {})
@@ -1728,16 +2577,324 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
                 await arena_send(ws, {"type": "resumed",
                     "message": "You're back! Looking for an opponent…"})
                 print(f"[arena] {username} resumed in {tournament_id}", flush=True)
-                asyncio.create_task(arena_pair_delayed(tournament_id, delay=1.0))
+                # No direct pairing call — the poller picks this up on its next tick.
     except WebSocketDisconnect:
         pass
     finally:
         conns = tournament_connections.get(tournament_id, {})
         if user_id and user_id in conns:
             conns[user_id]["available"] = False
-            # Keep paused flag — if they reconnect they're still paused until they resume
-            del conns[user_id]
+            # Do NOT delete the entry — a reconnect (refresh, navigating to
+            # Watch and back, the redirect after a game ends) needs to find
+            # this entry still here so it can read paused/consecutive_wins
+            # and carry them forward. Deleting it here meant every single
+            # disconnect silently erased a player's pause state moments
+            # before the reconnect logic ran, even though that logic was
+            # specifically designed to preserve it. This was the actual
+            # cause of paused players coming back as available after any
+            # refresh, and of forfeited players getting re-paired
+            # immediately on their post-game redirect.
         print(f"[arena] {username} left {tournament_id}", flush=True)
+
+
+
+# ═══════════════════════════════════════════════════════════════
+#  CHALLENGE / INVITE LINK
+# ═══════════════════════════════════════════════════════════════
+
+@app.post("/api/challenge")
+async def create_challenge(req: Request):
+    """
+    Create a challenge invite link. Works for guests and signed-in users.
+    Body: { time_control: "5+0" }
+    Returns: { code: "abc123", time_control: "5+0", creator: "username" }
+    """
+    body     = await req.json()
+    tc       = body.get("time_control", "5+0")
+    username = "Guest"
+    uid      = "guest_" + uuid.uuid4().hex[:8]
+
+    # If user sends auth header, fetch their username
+    auth = req.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(
+                    f"{SUPABASE_URL}/auth/v1/user",
+                    headers={"apikey": SUPABASE_SERVICE_KEY,
+                             "Authorization": f"Bearer {token}"}
+                )
+                if r.status_code == 200:
+                    user_data = r.json()
+                    uid = user_data.get("id", uid)
+                    # Fetch username from profiles
+                    r2 = await client.get(
+                        f"{SUPABASE_URL}/rest/v1/profiles",
+                        params={"user_id": f"eq.{uid}", "select": "username"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY,
+                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    )
+                    rows = r2.json()
+                    if rows: username = rows[0].get("username") or username
+        except Exception:
+            pass
+
+    # Generate short unique code
+    import secrets, time as _time
+    code = secrets.token_urlsafe(4)[:6].replace("-", "x").replace("_", "y")
+
+    # Clean up expired challenges (>15 min old)
+    now = _time.time()
+    expired = [k for k, v in pending_challenges.items()
+               if now - v.get("created_at", now) > 900]
+    for k in expired:
+        pending_challenges.pop(k, None)
+
+    pending_challenges[code] = {
+        "code":         code,
+        "creator_id":   uid,
+        "creator_name": username,
+        "time_control": tc,
+        "ws":           None,
+        "created_at":   now,
+    }
+    print(f"[challenge] {username} created {code} ({tc})", flush=True)
+    return {"code": code, "time_control": tc, "creator": username}
+
+
+@app.get("/api/challenge/{code}")
+async def get_challenge(code: str):
+    """Return challenge info for the join page."""
+    ch = pending_challenges.get(code)
+    if not ch:
+        raise HTTPException(404, "Challenge not found or expired")
+    return {
+        "code":         ch["code"],
+        "creator":      ch["creator_name"],
+        "time_control": ch["time_control"],
+    }
+
+
+@app.websocket("/ws/challenge/{code}")
+async def challenge_ws(ws: WebSocket, code: str):
+    """
+    Both the creator and the joiner connect here.
+    Creator connects first and waits.
+    When the joiner connects, the game starts immediately.
+    """
+    await ws.accept()
+
+    ch = pending_challenges.get(code)
+    if not ch:
+        await ws.send_json({"type": "error", "detail": "Challenge not found or expired."})
+        await ws.close()
+        return
+
+    import time as _time
+
+    # ── Creator is connecting ─────────────────────────────────────
+    if ch["ws"] is None:
+        ch["ws"] = ws
+        await ws.send_json({
+            "type":         "waiting",
+            "code":         code,
+            "time_control": ch["time_control"],
+            "message":      "Waiting for your friend to join…",
+        })
+        print(f"[challenge] creator connected: {code}", flush=True)
+
+        # Keep alive until matched or disconnected
+        try:
+            while True:
+                try:
+                    data = await asyncio.wait_for(ws.receive_json(), timeout=5)
+                    if isinstance(data, dict) and data.get("type") == "ping":
+                        pass
+                except asyncio.TimeoutError:
+                    pass
+                # Check if we've been matched (ws replaced by None to signal completion)
+                if ch.get("matched"):
+                    break
+        except Exception:
+            pass
+        finally:
+            # If creator disconnects before anyone joins, clean up
+            if not ch.get("matched"):
+                pending_challenges.pop(code, None)
+        return
+
+    # ── Joiner is connecting ──────────────────────────────────────
+    creator_ws = ch["ws"]
+    tc         = ch["time_control"]
+
+    # Get joiner identity
+    joiner_id   = "guest_" + uuid.uuid4().hex[:8]
+    creator_id  = ch["creator_id"]
+    creator_name = ch["creator_name"]
+
+    # Read ident from joiner (optional — they may send user_id + username)
+    joiner_name = joiner_id
+    try:
+        ident = await asyncio.wait_for(ws.receive_json(), timeout=3)
+        if ident.get("user_id"):   joiner_id   = ident["user_id"]
+        if ident.get("username"):  joiner_name = ident["username"]
+    except Exception:
+        pass
+
+    # Assign colours randomly
+    import random as _random
+    if _random.random() < 0.5:
+        white_ws, white_id, white_name = creator_ws, creator_id, creator_name
+        black_ws, black_id,  black_name  = ws,         joiner_id,  joiner_name
+    else:
+        white_ws, white_id, white_name = ws,         joiner_id,  joiner_name
+        black_ws, black_id,  black_name  = creator_ws, creator_id, creator_name
+
+    game_id = uuid.uuid4().hex[:12]
+    game    = new_game(game_id, white_ws, black_ws, white_id, black_id, tc)
+    active_games[game_id] = game
+
+    ch["matched"] = True
+    pending_challenges.pop(code, None)
+
+    await send(white_ws, {
+        "type":         "matched",
+        "game_id":      game_id,
+        "color":        "white",
+        "opponent":     black_name,
+        "time_control": tc,
+    })
+    await send(black_ws, {
+        "type":         "matched",
+        "game_id":      game_id,
+        "color":        "black",
+        "opponent":     white_name,
+        "time_control": tc,
+    })
+
+    asyncio.create_task(clock_loop(game_id))
+    asyncio.create_task(first_move_timeout_loop(game_id))
+    print(f"[challenge] {code} matched: {white_name} vs {black_name}", flush=True)
+
+    # Keep joiner WS alive until game WS takes over
+    try:
+        while True:
+            try:
+                await asyncio.wait_for(ws.receive_json(), timeout=30)
+            except asyncio.TimeoutError:
+                break
+    except Exception:
+        pass
+
+
+
+# ═══════════════════════════════════════════════════════════════
+#  SPECTATOR / LIVE GAMES
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/games/live")
+async def list_live_games():
+    """Return currently active games for the watch page."""
+    games = []
+    for gid, g in active_games.items():
+        if g.get("over"):
+            continue
+        wp = g.get("white_profile") or {}
+        bp = g.get("black_profile") or {}
+        games.append({
+            "id":           gid,
+            "white":        wp.get("username", "Player"),
+            "black":        bp.get("username", "Player"),
+            "white_elo":    wp.get("elo", 1500),
+            "black_elo":    bp.get("elo", 1500),
+            "time_control": g.get("time_control", "?"),
+            "moves":        g.get("moves_made", 0),
+            "fen":          g["board"].fen(),
+            "clock":        g.get("clock", {"w": 0, "b": 0}),
+            "spectators":   len(g.get("spectators", [])),
+        })
+    # Sort by most spectators first, then by most moves (most interesting games first)
+    games.sort(key=lambda x: (-x["spectators"], -x["moves"]))
+    return games
+
+
+@app.get("/watch")
+async def watch_page():
+    """Serve the spectator/live games page."""
+    return FileResponse("watch.html")
+
+
+@app.websocket("/ws/watch/{game_id}")
+async def watch_ws(ws: WebSocket, game_id: str):
+    """
+    Spectator WebSocket. Connects to a live game and receives all moves
+    and game events in real time. Read-only — no input accepted.
+    """
+    await ws.accept()
+
+    game = active_games.get(game_id)
+    if not game or game.get("over"):
+        await ws.send_json({"type": "error", "detail": "Game not found or already finished."})
+        await ws.close()
+        return
+
+    # Register spectator
+    if "spectators" not in game:
+        game["spectators"] = []
+    game["spectators"].append(ws)
+
+    # Send current game state so spectator can render the board immediately
+    wp = game.get("white_profile") or {}
+    bp = game.get("black_profile") or {}
+    await ws.send_json({
+        "type":         "game_state",
+        "fen":          game["board"].fen(),
+        "clock":        game["clock"],
+        "turn":         "white" if game["board"].turn else "black",
+        "moves":        game.get("moves_made", 0),
+        "time_control": game.get("time_control", "?"),
+        "white":        wp.get("username", "Player"),
+        "black":        bp.get("username", "Player"),
+        "white_elo":    wp.get("elo", 1500),
+        "black_elo":    bp.get("elo", 1500),
+    })
+
+    print(f"[watch] spectator joined game {game_id} "
+          f"({len(game['spectators'])} watching)", flush=True)
+
+    # Keep connection alive until spectator disconnects or game ends
+    try:
+        while True:
+            try:
+                # Accept pings, ignore everything else (read-only)
+                await asyncio.wait_for(ws.receive_text(), timeout=30)
+            except asyncio.TimeoutError:
+                # Send a keepalive ping
+                try:
+                    await ws.send_json({"type": "ping"})
+                except Exception:
+                    break
+            except Exception:
+                break
+            # Check if game ended
+            game = active_games.get(game_id)
+            if not game or game.get("over"):
+                try:
+                    await ws.send_json({"type": "game_ended"})
+                except Exception:
+                    pass
+                break
+    finally:
+        # Remove from spectators list
+        game = active_games.get(game_id)
+        if game and "spectators" in game:
+            try:
+                game["spectators"].remove(ws)
+                print(f"[watch] spectator left game {game_id} "
+                      f"({len(game['spectators'])} watching)", flush=True)
+            except ValueError:
+                pass
 
 
 @app.websocket("/ws/lobby")
@@ -1863,12 +3020,27 @@ async def game_ws(ws: WebSocket, game_id: str):
 
     # Notify both players once both are connected
     if game.get("white_game_ws") and game.get("black_game_ws"):
-        # Set first-move deadline now that both players are present
-        game["last_move_ts"]        = time.time()
-        game["first_move_deadline"] = time.time() + game.get("first_move_timeout", 60)
-        asyncio.create_task(first_move_timeout_loop(game["id"]))
+        if not game.get("tournament_id"):
+            # Casual lobby games: deadline starts once both strangers are present
+            game["last_move_ts"]        = time.time()
+            game["first_move_deadline"] = time.time() + game.get("first_move_timeout", 60)
+            asyncio.create_task(first_move_timeout_loop(game["id"]))
+        # Tournament games already have their deadline + timeout loop running
+        # from the moment they were paired — connecting here does not reset it,
+        # so a late-but-within-timeout player doesn't get extra time at their
+        # opponent's expense.
+        #
+        # Tell the client the ACTUAL remaining seconds, not just the configured
+        # total timeout — for tournament games the deadline may have already
+        # been ticking for a while before this player finished navigating from
+        # the lobby, so "first_move_timeout" alone would show a misleadingly
+        # large countdown (or none at all, since the old client only showed it
+        # for white).
+        deadline = game.get("first_move_deadline")
+        remaining_secs = max(0, int(deadline - time.time())) if deadline else game.get("first_move_timeout", 60)
         await broadcast(game, {"type": "both_connected",
-                               "first_move_timeout": game.get("first_move_timeout", 60)})
+                               "first_move_timeout": game.get("first_move_timeout", 60),
+                               "first_move_remaining": remaining_secs})
 
         # Push already-received profile to the late-connecting player
         if color == "w" and game.get("black_profile"):
@@ -1968,6 +3140,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                         if not game.get("_elo_updated"):
                             game["_elo_updated"] = True
                             await update_elos(game, winner)
+                        fairplay_log(game, winner)
                         active_games.pop(game_id, None)
                     continue
 
@@ -1977,7 +3150,17 @@ async def game_ws(ws: WebSocket, game_id: str):
                     await send(ws, {"type": "error", "detail": "Illegal move."})
                     continue
 
-                # Deduct clock
+                # Record move time for fair play analysis
+                # IMPORTANT: capture elapsed BEFORE deduct_clock() runs, since
+                # deduct_clock() reads last_move_ts itself to calculate the deduction.
+                # Overwriting last_move_ts here first would zero out the elapsed time
+                # used by the clock math, causing the clock to snap back to full TC.
+                _now = time.time()
+                if game.get("last_move_ts"):
+                    _ms = int((_now - game["last_move_ts"]) * 1000)
+                    game["move_times_w" if color == "w" else "move_times_b"].append(_ms)
+
+                # Deduct clock — this reads and then updates last_move_ts internally
                 remaining = deduct_clock(game)
                 fen = game["board"].fen()
 
@@ -2001,6 +3184,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                     if not game.get("_elo_updated"):
                         game["_elo_updated"] = True
                         await update_elos(game, result)
+                    fairplay_log(game, result)
                     active_games.pop(game_id, None)
                 else:
                     await broadcast(game, {
@@ -2024,6 +3208,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                 if not game.get("_elo_updated"):
                     game["_elo_updated"] = True
                     await update_elos(game, winner)
+                fairplay_log(game, winner)
                 asyncio.create_task(cleanup_game(game_id, delay=10))
 
             # ── Draw offer ─────────────────────────────────────────────────────
@@ -2049,6 +3234,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                 if not game.get("_elo_updated"):
                     game["_elo_updated"] = True
                     await update_elos(game, "draw")
+                fairplay_log(game, "draw")
                 asyncio.create_task(cleanup_game(game_id, delay=10))
 
             elif msg_type == "draw_claim":
@@ -2072,38 +3258,81 @@ async def game_ws(ws: WebSocket, game_id: str):
                         await update_elos(game, "draw")
                     asyncio.create_task(cleanup_game(game_id, delay=10))
 
+            elif msg_type == "takeback_offer":
+                # Takebacks not allowed in tournament games
+                if game.get("tournament_id"):
+                    await send(ws, {"type": "error", "detail": "Takebacks are not allowed in tournament games."})
+                elif game["board"].move_stack and not game.get("takeback_offered_by"):
+                    game["takeback_offered_by"] = color
+                    opponent_ws = game.get("black_game_ws") if color == "w" else game.get("white_game_ws")
+                    if opponent_ws:
+                        await send(opponent_ws, {"type": "takeback_offer"})
+
+            elif msg_type == "takeback_accept":
+                # Only accept if the opponent offered (not yourself)
+                offered_by = game.get("takeback_offered_by")
+                if offered_by and offered_by != color and not game["over"]:
+                    game["takeback_offered_by"] = None
+                    board = game["board"]
+                    if board.move_stack:
+                        board.pop()
+                        # Decrement moves_made to stay accurate
+                        game["moves_made"] = max(0, game.get("moves_made", 1) - 1)
+                    # Reset the clock timestamp so clock_loop doesn't count
+                    # time spent during/before the takeback as thinking time
+                    game["last_move_ts"] = time.time()
+                    new_fen = board.fen()
+                    await broadcast(game, {
+                        "type":  "takeback",
+                        "fen":   new_fen,
+                        "turn":  "white" if board.turn == chess.WHITE else "black",
+                        "clock": game["clock"],
+                    })
+
+            elif msg_type == "takeback_decline":
+                game["takeback_offered_by"] = None
+                opponent_ws = game.get("black_game_ws") if color == "w" else game.get("white_game_ws")
+                if opponent_ws:
+                    await send(opponent_ws, {"type": "takeback_declined"})
+
             elif msg_type == "rematch_offer":
+                # Only notify opponent — do NOT create game yet
                 game["rematch_offered_by"] = color
-                opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
-                await send(opponent_ws, {"type": "rematch_offer"})
+                opponent_ws = game.get("black_game_ws") if color == "w" else game.get("white_game_ws")
+                if opponent_ws:
+                    await send(opponent_ws, {"type": "rematch_offer"})
 
             elif msg_type == "rematch_accept":
-                old_white_profile = game["white_profile"]
-                old_black_profile = game["black_profile"]
-                old_white_ws      = game["white_ws"]
-                old_black_ws      = game["black_ws"]
+                # Only valid if opponent offered
+                if game.get("rematch_offered_by") and game["rematch_offered_by"] != color:
+                    old_white_profile = game["white_profile"]
+                    old_black_profile = game["black_profile"]
+                    old_tc            = game.get("time_control")
+                    white_game_ws     = game.get("white_game_ws")
+                    black_game_ws     = game.get("black_game_ws")
+                    # IDs for the new game — colors swap
+                    new_white_id = game.get("black_id", "?")
+                    new_black_id = game.get("white_id", "?")
 
-                new_game_id = uuid.uuid4().hex[:12]
-                # Colors swapped: old black becomes new white
-                ng = new_game(new_game_id, old_black_ws, old_white_ws,
-                              old_black_profile.get("username", "?") if old_black_profile else "?",
-                              old_white_profile.get("username", "?") if old_white_profile else "?")
-                ng["white_profile"]   = old_black_profile
-                ng["black_profile"]   = old_white_profile
-                # Clear stale lobby sockets — players will connect fresh via /ws/game/{new_game_id}
-                ng["white_ws"] = None
-                ng["black_ws"] = None
-                active_games[new_game_id] = ng
+                    new_game_id = uuid.uuid4().hex[:12]
+                    # Colors swapped: old black becomes new white
+                    ng = new_game(new_game_id, None, None,
+                                  new_white_id, new_black_id, old_tc)
+                    ng["white_profile"] = old_black_profile
+                    ng["black_profile"] = old_white_profile
+                    # white_game_ws / black_game_ws left as None — players connect fresh
+                    active_games[new_game_id] = ng
 
-                # Notify players on the OLD game sockets before they disconnect
-                await send(old_black_ws, {
-                    "type": "rematch_start", "game_id": new_game_id, "color": "white"
-                })
-                await send(old_white_ws, {
-                    "type": "rematch_start", "game_id": new_game_id, "color": "black"
-                })
-                asyncio.create_task(clock_loop(new_game_id))
-                asyncio.create_task(cleanup_game(game_id, delay=10))
+                    # Notify both players — they reconnect via /ws/game/{new_game_id}
+                    if black_game_ws:
+                        await send(black_game_ws, {
+                            "type": "rematch_start", "game_id": new_game_id, "color": "white"
+                        })
+                    if white_game_ws:
+                        await send(white_game_ws, {
+                            "type": "rematch_start", "game_id": new_game_id, "color": "black"
+                        })
+                    asyncio.create_task(cleanup_game(game_id, delay=10))
 
             elif msg_type == "rematch_decline":
                 opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
@@ -2150,6 +3379,9 @@ class FreeCoachRequest(BaseModel):
     pgn: Optional[str] = None
     user_id: str
     think_time: float = 0.5
+    # Optional: client can pre-compute these via WASM to skip server engine pool
+    best_move: Optional[str] = None
+    eval_pawns: Optional[float] = None
 
 FREE_COACH_LIMIT = 10  # free tier daily limit (kept for legacy refs)
 
@@ -2218,15 +3450,25 @@ async def coach_free(req: FreeCoachRequest):
             json={"coach_uses_today": uses_today + 1, "coach_reset_date": today}
         )
 
-    # Run analysis — use semaphore and run in thread to avoid blocking event loop
-    try:
-        async with engine_semaphore:
-            loop = asyncio.get_event_loop()
-            analysis = await loop.run_in_executor(None, analyse_position, req.fen, req.think_time)
-    except Exception as e:
-        import traceback
-        print(f"coach-free engine error: {traceback.format_exc()}", flush=True)
-        raise HTTPException(500, f"Engine error: {e}")
+    # Run analysis — skip if client already sent pre-computed WASM result
+    if req.best_move and req.eval_pawns is not None:
+        # Client ran WASM locally — use those results directly, no engine pool needed
+        analysis = {
+            "best_move":  req.best_move,
+            "score_cp":   int(req.eval_pawns * 100),
+            "pv":         [req.best_move],
+            "pv_san":     [],
+            "mate_in":    None,
+        }
+    else:
+        try:
+            async with engine_semaphore:
+                loop = asyncio.get_event_loop()
+                analysis = await loop.run_in_executor(None, analyse_position, req.fen, req.think_time)
+        except Exception as e:
+            import traceback
+            print(f"coach-free engine error: {traceback.format_exc()}", flush=True)
+            raise HTTPException(500, f"Engine error: {e}")
 
     score_pawns = round(analysis["score_cp"] / 100, 2)
 
@@ -2293,9 +3535,10 @@ White pieces: {', '.join(white_pieces) if white_pieces else 'none'}
 Black pieces: {', '.join(black_pieces) if black_pieces else 'none'}
 
 Engine best move: {best_move_desc}
-Suggested continuation (UCI): {' '.join(analysis['pv'][:3])}
+Engine continuation: {' '.join(analysis.get('pv_san', analysis['pv'])[:5])}
 
-Base your entire response on the piece positions listed above. Do not invent pieces or squares not listed.
+These are the EXACT engine-calculated moves. Base your explanation on this specific line.
+Do not invent moves or variations not in this list. Do not guess — use only the continuation above.
 """
     if req.played_move:
         played_desc = ""
@@ -2318,8 +3561,9 @@ Base your entire response on the piece positions listed above. Do not invent pie
 
     prompt += """
 Respond in this exact format:
-ASSESSMENT: (1 sentence on who stands better and why, based on the piece positions above)
-BEST MOVE: (explain the engine best move in plain English using the piece description provided)
+ASSESSMENT: (1 sentence on who stands better and why)
+BEST MOVE: (explain the engine best move in plain English)
+CONTINUATION: (walk through the next 4-5 moves from the engine continuation provided, explaining the idea behind each move in one short phrase)
 PLAN: (2-3 sentences on the strategic plan going forward)
 TIP: (one practical chess principle this position illustrates)
 """
@@ -2340,6 +3584,8 @@ TIP: (one practical chess principle this position illustrates)
     return {
         "best_move": analysis["best_move"],
         "eval_pawns": score_pawns,
+        "pv_san":     analysis.get("pv_san", []),
+        "mate_in":    analysis.get("mate_in"),
         "pv": analysis["pv"],
         "coaching": explanation,
         "uses_today": uses_today + 1,
@@ -2378,7 +3624,7 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         games = r2.json()
 
         # Award pioneer badge lazily on profile load (idempotent)
-        asyncio.create_task(grant_pioneer_medal(user_id, client))
+        asyncio.create_task(grant_pioneer_medal(user_id))
 
     # Compute stats
     wins = sum(1 for g in games if g.get("result") == g.get("player_color"))
@@ -2421,6 +3667,7 @@ async def get_profile_stats(user_id: str, x_user_id: str = Header(...)):
         "elo_classical": profile.get("elo", 1500),   # elo col = classical
         "created_at": profile.get("created_at"),
         "country":    profile.get("country"),
+        "gender":     profile.get("gender"),
         "games_played": profile.get("games_played", 0),
         "wins":       wins,
         "losses":     losses,
@@ -2450,6 +3697,8 @@ async def analyse_pos(req: AnalyseRequest):
             "eval_pawns": round(analysis["score_cp"] / 100, 2),
             "score_cp":   analysis["score_cp"],
             "pv":         analysis["pv"],
+            "pv_san":     analysis.get("pv_san", []),
+            "mate_in":    analysis.get("mate_in"),
         }
     except Exception as e:
         import traceback
@@ -2493,6 +3742,33 @@ async def submit_feedback(req: FeedbackRequest):
 
 app.mount("/img", StaticFiles(directory="img"), name="img")
 app.mount("/static", StaticFiles(directory="."), name="static")
+
+@app.get("/book.bin")
+def serve_book():
+    import os
+    if not os.path.exists("book.bin"):
+        raise HTTPException(status_code=404, detail="Opening book not found")
+    return FileResponse("book.bin", media_type="application/octet-stream")
+
+@app.get("/openings.js")
+def serve_openings():
+    return FileResponse("openings.js", media_type="application/javascript")
+
+@app.get("/openings_detector.js")
+def serve_openings_detector():
+    return FileResponse("openings_detector.js", media_type="application/javascript")
+
+@app.get("/aac_strings.js")
+def serve_aac_strings():
+    return FileResponse("aac_strings.js", media_type="application/javascript")
+
+@app.get("/aac.js")
+def serve_aac():
+    return FileResponse("aac.js", media_type="application/javascript")
+
+@app.get("/aac_grid.js")
+def serve_aac_grid():
+    return FileResponse("aac_grid.js", media_type="application/javascript")
 
 @app.get("/")
 def root():
@@ -2698,9 +3974,26 @@ async def start_tournament(req: TournamentStartRequest, authorization: str = Hea
                 json={"status": "active"}
             )
 
-            # Arena: pairing via WebSocket engine
+            # Tell every player already connected to this tournament's lobby
+            # that it just started — without this, a player who was sitting
+            # in the waiting room before start had no way to know anything
+            # changed until they manually refreshed the page. arena_pair()
+            # below only notifies players it successfully pairs in this pass;
+            # anyone left unpaired (odd count, still mid-connect, etc.) would
+            # otherwise see no update at all.
+            conns = tournament_connections.get(req.tournament_id, {})
+            for uid, info in list(conns.items()):
+                ws = info.get("ws")
+                if ws:
+                    try:
+                        await arena_send(ws, {"type": "tournament_started"})
+                    except Exception:
+                        pass
+
+            # Arena: pairing via the single background poller (started here,
+            # runs every 1.5s for the lifetime of the active tournament)
             if t.get("format") == "arena":
-                asyncio.create_task(arena_pair(req.tournament_id))
+                asyncio.create_task(arena_pairing_loop(req.tournament_id))
                 return {"ok": True, "format": "arena", "players": len(players)}
 
             # Swiss: generate round 1
@@ -2713,7 +4006,7 @@ async def start_tournament(req: TournamentStartRequest, authorization: str = Hea
                         params={"tournament_id": f"eq.{req.tournament_id}", "user_id": f"eq.{white['user_id']}"},
                         headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                                  "Content-Type": "application/json"},
-                        json={"score": white.get("score", 0) + 1}
+                        json={"score": white.get("score", 0) + 2}  # bye = full win value
                     )
                     continue
                 games_to_insert.append({
@@ -2801,7 +4094,7 @@ async def next_round(req: TournamentStartRequest, authorization: str = Header(No
                         params={"tournament_id": f"eq.{req.tournament_id}", "user_id": f"eq.{white['user_id']}"},
                         headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                                  "Content-Type": "application/json"},
-                        json={"score": white.get("score", 0) + 1}
+                        json={"score": white.get("score", 0) + 2}  # bye = full win value
                     )
                     continue
                 games_to_insert.append({
@@ -2830,7 +4123,7 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
     """
     Submit a tournament game result.
     - Marks the game result in tournament_games
-    - Updates tournament_players.score (win=1, draw=0.5, loss=0)
+    - Updates tournament_players.score (win=2, draw=1, loss=0, +1 streak bonus on 3rd+ consecutive win)
     - Syncs tournament_players.elo snapshot from profiles (ELO already updated by update_elos via WS)
     - Does NOT recalculate ELO — that is handled by update_elos() when the game ends over WebSocket
     """
@@ -2840,138 +4133,240 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
     if req.result not in ('white', 'black', 'draw'):
         raise HTTPException(400, "Invalid result")
 
-    async with httpx.AsyncClient() as client:
-        # Get the game
-        r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournament_games",
-            params={"id": f"eq.{req.game_id}", "select": "*"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        games = r.json()
-        if not games:
-            raise HTTPException(404, "Game not found")
-        g = games[0]
-        if g.get('result'):
-            raise HTTPException(400, "Result already submitted")
-
-        # Only white or black player can submit
-        if user_id not in (g['white_id'], g['black_id']):
-            raise HTTPException(403, "Not a player in this game")
-
-        tid = g['tournament_id']
-
-        # Fetch tournament time_control to determine ELO column
-        tc_r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/tournaments",
-            params={"id": f"eq.{tid}", "select": "format,status,time_control"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-        )
-        tc_rows = tc_r.json()
-        time_control = tc_rows[0].get("time_control") if tc_rows else None
-        elo_col = elo_col_for_tc(time_control)
-
-        # Mark game result
-        await client.patch(
-            f"{SUPABASE_URL}/rest/v1/tournament_games",
-            params={"id": f"eq.{req.game_id}"},
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                     "Content-Type": "application/json"},
-            json={"result": req.result, "played_at": datetime.utcnow().isoformat()}
-        )
-
-        # Fetch updated ELOs from the correct column (already written by update_elos over WS)
-        elo_r = await asyncio.gather(
-            client.get(
-                f"{SUPABASE_URL}/rest/v1/profiles",
-                params={"user_id": f"eq.{g['white_id']}", "select": elo_col},
-                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-            ),
-            client.get(
-                f"{SUPABASE_URL}/rest/v1/profiles",
-                params={"user_id": f"eq.{g['black_id']}", "select": elo_col},
-                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
-            ),
-        )
-        w_elo = (elo_r[0].json()[0].get(elo_col) or 1500) if elo_r[0].json() else 1500
-        b_elo = (elo_r[1].json()[0].get(elo_col) or 1500) if elo_r[1].json() else 1500
-
-        # Update tournament standings: score + ELO snapshot
-        async def add_score(uid, pts, elo_snapshot):
-            r2 = await client.get(
-                f"{SUPABASE_URL}/rest/v1/tournament_players",
-                params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}", "select": "score"},
+    # Both players' clients independently call this endpoint after receiving
+    # the same gameover broadcast. Without this lock, two near-simultaneous
+    # requests for the same game_id could each read tournament_games.result
+    # as still null (neither has committed yet) and both proceed to score
+    # the game — doubling every point awarded. Confirmed live: every win in
+    # a tournament was recorded at exactly double its correct value.
+    lock = _submit_result_locks.setdefault(req.game_id, asyncio.Lock())
+    async with lock:
+        async with httpx.AsyncClient() as client:
+            # Get the game
+            r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournament_games",
+                params={"id": f"eq.{req.game_id}", "select": "*"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             )
-            current = r2.json()[0].get('score', 0) if r2.json() else 0
+            games = r.json()
+            if not games:
+                raise HTTPException(404, "Game not found")
+            g = games[0]
+            if g.get('result'):
+                raise HTTPException(400, "Result already submitted")
+
+            # Only white or black player can submit
+            if user_id not in (g['white_id'], g['black_id']):
+                raise HTTPException(403, "Not a player in this game")
+
+            tid = g['tournament_id']
+
+            # Fetch tournament time_control to determine ELO column
+            tc_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/tournaments",
+                params={"id": f"eq.{tid}", "select": "format,status,time_control"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            )
+            tc_rows = tc_r.json()
+            time_control = tc_rows[0].get("time_control") if tc_rows else None
+            elo_col = elo_col_for_tc(time_control)
+
+            tournament_status = tc_rows[0].get("status") if tc_rows else None
+
+            # Mark game result — this happens regardless of tournament status.
+            # It's what makes the tournament page stop showing this game as
+            # "ongoing" (the Watch button / live-games list both key off
+            # whether tournament_games.result is set), so it must always run
+            # even for a game that outlived its tournament.
             await client.patch(
-                f"{SUPABASE_URL}/rest/v1/tournament_players",
-                params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}"},
+                f"{SUPABASE_URL}/rest/v1/tournament_games",
+                params={"id": f"eq.{req.game_id}"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                          "Content-Type": "application/json"},
-                json={"score": current + pts, "elo": elo_snapshot}
+                json={"result": req.result, "played_at": datetime.utcnow().isoformat()}
             )
 
-        # Streak bonus: +1 extra point for a 2+ game win streak (Lichess-style)
-        # consecutive_wins tracked in tournament_connections (in-memory, survives reconnect via _myArenaScore)
-        conns_now = tournament_connections.get(tid, {})
+            if tournament_status != "active":
+                # The tournament ended while this game was still being played
+                # (its clock ran out, but the game itself plays to a real
+                # conclusion rather than being force-resolved). The game's own
+                # result is recorded above so it correctly stops showing as
+                # ongoing, but it no longer counts toward standings — the
+                # tournament is already over. ELO is unaffected: that's
+                # updated separately by update_elos() over the game's own
+                # WebSocket the moment it actually ends, independent of this
+                # endpoint and independent of tournament status.
+                print(f"[arena] game {req.game_id} finished after tournament {tid} ended — "
+                      f"result recorded, standings NOT updated", flush=True)
+                return {"ok": True, "result": req.result, "counted_toward_standings": False}
 
-        def streak_bonus(uid, won):
-            """Update streak counter and return bonus points."""
-            if uid not in conns_now:
-                return 0
-            if won:
-                conns_now[uid]["consecutive_wins"] = conns_now[uid].get("consecutive_wins", 0) + 1
-                streak = conns_now[uid]["consecutive_wins"]
-                return 1 if streak >= 2 else 0   # bonus kicks in on 2nd+ consecutive win
+            # Fetch updated ELOs from the correct column (already written by update_elos over WS)
+            elo_r = await asyncio.gather(
+                client.get(
+                    f"{SUPABASE_URL}/rest/v1/profiles",
+                    params={"user_id": f"eq.{g['white_id']}", "select": elo_col},
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                ),
+                client.get(
+                    f"{SUPABASE_URL}/rest/v1/profiles",
+                    params={"user_id": f"eq.{g['black_id']}", "select": elo_col},
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                ),
+            )
+            w_elo = (elo_r[0].json()[0].get(elo_col) or 1500) if elo_r[0].json() else 1500
+            b_elo = (elo_r[1].json()[0].get(elo_col) or 1500) if elo_r[1].json() else 1500
+
+            # Streak bonus: +1 extra point for every win once a streak reaches 3+
+            # consecutive wins (a loss resets it to 0). Tracked in-memory in
+            # tournament_connections so it survives across games without a DB
+            # round trip.
+            conns_now = tournament_connections.get(tid, {})
+
+            # Update tournament standings: score + ELO snapshot.
+            # IMPORTANT: uses the in-memory conns_now[uid]["score"] as the
+            # authoritative running total, NOT a fresh read from the database.
+            # The old version did read-current-then-write-current+pts as two
+            # separate HTTP round trips — if two games for the same player ended
+            # close together (entirely possible in a fast arena, and especially
+            # likely while the duplicate-pairing bug existed earlier this
+            # session), the second call's read could land before the first
+            # call's write had committed, silently dropping points. Mutating the
+            # in-memory dict has no such gap — it's a synchronous Python
+            # operation with no await between read and write, so it can't be
+            # interleaved by another coroutine on the same event loop.
+            async def add_score(uid, pts, elo_snapshot):
+                if uid not in conns_now:
+                    # Player isn't connected right now (shouldn't normally happen
+                    # mid-game, but fall back to a DB read so we don't silently
+                    # lose points if it does)
+                    r2 = await client.get(
+                        f"{SUPABASE_URL}/rest/v1/tournament_players",
+                        params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}", "select": "score"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    )
+                    current = r2.json()[0].get('score', 0) if r2.json() else 0
+                else:
+                    current = conns_now[uid].get("score", 0)
+                new_score = current + pts
+                if uid in conns_now:
+                    conns_now[uid]["score"] = new_score
+                # Also update the per-TC column (elo_bullet/elo_blitz/elo_rapid)
+                # that matches this tournament's actual time control, in
+                # addition to the generic `elo` field. tournament_players'
+                # per-TC columns were only ever written once, at registration
+                # — never touched again as the player's real rating changed
+                # mid-tournament. The lobby standings table reads p[eloCol]
+                # (e.g. p.elo_blitz) specifically, so it kept showing each
+                # player's join-time snapshot indefinitely, while the generic
+                # `elo` field (and the profile page, which reads `profiles`
+                # directly) updated correctly the whole time.
+                patch_body = {"score": new_score, "elo": elo_snapshot}
+                if elo_col in ("elo_bullet", "elo_blitz", "elo_rapid"):
+                    patch_body[elo_col] = elo_snapshot
+                await client.patch(
+                    f"{SUPABASE_URL}/rest/v1/tournament_players",
+                    params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                             "Content-Type": "application/json"},
+                    json=patch_body
+                )
+
+            def streak_bonus(uid, won):
+                """Update streak counter and return bonus points.
+                Bonus applies to EVERY win once the streak reaches 3+ consecutive
+                wins, continuing until the player loses (which resets it to 0).
+                The 1st and 2nd wins in a streak are plain, no bonus yet."""
+                if uid not in conns_now:
+                    return 0
+                if won:
+                    conns_now[uid]["consecutive_wins"] = conns_now[uid].get("consecutive_wins", 0) + 1
+                    streak = conns_now[uid]["consecutive_wins"]
+                    return 1 if streak >= 3 else 0   # bonus on every win once streak hits 3+
+                else:
+                    conns_now[uid]["consecutive_wins"] = 0
+                    return 0
+
+            if req.result == 'white':
+                w_bonus = streak_bonus(g['white_id'], won=True)
+                b_bonus = streak_bonus(g['black_id'], won=False)
+                await add_score(g['white_id'], 2 + w_bonus, w_elo)
+                await add_score(g['black_id'], 0,            b_elo)
+            elif req.result == 'black':
+                w_bonus = streak_bonus(g['white_id'], won=False)
+                b_bonus = streak_bonus(g['black_id'], won=True)
+                await add_score(g['white_id'], 0,            w_elo)
+                await add_score(g['black_id'], 2 + b_bonus,  b_elo)
             else:
-                conns_now[uid]["consecutive_wins"] = 0
-                return 0
+                streak_bonus(g['white_id'], won=False)   # draw resets streak
+                streak_bonus(g['black_id'], won=False)
+                await add_score(g['white_id'], 1, w_elo)
+                await add_score(g['black_id'], 1, b_elo)
 
-        if req.result == 'white':
-            w_bonus = streak_bonus(g['white_id'], won=True)
-            b_bonus = streak_bonus(g['black_id'], won=False)
-            await add_score(g['white_id'], 1 + w_bonus, w_elo)
-            await add_score(g['black_id'], 0,            b_elo)
-        elif req.result == 'black':
-            w_bonus = streak_bonus(g['white_id'], won=False)
-            b_bonus = streak_bonus(g['black_id'], won=True)
-            await add_score(g['white_id'], 0,            w_elo)
-            await add_score(g['black_id'], 1 + b_bonus,  b_elo)
-        else:
-            streak_bonus(g['white_id'], won=False)   # draw resets streak
-            streak_bonus(g['black_id'], won=False)
-            await add_score(g['white_id'], 0.5, w_elo)
-            await add_score(g['black_id'], 0.5, b_elo)
+        # Arena: release players and re-pair
+        try:
+            if tc_rows and tc_rows[0].get("format") == "arena" and tc_rows[0].get("status") == "active":
+                pg    = tournament_player_game.get(tid, {})
+                conns = tournament_connections.get(tid, {})
+                for uid in (g['white_id'], g['black_id']):
+                    if uid in pg:
+                        pg[uid] = None
+                    if uid in conns:
+                        # IMPORTANT: do not blindly set available=True here. If this
+                        # player was just paused by a forfeit (tournament_handle_forfeit
+                        # sets paused=True synchronously before this code can run),
+                        # the OTHER player's client independently calling this same
+                        # endpoint after receiving the gameover broadcast must not
+                        # undo that pause. This was the actual cause of forfeited
+                        # players keep getting re-paired indefinitely — the winner's
+                        # own result-submission was unconditionally re-enabling the
+                        # loser's pairing eligibility moments after it was correctly
+                        # disabled.
+                        if not conns[uid].get("paused"):
+                            conns[uid]["available"] = True
+                        won = (req.result == "white" and uid == g['white_id']) or \
+                              (req.result == "black" and uid == g['black_id'])
+                        # NOTE: do NOT recompute pts/streak and add to conns[uid]["score"]
+                        # here — add_score() above already updated this exact value
+                        # (conns_now and conns are the same dict, same tournament_id).
+                        # Doing it again here was a genuine double-count bug: every
+                        # game silently added its points TWICE to the in-memory score,
+                        # which is what the lobby UI displays. This is very likely why
+                        # an 8-game win streak showed fewer points than the formula
+                        # actually produces — some of the doubled increments were
+                        # then lost to the OTHER race (the old read-then-write DB
+                        # pattern in add_score, now also fixed), so the visible total
+                        # ended up an inconsistent mix of double-counted and dropped
+                        # points rather than cleanly wrong in one direction.
+                        streak = conns_now.get(uid, {}).get("consecutive_wins", 0)
+                        bonus = 1 if (won and streak >= 3) else 0
+                        # Include ELO change so tournament.html can display it
+                        # (the elo_update WS msg goes to the game socket which closes on redirect)
+                        tc_str = tc_rows[0].get("time_control") if tc_rows else None
+                        elo_col = elo_col_for_tc(tc_str)
+                        # Use the real ELO fetched fresh from Supabase earlier in this
+                        # function (w_elo/b_elo), not the in-memory conns[uid] value —
+                        # that was only ever a one-time snapshot taken when this player
+                        # first connected to the tournament WebSocket, and never gets
+                        # updated as their actual rating changes from playing games.
+                        # Showing it in the lobby produced exactly the "ELO looks wrong"
+                        # symptom, since it could be many games stale.
+                        old_elo = w_elo if uid == g['white_id'] else b_elo
+                        await arena_send(conns[uid]["ws"], {
+                            "type":       "game_over",
+                            "result":     req.result,
+                            "my_score":   conns[uid]["score"],
+                            "streak":     streak if won else 0,
+                            "streak_bonus": bonus,
+                            "old_elo":    old_elo,
+                            "elo_col":    elo_col,
+                        })
+                # No direct pairing call — players were released above
+                # (available=True, pg cleared); the single poller's next
+                # tick (≤1.5s) handles the actual re-pairing.
+        except Exception as e:
+            print(f"[arena] re-pair error: {e}", flush=True)
 
-    # Arena: release players and re-pair
-    try:
-        if tc_rows and tc_rows[0].get("format") == "arena" and tc_rows[0].get("status") == "active":
-            pg    = tournament_player_game.get(tid, {})
-            conns = tournament_connections.get(tid, {})
-            for uid in (g['white_id'], g['black_id']):
-                if uid in pg:
-                    pg[uid] = None
-                if uid in conns:
-                    conns[uid]["available"] = True
-                    won = (req.result == "white" and uid == g['white_id']) or                            (req.result == "black" and uid == g['black_id'])
-                    drew = req.result == "draw"
-                    # Mirror the streak bonus calculated in the DB scoring above
-                    streak = conns_now.get(uid, {}).get("consecutive_wins", 0)
-                    bonus = 1 if (won and streak >= 2) else 0
-                    pts = (1 + bonus) if won else (0.5 if drew else 0)
-                    conns[uid]["score"] = conns[uid].get("score", 0) + pts
-                    await arena_send(conns[uid]["ws"], {
-                        "type":       "game_over",
-                        "result":     req.result,
-                        "my_score":   conns[uid]["score"],
-                        "streak":     streak if won else 0,
-                        "streak_bonus": bonus,
-                    })
-            asyncio.create_task(arena_pair_delayed(tid))
-    except Exception as e:
-        print(f"[arena] re-pair error: {e}", flush=True)
-
-    return {"ok": True, "result": req.result}
+        return {"ok": True, "result": req.result}
 
 
 
@@ -3016,11 +4411,15 @@ async def set_username(request: Request, authorization: str = Header(None)):
     if not is_admin and _is_reserved(username):
         raise HTTPException(400, "That username is reserved. Please choose a different name.")
 
+    # Normalise for uniqueness — store as-typed but check case-insensitively
+    # so 'Isa', 'isa', 'ISA' can't coexist
+    username_lower = username.lower()
+
     async with httpx.AsyncClient() as client:
-        # Check uniqueness
+        # Check uniqueness — case-insensitive so 'Isa' blocks 'isa' and 'ISA'
         check = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles",
-            params={"username": f"eq.{username}", "select": "user_id"},
+            params={"username": f"ilike.{username_lower}", "select": "user_id"},
             headers={"apikey": SUPABASE_SERVICE_KEY,
                      "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
@@ -3060,10 +4459,55 @@ async def set_username(request: Request, authorization: str = Header(None)):
 
     # Award pioneer badge if eligible (fire-and-forget)
     async with httpx.AsyncClient() as client:
-        asyncio.create_task(grant_pioneer_medal(user_id, client))
+        asyncio.create_task(grant_pioneer_medal(user_id))
 
     print(f"[profile] new user {user_id} → {username}", flush=True)
     return {"ok": True}
+
+@app.post("/api/update-gender")
+async def update_gender(request: Request, authorization: str = Header(None)):
+    """Set the authenticated user's gender — locked after first save."""
+    user_id = await verify_jwt(authorization)
+    body    = await request.json()
+    gender  = (body.get("gender") or "").strip()
+    allowed = {"male", "female", "prefer_not_to_say"}
+
+    if gender not in allowed:
+        print(f"[gender] invalid value {gender!r} from {user_id}", flush=True)
+        raise HTTPException(status_code=400, detail=f"Invalid gender value. Must be one of: male, female, prefer_not_to_say")
+
+    async with httpx.AsyncClient() as client:
+        # Check if profile exists and if gender already set
+        check = await client.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"user_id": f"eq.{user_id}", "select": "gender"},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        )
+        rows = check.json()
+
+        # If profile exists and gender already set — locked
+        if rows and rows[0].get("gender"):
+            raise HTTPException(status_code=400, detail="Gender is locked and cannot be changed.")
+
+        if rows:
+            # Profile exists, gender not set — patch it
+            await client.patch(
+                f"{SUPABASE_URL}/rest/v1/profiles",
+                params={"user_id": f"eq.{user_id}"},
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json",
+                         "Prefer": "return=minimal"},
+                json={"gender": gender}
+            )
+        else:
+            # No profile row yet — shouldn't happen but handle gracefully
+            raise HTTPException(status_code=400, detail="Profile not found. Please set a username first.")
+
+    print(f"[gender] set {user_id} → {gender}", flush=True)
+    return {"ok": True}
+
 
 @app.post("/api/update-country")
 async def update_country(request: Request, authorization: str = Header(None)):
@@ -3170,7 +4614,7 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
         r = await client.get(
             f"{SUPABASE_URL}/rest/v1/tournaments",
             params={"id": f"eq.{tournament_id}",
-                    "select": "country,region,max_players,status,prize_pool"},
+                    "select": "country,region,max_players,status,prize_pool,format"},
             headers={"apikey": SUPABASE_SERVICE_KEY,
                      "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
         )
@@ -3179,7 +4623,16 @@ async def join_tournament(request: Request, authorization: str = Header(None)):
             raise HTTPException(404, "Tournament not found")
         t = ts[0]
 
-        if t["status"] != "upcoming":
+        # Arena tournaments allow late joining while active — same as Lichess.
+        # You enter with 0 points and play whatever rounds remain.
+        # Swiss/round-robin formats stay closed once started, since their
+        # pairing system assumes a fixed player list from round 1.
+        is_arena = t.get("format") == "arena"
+        if t["status"] == "completed":
+            raise HTTPException(400, "Tournament has ended")
+        if t["status"] == "active" and not is_arena:
+            raise HTTPException(400, "This tournament has already started and is not open for late registration")
+        if t["status"] not in ("upcoming", "active"):
             raise HTTPException(400, "Tournament is not open for registration")
 
         has_prizes = bool(t.get("prize_pool") and float(t.get("prize_pool") or 0) > 0)
@@ -3421,7 +4874,7 @@ async def get_leaderboard(region: str = ""):
     """Return all profiles with ELO data for the continental leaderboard.
     Optionally filtered by African region (east_africa, west_africa, etc.)."""
     params: dict = {
-        "select": "user_id,username,country,elo,elo_bullet,elo_blitz,elo_rapid,games_played",
+        "select": "user_id,username,country,elo,elo_bullet,elo_blitz,elo_rapid,games_played,gender",
         "order":  "elo_blitz.desc.nullslast",
     }
     if region and region in REGIONS:
@@ -3571,6 +5024,26 @@ async def presence_ping(request: Request):
     count = _presence_count()
     return {"online": count}
 
+
+
+@app.get("/api/health")
+async def health():
+    """
+    Health check endpoint. Railway can poll this to detect issues.
+    Also exposes in-memory state counts so you can see if a restart
+    wiped active games without checking logs.
+    """
+    pool_alive = sum(1 for w in engine_pool._workers if w.alive())
+    return {
+        "status":          "ok",
+        "engine_pool":     {"size": POOL_SIZE, "alive": pool_alive},
+        "active_games":    len(active_games),
+        "lobby_queue":     len(lobby_queue),
+        "tournaments":     len(tournament_connections),
+        "presence":        _presence_count(),
+        "engine_failures": _engine_failures,
+    }
+
 @app.get("/api/stats")
 async def get_live_stats():
     """
@@ -3603,12 +5076,13 @@ async def get_live_stats():
         try:
             async with httpx.AsyncClient() as client:
                 # Total registered players (profiles with username)
-                pr = await client.get(
+                # HEAD request = no body, just headers — correct for count=exact
+                pr = await client.head(
                     f"{SUPABASE_URL}/rest/v1/profiles",
                     params={"select": "count", "username": "not.is.null"},
                     headers={"apikey": SUPABASE_SERVICE_KEY,
                              "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                             "Prefer": "count=exact", "Range": "0-0"}
+                             "Prefer": "count=exact"}
                 )
                 players = int(pr.headers.get("content-range", "0/0").split("/")[-1] or 0)
 

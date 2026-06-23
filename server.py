@@ -1217,6 +1217,15 @@ tournament_player_game: dict = {}
 # a few milliseconds later.
 _arena_pair_locks: dict = {}
 _submit_result_locks: dict = {}
+# Per (tournament_id, user_id) lock for the actual score increment. The
+# per-game lock above stops two requests for the SAME game from double-
+# scoring it, but does nothing to stop two DIFFERENT games' result
+# submissions for the SAME player from racing each other's score read-
+# modify-write — both could read the in-memory score before either writes
+# it back, and whichever writes last silently overwrites the other,
+# losing a whole game's worth of points. Confirmed live: a player who won
+# 5 games out of 7 ended up with a tournament score of 2.
+_player_score_locks: dict = {}
 
 
 # ΓöÇΓöÇ Helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -4235,41 +4244,43 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
             # operation with no await between read and write, so it can't be
             # interleaved by another coroutine on the same event loop.
             async def add_score(uid, pts, elo_snapshot):
-                if uid not in conns_now:
-                    # Player isn't connected right now (shouldn't normally happen
-                    # mid-game, but fall back to a DB read so we don't silently
-                    # lose points if it does)
-                    r2 = await client.get(
+                lock = _player_score_locks.setdefault((tid, uid), asyncio.Lock())
+                async with lock:
+                    if uid not in conns_now:
+                        # Player isn't connected right now (shouldn't normally happen
+                        # mid-game, but fall back to a DB read so we don't silently
+                        # lose points if it does)
+                        r2 = await client.get(
+                            f"{SUPABASE_URL}/rest/v1/tournament_players",
+                            params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}", "select": "score"},
+                            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                        )
+                        current = r2.json()[0].get('score', 0) if r2.json() else 0
+                    else:
+                        current = conns_now[uid].get("score", 0)
+                    new_score = current + pts
+                    if uid in conns_now:
+                        conns_now[uid]["score"] = new_score
+                    # Also update the per-TC column (elo_bullet/elo_blitz/elo_rapid)
+                    # that matches this tournament's actual time control, in
+                    # addition to the generic `elo` field. tournament_players'
+                    # per-TC columns were only ever written once, at registration
+                    # — never touched again as the player's real rating changed
+                    # mid-tournament. The lobby standings table reads p[eloCol]
+                    # (e.g. p.elo_blitz) specifically, so it kept showing each
+                    # player's join-time snapshot indefinitely, while the generic
+                    # `elo` field (and the profile page, which reads `profiles`
+                    # directly) updated correctly the whole time.
+                    patch_body = {"score": new_score, "elo": elo_snapshot}
+                    if elo_col in ("elo_bullet", "elo_blitz", "elo_rapid"):
+                        patch_body[elo_col] = elo_snapshot
+                    await client.patch(
                         f"{SUPABASE_URL}/rest/v1/tournament_players",
-                        params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}", "select": "score"},
-                        headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                        params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                 "Content-Type": "application/json"},
+                        json=patch_body
                     )
-                    current = r2.json()[0].get('score', 0) if r2.json() else 0
-                else:
-                    current = conns_now[uid].get("score", 0)
-                new_score = current + pts
-                if uid in conns_now:
-                    conns_now[uid]["score"] = new_score
-                # Also update the per-TC column (elo_bullet/elo_blitz/elo_rapid)
-                # that matches this tournament's actual time control, in
-                # addition to the generic `elo` field. tournament_players'
-                # per-TC columns were only ever written once, at registration
-                # — never touched again as the player's real rating changed
-                # mid-tournament. The lobby standings table reads p[eloCol]
-                # (e.g. p.elo_blitz) specifically, so it kept showing each
-                # player's join-time snapshot indefinitely, while the generic
-                # `elo` field (and the profile page, which reads `profiles`
-                # directly) updated correctly the whole time.
-                patch_body = {"score": new_score, "elo": elo_snapshot}
-                if elo_col in ("elo_bullet", "elo_blitz", "elo_rapid"):
-                    patch_body[elo_col] = elo_snapshot
-                await client.patch(
-                    f"{SUPABASE_URL}/rest/v1/tournament_players",
-                    params={"tournament_id": f"eq.{tid}", "user_id": f"eq.{uid}"},
-                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                             "Content-Type": "application/json"},
-                    json=patch_body
-                )
 
             def streak_bonus(uid, won):
                 """Update streak counter and return bonus points.

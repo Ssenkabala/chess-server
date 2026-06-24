@@ -1353,6 +1353,15 @@ global.Chessground = Nr;
       <div id="analysis-board" class="cg-wrap"></div>
     </div>
 
+    <!-- Move navigation -->
+    <div id="analysis-nav-bar" style="display:flex;gap:6px;justify-content:center;margin:8px 0;">
+      <button onclick="analysisJumpToStart()" title="Start" style="padding:6px 10px;">⏮</button>
+      <button onclick="analysisStepBack()" title="Previous move" style="padding:6px 10px;">◀</button>
+      <button onclick="analysisStepForward()" title="Next move" style="padding:6px 10px;">▶</button>
+      <button onclick="analysisJumpToEnd()" title="Latest" style="padding:6px 10px;">⏭</button>
+    </div>
+    <div id="analysis-move-list" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-bottom:10px;font-size:13px;"></div>
+
     <!-- Eval bar -->
     <div class="eval-bar-wrap">
       <div class="eval-bar-fill" id="eval-bar"></div>
@@ -2193,6 +2202,14 @@ renderBar('pieces-player',   captured[bottomColor], diffOpp > 0 ? diffOpp : 0, b
 //  ANALYSIS MODE
 // ══════════════════════════════════════════════════════════════
 var analysisGame = new Chess();
+// Move-navigation state — mirrors play_multiplayer.html's fenHistory/viewingMove
+// pattern. analysisFenHistory[0] is always the starting position of whatever
+// was loaded (a blank board or a pasted FEN); each subsequent entry is the
+// FEN after one more move. analysisViewIndex of -1 means "viewing the live
+// (latest) position"; any other value means viewing that index in history.
+var analysisFenHistory = [analysisGame.fen()];
+var analysisSanHistory = [];
+var analysisViewIndex  = -1;
 var analysisCg = null;
 // Cache the most recent analysis result so Coach Me can reuse it without re-running the engine
 var lastAnalysisResult = null;  // { fen, bestMove, evalCp }  — set by analysePosition on completion
@@ -2214,9 +2231,22 @@ function initAnalysisBoard() {
         free: true,
         events: {
           after: function(source, target) {
+            // If viewing a past position, jump the underlying game object
+            // back there first so the new move branches off correctly,
+            // discarding any moves that were "in the future" relative to
+            // where we just played from.
+            if (analysisViewIndex !== -1 && analysisViewIndex < analysisFenHistory.length - 1) {
+              analysisGame.load(analysisFenHistory[analysisViewIndex]);
+              analysisFenHistory = analysisFenHistory.slice(0, analysisViewIndex + 1);
+              analysisSanHistory = analysisSanHistory.slice(0, analysisViewIndex);
+            }
             var move = analysisGame.move({ from: source, to: target, promotion: 'q' });
             if (move === null) { analysisCg.set({ fen: analysisGame.fen() }); return; }
             analysisCg.set({ fen: analysisGame.fen(), lastMove: [source, target] });
+            analysisFenHistory.push(analysisGame.fen());
+            analysisSanHistory.push(move.san);
+            analysisViewIndex = -1;
+            renderAnalysisMoveList();
             lastAnalysisResult = null;  // position changed — invalidate cache
             resetCoachCard();
             clearBestMoveHighlight();
@@ -2234,6 +2264,69 @@ function initAnalysisBoard() {
   });
 }
 
+// ── Analysis move navigation ────────────────────────────────────────────
+// Mirrors play_multiplayer.html's jumpToMove/returnToLive pattern. Viewing
+// a past position never triggers a new engine search — analysis only ever
+// runs against the live (latest) position, matching how the engine call
+// site (analysePosition) already reads analysisGame.fen() directly.
+function analysisGoToIndex(idx) {
+  idx = Math.max(0, Math.min(idx, analysisFenHistory.length - 1));
+  analysisViewIndex = (idx === analysisFenHistory.length - 1) ? -1 : idx;
+  var fen = analysisFenHistory[idx];
+  analysisGame.load(fen);
+  if (analysisCg) {
+    analysisCg.set({
+      fen: fen,
+      lastMove: idx > 0 ? lastMoveSquaresFromSan(idx) : undefined,
+      movable: { color: 'both', free: true }
+    });
+  }
+  renderAnalysisMoveList();
+  lastAnalysisResult = null;
+  resetCoachCard();
+  clearBestMoveHighlight();
+  scheduleAutoAnalyse();
+}
+
+function analysisJumpToStart()   { analysisGoToIndex(0); }
+function analysisStepBack()      { analysisGoToIndex((analysisViewIndex === -1 ? analysisFenHistory.length - 1 : analysisViewIndex) - 1); }
+function analysisStepForward()   { analysisGoToIndex((analysisViewIndex === -1 ? analysisFenHistory.length - 1 : analysisViewIndex) + 1); }
+function analysisJumpToEnd()     { analysisGoToIndex(analysisFenHistory.length - 1); }
+
+// Reconstructs the [from, to] squares for highlighting the last move at a
+// given history index, since chessground needs explicit squares, not SAN.
+function lastMoveSquaresFromSan(idx) {
+  try {
+    var tmp = new Chess(analysisFenHistory[idx - 1]);
+    var verbose = tmp.moves({ verbose: true });
+    for (var i = 0; i < verbose.length; i++) {
+      tmp.move(verbose[i]);
+      if (tmp.fen() === analysisFenHistory[idx]) return [verbose[i].from, verbose[i].to];
+      tmp.load(analysisFenHistory[idx - 1]);
+    }
+  } catch (e) {}
+  return undefined;
+}
+
+function renderAnalysisMoveList() {
+  var el = document.getElementById('analysis-move-list');
+  if (!el) return;
+  if (analysisSanHistory.length === 0) { el.innerHTML = ''; return; }
+  var html = '';
+  for (var i = 0; i < analysisSanHistory.length; i++) {
+    var moveNum = Math.floor(i / 2) + 1;
+    var prefix  = (i % 2 === 0) ? (moveNum + '. ') : '';
+    var isActive = (analysisViewIndex === -1 ? analysisFenHistory.length - 1 : analysisViewIndex) === i + 1;
+    html += '<span onclick="analysisGoToIndex(' + (i + 1) + ')" style="cursor:pointer;padding:2px 6px;border-radius:4px;' +
+            (isActive ? 'background:rgba(0,255,157,0.25);color:#00ff9d;' : 'color:#ccc;') + '">' +
+            prefix + analysisSanHistory[i] + '</span>';
+  }
+  el.innerHTML = html;
+  el.scrollLeft = el.scrollWidth;
+}
+
+
+
 function loadFen() {
   if (!analysisCg) initAnalysisBoard();
   lastAnalysisResult = null;  // position changed — invalidate cache
@@ -2245,6 +2338,10 @@ function loadFen() {
     setAnalysisStatus('Starting position loaded.');
     resetCoachCard();
     updateEvalBar(0);
+    analysisFenHistory = [analysisGame.fen()];
+    analysisSanHistory = [];
+    analysisViewIndex  = -1;
+    renderAnalysisMoveList();
     return;
   }
   var test = new Chess();
@@ -2258,6 +2355,10 @@ function loadFen() {
   resetCoachCard();
   updateEvalBar(0);
   clearBestMoveHighlight();
+  analysisFenHistory = [analysisGame.fen()];
+  analysisSanHistory = [];
+  analysisViewIndex  = -1;
+  renderAnalysisMoveList();
 }
 
 function scheduleAutoAnalyse() {

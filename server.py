@@ -2590,6 +2590,16 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
                 # No direct pairing call — the poller picks this up on its next tick.
     except WebSocketDisconnect:
         pass
+    except Exception as e:
+        # Anything other than a clean disconnect was previously invisible —
+        # it propagated past this function as an unhandled exception at the
+        # ASGI level, with the finally block below still running cleanup
+        # correctly but no detail ever logged about what actually failed.
+        # Logging it here doesn't change behavior, but means a future
+        # occurrence is actually diagnosable instead of showing up as a
+        # generic Uvicorn traceback with no application-level context.
+        print(f"[arena] tournament_ws error for {user_id} on {tournament_id}: "
+              f"{type(e).__name__}: {e}", flush=True)
     finally:
         conns = tournament_connections.get(tournament_id, {})
         if user_id and user_id in conns:
@@ -3016,14 +3026,42 @@ async def game_ws(ws: WebSocket, game_id: str):
                 await ws.close()
                 return
 
-        if claimed_color == "white" and game.get("white_game_ws") is None:
-            game["white_game_ws"] = ws
-            game["white_ws"] = ws
-            color = "w"
-        elif claimed_color == "black" and game.get("black_game_ws") is None:
-            game["black_game_ws"] = ws
-            game["black_ws"] = ws
-            color = "b"
+        async def _slot_is_live(existing_ws):
+            """Check whether a previously-claimed socket for this color is
+            actually still alive, not just a stale handle left behind by a
+            connection that's already gone (e.g. the player navigated away
+            and back, or had a brief network drop, before the old socket's
+            own disconnect handler had a chance to run). A harmless ping is
+            the only reliable way to tell — without this, a legitimate
+            reconnect could be rejected in favor of a dead old connection,
+            leaving the player stuck with no working socket at all while
+            the server keeps trying to talk to one that's already gone."""
+            if existing_ws is None:
+                return False
+            try:
+                await existing_ws.send_json({"type": "ping"})
+                return True
+            except Exception:
+                return False
+
+        if claimed_color == "white":
+            if game.get("white_game_ws") is None or not await _slot_is_live(game.get("white_game_ws")):
+                game["white_game_ws"] = ws
+                game["white_ws"] = ws
+                color = "w"
+            else:
+                await send(ws, {"type": "error", "detail": "Slot unavailable."})
+                await ws.close()
+                return
+        elif claimed_color == "black":
+            if game.get("black_game_ws") is None or not await _slot_is_live(game.get("black_game_ws")):
+                game["black_game_ws"] = ws
+                game["black_ws"] = ws
+                color = "b"
+            else:
+                await send(ws, {"type": "error", "detail": "Slot unavailable."})
+                await ws.close()
+                return
         else:
             await send(ws, {"type": "error", "detail": "Slot unavailable."})
             await ws.close()
@@ -3364,6 +3402,35 @@ async def game_ws(ws: WebSocket, game_id: str):
                 game["_elo_updated"] = True
                 await update_elos(game, winner)
             active_games.pop(game_id, None)
+    except Exception as e:
+        # Any OTHER error in this loop (not a clean disconnect) previously
+        # propagated unhandled, crashing the connection with no cleanup, no
+        # opponent notification, and no log detail. Confirmed as a real gap:
+        # this is exactly the mechanism that would produce "opponent thinking
+        # forever, move never arrived" — the connection responsible for
+        # broadcasting the move died silently with nothing left to tell
+        # either player what happened. Treat it the same as a disconnect for
+        # game-state purposes, but log the actual cause so it's diagnosable
+        # next time instead of showing up as a bare framework traceback.
+        print(f"[game] {game_id} unexpected error for color={color}: "
+              f"{type(e).__name__}: {e}", flush=True)
+        try:
+            if not game["over"]:
+                game["over"] = True
+                winner = "black" if color == "w" else "white"
+                opponent_ws = game["black_ws"] if color == "w" else game["white_ws"]
+                await send(opponent_ws, {
+                    "type":   "gameover",
+                    "result": winner,
+                    "reason": "disconnect",
+                    "clock":  game["clock"],
+                })
+                if not game.get("_elo_updated"):
+                    game["_elo_updated"] = True
+                    await update_elos(game, winner)
+                active_games.pop(game_id, None)
+        except Exception as cleanup_err:
+            print(f"[game] {game_id} cleanup after error also failed: {cleanup_err}", flush=True)
 
 
 # ΓöÇΓöÇ Lobby status (optional debug endpoint) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ

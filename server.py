@@ -2169,23 +2169,6 @@ async def _arena_pair_impl(tournament_id: str):
         asyncio.create_task(arena_launch_game(tournament_id, white_id, black_id))
 
 
-# How long a player who just finished a game stays unavailable for pairing
-# before the next pairing pass can match them again. Must cover the client's
-# real worst-case timeline before it's actually back on the tournament page:
-# showOverlay() waits ~4s for elo_update before saving game history, the
-# save insert itself takes some real time, and only after that resolves does
-# the "Returning to tournament in 5s" countdown even start. ~4s alone (the
-# first version of this fix) was nowhere near long enough — confirmed live,
-# a player was still re-paired while sitting on the previous game's overlay.
-POST_GAME_GRACE_SECONDS = 12
-
-async def _delayed_mark_available(tournament_id: str, uid: str):
-    await asyncio.sleep(POST_GAME_GRACE_SECONDS)
-    conns = tournament_connections.get(tournament_id, {})
-    if uid in conns and not conns[uid].get("paused"):
-        conns[uid]["available"] = True
-
-
 async def arena_pair(tournament_id: str):
     """
     Serializes concurrent pairing attempts so a forfeit handler and one or
@@ -2217,7 +2200,7 @@ _active_pairing_loops: set = set()
 async def arena_pairing_loop(tournament_id: str):
     """
     The single background poller for one active arena tournament. Runs every
-    1.5 seconds for as long as the tournament is active, and is the ONLY
+    5 seconds for as long as the tournament is active, and is the ONLY
     caller of arena_pair(). Every other event in the system (a forfeit, a
     player resuming, a game ending) only ever updates state — available,
     paused, pg — and waits for this loop's next tick to actually act on it.
@@ -2236,7 +2219,7 @@ async def arena_pairing_loop(tournament_id: str):
     _active_pairing_loops.add(tournament_id)
     try:
         while True:
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(5)  # per design spec: check the lobby every 5 seconds
             try:
                 async with httpx.AsyncClient() as client:
                     r = await client.get(
@@ -2287,11 +2270,11 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
         # nothing wrong and have no real game of their own right now.
         if existing_white not in (None, "pending") and white_id in conns:
             pg[black_id] = None
-            if black_id in conns and not conns[black_id].get("paused"):
+            if black_id in conns and not conns[black_id].get("paused") and conns[black_id].get("connected"):
                 conns[black_id]["available"] = True
         elif existing_black not in (None, "pending") and black_id in conns:
             pg[white_id] = None
-            if white_id in conns and not conns[white_id].get("paused"):
+            if white_id in conns and not conns[white_id].get("paused") and conns[white_id].get("connected"):
                 conns[white_id]["available"] = True
         return
     white_info = conns[white_id]
@@ -2498,6 +2481,7 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
         "available":        not _existing.get("paused", False),
         "paused":           _existing.get("paused", False),
         "consecutive_wins": _existing.get("consecutive_wins", 0),
+        "connected":        True,
     }
     if tournament_player_game[tournament_id].get(user_id):
         tournament_connections[tournament_id][user_id]["available"] = False
@@ -2553,7 +2537,7 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
             )
             rows = r.json()
         if rows and rows[0]["status"] == "active" and rows[0].get("format") == "arena":
-            pass  # state is set; arena_pairing_loop's next tick (≤1.5s) picks it up
+            pass  # state is set; arena_pairing_loop's next tick (≤5s) picks it up
     except Exception:
         pass
 
@@ -2610,6 +2594,7 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
         conns = tournament_connections.get(tournament_id, {})
         if user_id and user_id in conns:
             conns[user_id]["available"] = False
+            conns[user_id]["connected"] = False
             # Do NOT delete the entry — a reconnect (refresh, navigating to
             # Watch and back, the redirect after a game ends) needs to find
             # this entry still here so it can read paused/consecutive_wins
@@ -4036,7 +4021,7 @@ async def start_tournament(req: TournamentStartRequest, authorization: str = Hea
                         pass
 
             # Arena: pairing via the single background poller (started here,
-            # runs every 1.5s for the lifetime of the active tournament)
+            # runs every 5s for the lifetime of the active tournament)
             if t.get("format") == "arena":
                 asyncio.create_task(arena_pairing_loop(req.tournament_id))
                 return {"ok": True, "format": "arena", "players": len(players)}
@@ -4368,19 +4353,8 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                         # own result-submission was unconditionally re-enabling the
                         # loser's pairing eligibility moments after it was correctly
                         # disabled.
-                        if not conns[uid].get("paused"):
-                            # Don't mark available=True instantly. The client
-                            # deliberately delays its own redirect back to the
-                            # tournament page by several seconds (so the player
-                            # can see the result and so the game-history save
-                            # has time to finish) — but the single poller
-                            # re-pairs anyone available on its very next tick
-                            # (≤1.5s). Without this delay, a player could be
-                            # matched into a brand new game while still
-                            # sitting on the previous game's overlay, with no
-                            # tournament WebSocket open to even receive the
-                            # new pairing notification. Confirmed live.
-                            asyncio.create_task(_delayed_mark_available(tid, uid))
+                        if not conns[uid].get("paused") and conns[uid].get("connected"):
+                            conns[uid]["available"] = True
                         won = (req.result == "white" and uid == g['white_id']) or \
                               (req.result == "black" and uid == g['black_id'])
                         # NOTE: do NOT recompute pts/streak and add to conns[uid]["score"]
@@ -4420,7 +4394,7 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                         })
                 # No direct pairing call — players were released above
                 # (available=True, pg cleared); the single poller's next
-                # tick (≤1.5s) handles the actual re-pairing.
+                # tick (≤5s) handles the actual re-pairing.
         except Exception as e:
             print(f"[arena] re-pair error: {e}", flush=True)
 

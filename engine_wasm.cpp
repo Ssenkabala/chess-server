@@ -2460,6 +2460,17 @@ const char* engine_analyse(const char* fen_str,
 
     memset(posHistory, 0, sizeof(posHistory));
     memset(history,    0, sizeof(history));
+    // Clear the transposition table too — it is never cleared anywhere else
+    // in this function, and persists across every call for the life of the
+    // worker. Without this, a second Load press on the EXACT SAME position
+    // would silently benefit from cached entries the first press never had,
+    // making the result non-deterministic for identical input: the first
+    // (genuinely cold) search could miss a deep tactic the second (now
+    // partially warm) search finds, purely from cache reuse, not from any
+    // real difference in search quality or engine readiness. Confirmed live:
+    // same FEN, same time budget, first press missed a mate the second
+    // press found at a SHALLOWER reported depth on the winning line.
+    ttClear();
 
     Board board = parseFEN(std::string(fen_str));
     if (moves_str && moves_str[0] != '\0') {

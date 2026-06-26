@@ -2504,8 +2504,14 @@ function analysePosition() {
       evalStr = evalPawns != null ? (evalPawns >= 0 ? '+' : '') + evalPawns.toFixed(2) : '?';
     }
 
-    // Cache result so Coach Me can reuse it without re-running engine
-    lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: lastLine.score || 0 };
+    // Cache result so Coach Me can reuse it without re-running engine.
+    // Includes the full PV (continuation line), not just the single best
+    // move — without this, Coach Me could only ever describe the opening
+    // move of a forced sequence and had to admit it couldn't confirm the
+    // actual mating line, even when the engine had already found and
+    // displayed the full continuation right there in the candidates list.
+    lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: lastLine.score || 0,
+                            pv: lastLine.pvLine || (finalMove ? [finalMove] : []) };
 
     setAnalysisStatus('Eval: ' + evalStr + '  ·  Use Coach Me for explanation.');
     document.getElementById('btn-coach').disabled = false;
@@ -2619,15 +2625,19 @@ function getCoaching() {
 
   var wasmEng = _ensureWasmEngine();
 
-  function requestCoach(bestMove, evalPawns) {
+  function requestCoach(bestMove, evalPawns, pv) {
     // Send to server — if WASM provided best_move + eval_pawns, server skips
-    // the engine pool entirely and goes straight to Claude AI explanation
+    // the engine pool entirely and goes straight to Claude AI explanation.
+    // pv (the full continuation, not just the first move) lets the coach
+    // actually describe the forcing sequence instead of only confirming
+    // the opening move and admitting it has no visibility into the rest.
     var body = {
       fen: fen,
       user_id: currentUser.id,
       think_time: 1.0,
     };
     if (bestMove) { body.best_move = bestMove; body.eval_pawns = evalPawns; }
+    if (pv && pv.length > 1) { body.pv = pv; }
 
     fetch(API_BASE + '/coach-free', {
       method: 'POST',
@@ -2663,17 +2673,30 @@ function getCoaching() {
     // If analysis was just run on this exact position, reuse its result —
     // no point running the engine again for the same FEN
     if (lastAnalysisResult && lastAnalysisResult.fen === fen) {
-      requestCoach(lastAnalysisResult.bestMove, lastAnalysisResult.evalCp / 100);
+      requestCoach(lastAnalysisResult.bestMove, lastAnalysisResult.evalCp / 100, lastAnalysisResult.pv);
       return;
     }
-    // Otherwise run engine at full analysis strength (no random chance, full time)
-    wasmEng.bestMove(fen, [], 5000)
+    // Otherwise run engine at full analysis strength (no random chance, full time).
+    // Use analyse() (multi-PV) rather than bestMove() (single move) so the
+    // coach has the real continuation to describe, not just the first move —
+    // this matters most exactly when it's needed most: a forced mate or a
+    // long forcing sequence, where "what happens after this move" is the
+    // whole point of asking for an explanation.
+    var coachPv = [];
+    var coachInfoHandler = function(msg) {
+      if (msg.multipv === 1 && msg.pvLine) coachPv = msg.pvLine;
+    };
+    wasmEng._analysisInfoHandler = coachInfoHandler;
+    var coachCall = typeof wasmEng.analyse === 'function'
+      ? wasmEng.analyse(fen, [], 5000, 1)
+      : wasmEng.bestMove(fen, [], 5000);
+    coachCall
       .then(function(uciMove) {
-        if (!uciMove) { requestCoach(null, null); return; }
-        requestCoach(uciMove, 0.0);
+        if (!uciMove) { requestCoach(null, null, null); return; }
+        requestCoach(uciMove, 0.0, coachPv.length ? coachPv : [uciMove]);
       })
       .catch(function() {
-        requestCoach(null, null);
+        requestCoach(null, null, null);
       });
   } else if (wasmEng) {
     setAnalysisStatus('<span class="spinner"></span> Loading engine...');

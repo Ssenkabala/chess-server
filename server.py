@@ -3391,6 +3391,7 @@ class FreeCoachRequest(BaseModel):
     # Optional: client can pre-compute these via WASM to skip server engine pool
     best_move: Optional[str] = None
     eval_pawns: Optional[float] = None
+    pv: Optional[list[str]] = None  # full continuation (UCI moves), not just best_move
 
 FREE_COACH_LIMIT = 10  # free tier daily limit (kept for legacy refs)
 
@@ -3461,12 +3462,30 @@ async def coach_free(req: FreeCoachRequest):
 
     # Run analysis — skip if client already sent pre-computed WASM result
     if req.best_move and req.eval_pawns is not None:
-        # Client ran WASM locally — use those results directly, no engine pool needed
+        # Client ran WASM locally — use those results directly, no engine pool needed.
+        # Use the full PV if the client sent one (it always should, now that
+        # the analysis tab carries the real continuation forward instead of
+        # just the opening move) — convert to SAN the same way the engine-pool
+        # path does, validating each move's legality and stopping cleanly at
+        # the first illegal one rather than trusting the input blindly.
+        pv_uci = req.pv if req.pv else [req.best_move]
+        pv_san = []
+        try:
+            pv_board = chess.Board(req.fen)
+            for uci in pv_uci:
+                move = chess.Move.from_uci(uci)
+                if move in pv_board.legal_moves:
+                    pv_san.append(pv_board.san(move))
+                    pv_board.push(move)
+                else:
+                    break
+        except Exception:
+            pass
         analysis = {
             "best_move":  req.best_move,
             "score_cp":   int(req.eval_pawns * 100),
-            "pv":         [req.best_move],
-            "pv_san":     [],
+            "pv":         pv_uci,
+            "pv_san":     pv_san,
             "mate_in":    None,
         }
     else:

@@ -2169,6 +2169,23 @@ async def _arena_pair_impl(tournament_id: str):
         asyncio.create_task(arena_launch_game(tournament_id, white_id, black_id))
 
 
+# How long a player who just finished a game stays unavailable for pairing
+# before the next pairing pass can match them again. Must cover the client's
+# real worst-case timeline before it's actually back on the tournament page:
+# showOverlay() waits ~4s for elo_update before saving game history, the
+# save insert itself takes some real time, and only after that resolves does
+# the "Returning to tournament in 5s" countdown even start. ~4s alone (the
+# first version of this fix) was nowhere near long enough — confirmed live,
+# a player was still re-paired while sitting on the previous game's overlay.
+POST_GAME_GRACE_SECONDS = 12
+
+async def _delayed_mark_available(tournament_id: str, uid: str):
+    await asyncio.sleep(POST_GAME_GRACE_SECONDS)
+    conns = tournament_connections.get(tournament_id, {})
+    if uid in conns and not conns[uid].get("paused"):
+        conns[uid]["available"] = True
+
+
 async def arena_pair(tournament_id: str):
     """
     Serializes concurrent pairing attempts so a forfeit handler and one or
@@ -4352,7 +4369,18 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                         # loser's pairing eligibility moments after it was correctly
                         # disabled.
                         if not conns[uid].get("paused"):
-                            conns[uid]["available"] = True
+                            # Don't mark available=True instantly. The client
+                            # deliberately delays its own redirect back to the
+                            # tournament page by several seconds (so the player
+                            # can see the result and so the game-history save
+                            # has time to finish) — but the single poller
+                            # re-pairs anyone available on its very next tick
+                            # (≤1.5s). Without this delay, a player could be
+                            # matched into a brand new game while still
+                            # sitting on the previous game's overlay, with no
+                            # tournament WebSocket open to even receive the
+                            # new pairing notification. Confirmed live.
+                            asyncio.create_task(_delayed_mark_available(tid, uid))
                         won = (req.result == "white" and uid == g['white_id']) or \
                               (req.result == "black" and uid == g['black_id'])
                         # NOTE: do NOT recompute pts/streak and add to conns[uid]["score"]

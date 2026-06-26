@@ -1848,6 +1848,62 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
     return bestScore;
 }
 
+// Walks the transposition table forward from a position, following each
+// position's stored best move, to reconstruct a real multi-move principal
+// variation. Without this, the engine's info output only ever reported the
+// single root move — even for a forced mate, where the actual winning line
+// is several moves deep and was always sitting right there in the TT,
+// just never collected into a sequence. Capped at a modest depth and
+// defended against TT collisions/cycles: stops cleanly if a position
+// repeats (a corrupted or shallow TT entry pointing back at an earlier
+// position) or if a stored move turns out illegal in the position it's
+// being applied to (a hash collision, rare but possible with a 1M/8M-entry
+// table and no verification beyond the hash match itself).
+string extractPV(Board startBoard, Move firstMove, int maxLen = 8) {
+    string result = moveStr(firstMove);
+    Board cur = startBoard;
+    UndoInfo u0;
+    if (!makeMove(cur, firstMove, u0)) return result;  // shouldn't happen — firstMove was already validated by the caller
+
+    vector<U64> seenHashes;
+    seenHashes.push_back(cur.hash);
+
+    for (int i = 1; i < maxLen; i++) {
+        TTResult tte;
+        if (!ttProbe(cur.hash, tte)) break;
+        if (tte.bestMove == NULL_MOVE) break;
+
+        // Verify the stored move is actually legal here before trusting it —
+        // a hash collision could otherwise produce a bogus or illegal move
+        // in the printed PV, which is exactly the class of bug we already
+        // chased once this session (the server-side fallback returning an
+        // unvalidated move). Cheap insurance: confirm it appears in the
+        // genuinely-generated legal move list for this exact position.
+        MoveList ml; genMoves(cur, ml);
+        bool isLegal = false;
+        for (int mi = 0; mi < ml.n; mi++) {
+            if (ml.m[mi] == tte.bestMove) { isLegal = true; break; }
+        }
+        if (!isLegal) break;
+
+        UndoInfo u;
+        Board next = cur;
+        if (!makeMove(next, tte.bestMove, u)) break;  // legality check above should prevent this, but stay defensive
+
+        // Guard against the TT pointing back into a position already in
+        // this exact line (a cycle) — would otherwise repeat forever up to
+        // maxLen with no real new information.
+        bool seenBefore = false;
+        for (U64 h : seenHashes) { if (h == next.hash) { seenBefore = true; break; } }
+        if (seenBefore) break;
+
+        result += " " + moveStr(tte.bestMove);
+        cur = next;
+        seenHashes.push_back(cur.hash);
+    }
+    return result;
+}
+
 // Root search — bestMove ALWAYS tracked here directly, never extracted from TT
 Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
     searchStart=chrono::steady_clock::now();
@@ -2034,7 +2090,7 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
                     <<" multipv "<<(pvIdx+1)
                     <<" score cp "<<depthBestScore
                     <<" time "<<elapsed
-                    <<" pv "<<moveStr(depthBest)<<"\n";
+                    <<" pv "<<extractPV(b, depthBest)<<"\n";
             }
         } // end pvIdx loop
 

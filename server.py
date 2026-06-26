@@ -2477,7 +2477,7 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
         "elo_bullet":       int(ident.get("elo_bullet", elo)),
         "elo_blitz":        int(ident.get("elo_blitz",  elo)),
         "elo_rapid":        int(ident.get("elo_rapid",  elo)),
-        "score":            score,
+        "score":            _existing.get("score", score),
         "available":        not _existing.get("paused", False),
         "paused":           _existing.get("paused", False),
         "consecutive_wins": _existing.get("consecutive_wins", 0),

@@ -2003,7 +2003,8 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
 
             Move depthBest      = NULL_MOVE;
             int  depthBestScore = -INF;
-            bool research       = false;
+            bool research        = false;
+            int  researchAttempts = 0;
 
             do {
                 research       = false;
@@ -2040,8 +2041,35 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
                 }
 
                 if(depth >= 4){
-                    if(depthBestScore <= alpha - 50){ alpha = max(-INF, alpha-100); research = true; }
-                    else if(depthBestScore >= beta + 50){ beta = min(INF, beta+100); research = true; }
+                    if(depthBestScore <= alpha - 50){
+                        researchAttempts++;
+                        if(researchAttempts >= 4){
+                            // A handful of narrow re-search attempts have all
+                            // failed — the true score is far outside the
+                            // aspiration window, which happens when a forced
+                            // mate is found partway through this depth (mate
+                            // scores are tens of thousands of centipawns away
+                            // from a normal position's evaluation, nowhere
+                            // close to reachable by widening 100cp at a time).
+                            // Fall back to a fully open window so the real
+                            // score and real best move are found directly,
+                            // instead of either looping a huge number of times
+                            // or settling for a stale, shallow best move.
+                            alpha = -INF;
+                        } else {
+                            alpha = max(-INF, alpha-100);
+                        }
+                        research = true;
+                    }
+                    else if(depthBestScore >= beta + 50){
+                        researchAttempts++;
+                        if(researchAttempts >= 4){
+                            beta = INF;
+                        } else {
+                            beta = min(INF, beta+100);
+                        }
+                        research = true;
+                    }
                 }
             } while(research && !stopNow);
 

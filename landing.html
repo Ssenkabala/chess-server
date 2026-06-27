@@ -1491,43 +1491,33 @@ async function fetchStats() {
     animateCount(document.getElementById('stat-total-players'), d.total_players   || 0);
     // Fetch leaderboard for countries count + top country
     fetch('/api/leaderboard?tc=blitz').then(r=>r.json()).then(players => {
-      console.log('[topcountry-debug] raw players from API:', players);
       // Countries count
       const countries = new Set(players.map(p=>p.country).filter(Boolean));
       const cEl = document.getElementById('stat-countries-hero');
       if (cEl && countries.size > 0) cEl.textContent = countries.size + '+';
 
-      // Top country — the country whose players' SUMMED ELO (across all 4
-      // time controls, same definition as leaderboard.html's eloSum()) is
-      // highest in total, not just whichever single player happens to be
-      // ranked #1 in blitz. A country with many solid players should beat
-      // a country with one standout but a much thinner overall field —
-      // that's the actual point of a "top country" stat representing
-      // community strength, not one person's rating.
+      // Top country — the country of the single highest-ranked player
+      // overall (by combined ELO across all 4 time controls), matching
+      // leaderboard.html's actual stats-strip logic exactly. NOT a sum of
+      // every player's ELO per country — that would let a country with
+      // many players who've each won one game out-rank a country with
+      // only a couple of genuinely strong players, just from raw
+      // headcount. A handful of standout individuals should represent
+      // their country here, the same way the leaderboard page itself
+      // already works.
       function eloSum(p) {
-        // Note: there is no elo_classical column in the database — classical
-        // rating is stored under the plain `elo` field (server.py: "elo col
-        // = classical"). Using elo_classical here would silently default
-        // every player's classical contribution to 1500 regardless of their
-        // real rating, which can meaningfully distort which country actually
-        // has the strongest combined field.
+        // No elo_classical column exists in the database — classical
+        // rating is stored under the plain `elo` field.
         return (p.elo_bullet||1500) + (p.elo_blitz||1500) +
                (p.elo_rapid||1500)  + (p.elo||1500);
       }
-      const countryTotals = {};   // country -> {sum, players}
-      players.forEach(p => {
-        if (!p.country || !(p.games_played > 0)) return;  // only players who've actually played
-        if (!countryTotals[p.country]) countryTotals[p.country] = {sum: 0, players: 0};
-        countryTotals[p.country].sum += eloSum(p);
-        countryTotals[p.country].players += 1;
-      });
-      console.log('[topcountry-debug] countryTotals:', JSON.stringify(countryTotals));
-      const ranked = Object.entries(countryTotals).sort((a, b) => b[1].sum - a[1].sum);
-      console.log('[topcountry-debug] ranked order:', ranked.map(r => r[0] + '=' + r[1].sum));
-      const topEntry = ranked[0];
-      console.log('[topcountry-debug] topEntry chosen:', topEntry);
-      if (topEntry) {
-        const [topCountry, info] = topEntry;
+      const ranked = players
+        .filter(p => p.country && p.games_played > 0)
+        .sort((a, b) => eloSum(b) - eloSum(a));
+      const topPlayer = ranked[0];
+      if (topPlayer) {
+        const topCountry = topPlayer.country;
+        const countryPlayerCount = players.filter(p => p.country === topCountry).length;
         const flagEl    = document.getElementById('stat-top-country-flag');
         const labelEl   = document.getElementById('stat-top-country-label');
         const playersEl = document.getElementById('stat-top-country-players');
@@ -1553,7 +1543,7 @@ async function fetchStats() {
         }
         if (flagEl)   flagEl.textContent   = FLAG(topCountry);
         if (labelEl)  labelEl.textContent  = COUNTRY_NAMES[topCountry] || topCountry;
-        if (playersEl) playersEl.textContent = info.players + ' player' + (info.players !== 1 ? 's' : '');
+        if (playersEl) playersEl.textContent = countryPlayerCount + ' player' + (countryPlayerCount !== 1 ? 's' : '');
       } else {
         // No ranked player yet — hide the cell so it doesn't show a dangling dash
         const cell = document.getElementById('stat-top-country-hero');

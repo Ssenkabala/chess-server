@@ -2098,8 +2098,24 @@ async def _arena_pair_impl(tournament_id: str):
         pair_count = {}
         color_balance = {}
 
-    # Sort available players by score desc, then ELO desc
-    available.sort(key=lambda uid: (-conns[uid].get("score", 0), -conns[uid].get("elo", 1500)))
+    # Sort available players: whoever has waited longest goes first,
+    # overriding score/ELO ordering — this is what actually fixes
+    # starvation. The OLD sort was purely (score desc, elo desc) with no
+    # concept of wait time at all, so a player who happened to sort low
+    # (by chance among freshly-created accounts with identical starting
+    # ELO, or simply from losing early games) could be left as the odd
+    # one out round after round indefinitely, since nothing in the
+    # algorithm ever corrected for it. Confirmed real via a 33-player load
+    # test: median time-to-first-pairing was 5.8s, but the max was 202.9s —
+    # one player waited the better part of the whole test while everyone
+    # else paired normally. Now rounds_waited is the PRIMARY sort key, so
+    # the longer someone sits, the more their turn gets prioritized,
+    # regardless of where they'd otherwise rank.
+    available.sort(key=lambda uid: (
+        -conns[uid].get("rounds_waited", 0),
+        -conns[uid].get("score", 0),
+        -conns[uid].get("elo", 1500),
+    ))
 
     def times_played(p1, p2):
         return pair_count.get(tuple(sorted([p1, p2])), 0)
@@ -2140,6 +2156,18 @@ async def _arena_pair_impl(tournament_id: str):
             paired.append((white_id, black_id))
             used.add(p1)
             used.add(best_p2)
+
+    # Update rounds_waited for everyone considered this tick — reset to 0
+    # for anyone who got paired (their wait is over), increment for anyone
+    # left unpaired. Without this update, the new wait-time sort key above
+    # would never actually accumulate and the starvation fix would do
+    # nothing — the counter only has teeth if it's actually maintained
+    # every single tick, not just read.
+    for uid in available:
+        if uid in used:
+            conns[uid]["rounds_waited"] = 0
+        else:
+            conns[uid]["rounds_waited"] = conns[uid].get("rounds_waited", 0) + 1
 
     # Odd player — just leave them waiting, no bye points
     # Arena players should wait until a free opponent becomes available
@@ -2481,6 +2509,7 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
         "available":        not _existing.get("paused", False),
         "paused":           _existing.get("paused", False),
         "consecutive_wins": _existing.get("consecutive_wins", 0),
+        "rounds_waited":    _existing.get("rounds_waited", 0),
         "connected":        True,
     }
     if tournament_player_game[tournament_id].get(user_id):

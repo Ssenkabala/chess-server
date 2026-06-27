@@ -930,41 +930,95 @@
       Compete against the sharpest minds across the continent. Low-data optimized, completely free entry, cash prizes.
     </p>
 
-    <div style="display:flex;flex-direction:column;gap:16px;max-width:800px;">
-
-      <div style="border:1px solid var(--green);background:#0f1a14;padding:28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px;position:relative;">
-        <span style="position:absolute;top:-10px;left:24px;background:var(--green);color:#000;font-size:9px;letter-spacing:0.15em;padding:2px 10px;">MAIN CHAMPIONSHIP</span>
-        <div>
-          <span style="color:var(--green);font-size:11px;letter-spacing:0.1em;">FRIDAY, 3RD JULY @ 7:00 PM (EAT)</span>
-          <h3 style="font-family:serif;color:white;margin-top:4px;font-size:22px;">$55 Continental Arena</h3>
-          <p style="font-size:12px;color:var(--text);margin-top:6px;">
-            1st: <strong>$30</strong> &nbsp;|&nbsp; 2nd: <strong>$15</strong> &nbsp;|&nbsp; 🏆 Top Female: <span style="color:var(--green);font-weight:500;">$10</span>
-          </p>
-        </div>
-        <a href="/tournaments" class="btn-primary" style="padding:10px 22px;font-size:11px;">Register Seat</a>
-      </div>
-
-      <div style="border:1px solid #2a2a2a;background:#0a0a0a;padding:20px 28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px;">
-        <div>
-          <span style="color:var(--muted);font-size:11px;letter-spacing:0.1em;">FRIDAY, 26TH JUNE @ 7:00 PM (EAT)</span>
-          <h3 style="font-family:serif;color:#fff;margin-top:4px;font-size:18px;font-weight:400;">Beta Test Arena II</h3>
-          <p style="font-size:12px;color:var(--muted);">Stress-testing the server matchmaking lobby. Free entry.</p>
-        </div>
-        <a href="/tournaments" class="btn-secondary" style="padding:8px 18px;font-size:10px;">Join Test</a>
-      </div>
-
-      <div style="border:1px solid #2a2a2a;background:#0a0a0a;padding:20px 28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px;">
-        <div>
-          <span style="color:var(--muted);font-size:11px;letter-spacing:0.1em;">FRIDAY, 19TH JUNE @ 7:00 PM (EAT)</span>
-          <h3 style="font-family:serif;color:#fff;margin-top:4px;font-size:18px;font-weight:400;">Beta Test Arena I</h3>
-          <p style="font-size:12px;color:var(--muted);">First live system run. Help us find bugs, play against the dev.</p>
-        </div>
-        <a href="/tournaments" class="btn-secondary" style="padding:8px 18px;font-size:10px;">Join Test</a>
-      </div>
-
+    <div id="tournaments-schedule-list" style="display:flex;flex-direction:column;gap:16px;max-width:800px;">
+      <p style="font-size:12px;color:var(--muted);">Loading upcoming events…</p>
     </div>
   </div>
 </section>
+
+<script>
+  // Drives the tournament cards above from real, live data instead of
+  // hand-typed dates — so this section never goes stale after an event
+  // passes, and never needs editing again for whatever's scheduled next.
+  // The highlighted "main championship" card is whichever upcoming
+  // tournament has the highest prize_pool; everything else renders as a
+  // secondary card, preserving the same visual hierarchy this section
+  // already had. Per-place prize breakdowns ($30/$15/$10 etc.) aren't
+  // stored as structured data — only one total prize_pool number is —
+  // so that breakdown comes from the tournament's own `description`
+  // field, set when the tournament is created, and shown as-is.
+  (function loadTournamentSchedule() {
+    var container = document.getElementById('tournaments-schedule-list');
+
+    function escapeHtml(s) {
+      return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function formatDateTime(iso) {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      var datePart = d.toLocaleDateString('en-GB', {weekday: 'long', day: 'numeric', month: 'long'});
+      var timePart = d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
+      return (datePart + ' @ ' + timePart).toUpperCase();
+    }
+
+    function mainCardHtml(t) {
+      var prizeLine = t.description
+        ? '<p style="font-size:12px;color:var(--text);margin-top:6px;">' + escapeHtml(t.description) + '</p>'
+        : (t.prize_pool ? '<p style="font-size:12px;color:var(--text);margin-top:6px;">' +
+           'Prize pool: <strong>$' + t.prize_pool + '</strong></p>' : '');
+      return '' +
+        '<div style="border:1px solid var(--green);background:#0f1a14;padding:28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px;position:relative;">' +
+          '<span style="position:absolute;top:-10px;left:24px;background:var(--green);color:#000;font-size:9px;letter-spacing:0.15em;padding:2px 10px;">MAIN CHAMPIONSHIP</span>' +
+          '<div>' +
+            '<span style="color:var(--green);font-size:11px;letter-spacing:0.1em;">' + formatDateTime(t.starts_at) + '</span>' +
+            '<h3 style="font-family:serif;color:white;margin-top:4px;font-size:22px;">' + escapeHtml(t.name) + '</h3>' +
+            prizeLine +
+          '</div>' +
+          '<a href="/tournaments#' + t.id + '" class="btn-primary" style="padding:10px 22px;font-size:11px;">Register Seat</a>' +
+        '</div>';
+    }
+
+    function secondaryCardHtml(t) {
+      return '' +
+        '<div style="border:1px solid #2a2a2a;background:#0a0a0a;padding:20px 28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px;">' +
+          '<div>' +
+            '<span style="color:var(--muted);font-size:11px;letter-spacing:0.1em;">' + formatDateTime(t.starts_at) + '</span>' +
+            '<h3 style="font-family:serif;color:#fff;margin-top:4px;font-size:18px;font-weight:400;">' + escapeHtml(t.name) + '</h3>' +
+            '<p style="font-size:12px;color:var(--muted);">' + escapeHtml(t.description || 'Free entry.') + '</p>' +
+          '</div>' +
+          '<a href="/tournaments#' + t.id + '" class="btn-secondary" style="padding:8px 18px;font-size:10px;">Join Test</a>' +
+        '</div>';
+    }
+
+    fetch('/api/tournaments?status=upcoming')
+      .then(function(r) { return r.ok ? r.json() : []; })
+      .then(function(list) {
+        if (!list || !list.length) {
+          container.innerHTML = '<p style="font-size:12px;color:var(--muted);">' +
+            'No events scheduled right now — check back soon.</p>';
+          return;
+        }
+        // Highest prize_pool first, so the real main event always leads
+        // regardless of creation order; ties/zero-prize broken by soonest start.
+        list.sort(function(a, b) {
+          var pa = a.prize_pool || 0, pb = b.prize_pool || 0;
+          if (pb !== pa) return pb - pa;
+          return new Date(a.starts_at) - new Date(b.starts_at);
+        });
+        var html = mainCardHtml(list[0]);
+        for (var i = 1; i < list.length; i++) {
+          html += secondaryCardHtml(list[i]);
+        }
+        container.innerHTML = html;
+      })
+      .catch(function() {
+        container.innerHTML = '<p style="font-size:12px;color:var(--muted);">' +
+          'Could not load events — see /tournaments directly.</p>';
+      });
+  })();
+</script>
+
 
 <section id="pricing">
   <div class="reveal">

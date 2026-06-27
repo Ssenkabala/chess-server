@@ -2453,15 +2453,17 @@ function analysePosition() {
     if (!analysisActive) return;
 
     if (msg.type === 'pv_final') {
-      // The real, full multi-move PV, sent exactly once after the search
-      // genuinely finishes. Update the top candidate row's PV in place and
-      // re-render — this extends the SAME live-updating row with the
-      // complete continuation, matching the original design where the
-      // candidate list updates as the engine finds more, rather than
-      // popping up a separate display once the search is done.
-      finalRealPv = msg.pvLine || [];
-      if (finalRealPv.length && infoLines[1]) {
-        infoLines[1].pvLine = finalRealPv;
+      // The real, full multi-move PV, sent exactly once per multiPV line
+      // after the search genuinely finishes. Updates that line's candidate
+      // row in place and re-renders — extending the SAME live-updating
+      // rows with each one's complete continuation, matching the original
+      // design where the candidate list updates as the engine finds more,
+      // rather than popping up a separate display once the search is done.
+      var mpv = msg.multipv || 1;
+      var pv  = msg.pvLine || [];
+      if (mpv === 1) finalRealPv = pv;  // line 1 specifically feeds the cached result / Coach Me
+      if (pv.length && infoLines[mpv]) {
+        infoLines[mpv].pvLine = pv;
         renderCandidateRows(fen);
       }
       return;

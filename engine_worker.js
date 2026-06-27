@@ -172,8 +172,10 @@ function handleInfoLine(text) {
     // real, correct final depth/score (already sent moments earlier by the
     // last per-depth info line) with stale or fabricated values.
     if (text && text.startsWith('pvfinal ')) {
-        var pvLine = text.slice('pvfinal '.length).trim().split(' ').filter(Boolean);
-        self.postMessage({ type: 'pv_final', pvLine: pvLine });
+        var rest  = text.slice('pvfinal '.length).trim().split(' ').filter(Boolean);
+        var mpvIdx = parseInt(rest[0]);
+        var pvLine = rest.slice(1);
+        self.postMessage({ type: 'pv_final', multipv: isNaN(mpvIdx) ? 1 : mpvIdx, pvLine: pvLine });
         return true;
     }
     if (!text || !text.startsWith('info ')) return false;

@@ -2134,6 +2134,26 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
             if(makeMove(b, rm.m, u)){ unmakeMove(b, rm.m, u); bestMove = rm.m; break; }
         }
     }
+
+    // Print the real, full multi-move PV for EVERY multiPV line, exactly
+    // once, now that search is genuinely finished. rootMoves is already
+    // sorted by score descending (the stable_sort at the top of each depth
+    // iteration), so the top multiPVCount entries directly correspond to
+    // each line's actual best move, in the same order the per-depth info
+    // lines reported them. This data only exists here, inside search() —
+    // engine_analyse() only ever receives the single return value, which
+    // structurally can't represent anything beyond line 1. Each line is
+    // tagged with its multipv index so the JS side updates the right
+    // candidate row instead of only ever extending the top one.
+#ifdef __EMSCRIPTEN__
+    if (wasmTimerPreset && bestMove != NULL_MOVE) {
+        int pvCountToPrint = std::min(multiPVCount, (int)rootMoves.size());
+        for (int i = 0; i < pvCountToPrint; i++) {
+            cerr << "pvfinal " << (i+1) << " " << extractPV(b, rootMoves[i].m) << "\n";
+        }
+    }
+#endif
+
     return bestMove;
 }
 
@@ -2585,17 +2605,6 @@ const char* engine_analyse(const char* fen_str,
         std::string ms = moveStr(best);
         strncpy(result, ms.c_str(), 7);
         result[7] = '\0';
-        // Print the real, full multi-move PV exactly ONCE, now that search
-        // is genuinely finished — not on every depth iteration. extractPV's
-        // real cost (a TT walk that does full legal-move generation at each
-        // step) was previously paid once per depth, compounding with search
-        // depth, which is what caused a 21-legal-move endgame position to
-        // stall at depth 4 even with a 30-second budget. Paid once here,
-        // it's negligible — a handful of cheap lookups, not a per-node cost.
-        // Uses a distinct "pvfinal" line (not "info") so it can never be
-        // mistaken for a real depth/score update and overwrite the correct
-        // final values already sent by the last per-depth info line.
-        cerr << "pvfinal " << extractPV(board, best) << "\n";
     }
     return result;
 }

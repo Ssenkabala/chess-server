@@ -1496,11 +1496,28 @@ async function fetchStats() {
       const cEl = document.getElementById('stat-countries-hero');
       if (cEl && countries.size > 0) cEl.textContent = countries.size + '+';
 
-      // Top country — country of the #1 ranked player with games
-      const topPlayer = players.find(p => p.games_played > 0 && p.country);
-      if (topPlayer) {
-        // Count players from that country
-        const countryPlayers = players.filter(p => p.country === topPlayer.country).length;
+      // Top country — the country whose players' SUMMED ELO (across all 4
+      // time controls, same definition as leaderboard.html's eloSum()) is
+      // highest in total, not just whichever single player happens to be
+      // ranked #1 in blitz. A country with many solid players should beat
+      // a country with one standout but a much thinner overall field —
+      // that's the actual point of a "top country" stat representing
+      // community strength, not one person's rating.
+      function eloSum(p) {
+        return (p.elo_bullet||1500) + (p.elo_blitz||1500) +
+               (p.elo_rapid||1500)  + (p.elo_classical||1500);
+      }
+      const countryTotals = {};   // country -> {sum, players}
+      players.forEach(p => {
+        if (!p.country || !(p.games_played > 0)) return;  // only players who've actually played
+        if (!countryTotals[p.country]) countryTotals[p.country] = {sum: 0, players: 0};
+        countryTotals[p.country].sum += eloSum(p);
+        countryTotals[p.country].players += 1;
+      });
+      const ranked = Object.entries(countryTotals).sort((a, b) => b[1].sum - a[1].sum);
+      const topEntry = ranked[0];
+      if (topEntry) {
+        const [topCountry, info] = topEntry;
         const flagEl    = document.getElementById('stat-top-country-flag');
         const labelEl   = document.getElementById('stat-top-country-label');
         const playersEl = document.getElementById('stat-top-country-players');
@@ -1524,9 +1541,9 @@ async function fetchStats() {
           if (!code || code.length !== 2) return '🌍';
           return String.fromCodePoint(...[...code.toUpperCase()].map(c=>c.charCodeAt(0)+127397));
         }
-        if (flagEl)   flagEl.textContent   = FLAG(topPlayer.country);
-        if (labelEl)  labelEl.textContent  = COUNTRY_NAMES[topPlayer.country] || topPlayer.country;
-        if (playersEl) playersEl.textContent = countryPlayers + ' player' + (countryPlayers !== 1 ? 's' : '');
+        if (flagEl)   flagEl.textContent   = FLAG(topCountry);
+        if (labelEl)  labelEl.textContent  = COUNTRY_NAMES[topCountry] || topCountry;
+        if (playersEl) playersEl.textContent = info.players + ' player' + (info.players !== 1 ? 's' : '');
       } else {
         // No ranked player yet — hide the cell so it doesn't show a dangling dash
         const cell = document.getElementById('stat-top-country-hero');
@@ -1537,6 +1554,7 @@ async function fetchStats() {
       if (cell) cell.style.display = 'none';
     });
   } catch(e) { /* silently fail — counters stay at last value */ }
+
 }
 
 // ── Presence ping ────────────────────────────────────────────────────────────

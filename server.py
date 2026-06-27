@@ -1498,7 +1498,8 @@ async def tournament_handle_forfeit(game: dict, loser_id: str, winner_id: str, r
         pg[loser_id] = None
 
     if winner_id in conns:
-        conns[winner_id]["available"] = True
+        if conns[winner_id].get("connected"):
+            conns[winner_id]["available"] = True
         conns[winner_id]["paused"]    = False
     if winner_id in pg:
         pg[winner_id] = None
@@ -1506,7 +1507,7 @@ async def tournament_handle_forfeit(game: dict, loser_id: str, winner_id: str, r
     print(f"[arena] forfeit in {tid}: {loser_id} paused, {winner_id} returned to pool", flush=True)
     # No longer triggers arena_pair() directly — the single poller in
     # arena_pairing_loop picks up this state change on its next tick (every
-    # 1.5s). This was the root cause of an entire class of bug: several
+    # 5s). This was the root cause of an entire class of bug: several
     # different events (forfeits, both players' independent result
     # submissions, reconnects) could all trigger pairing concurrently,
     # racing each other against a half-updated in-memory dict. With exactly

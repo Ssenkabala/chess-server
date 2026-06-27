@@ -2637,7 +2637,7 @@ function getCoaching() {
       think_time: 1.0,
     };
     if (bestMove) { body.best_move = bestMove; body.eval_pawns = evalPawns; }
-    if (pv && pv.length > 1) { body.pv = pv; }
+    if (pv && pv.length > 0) { body.pv = pv; }
 
     fetch(API_BASE + '/coach-free', {
       method: 'POST',

@@ -1369,7 +1369,7 @@ global.Chessground = Nr;
     <div class="eval-label" id="eval-label">—</div>
 
     <!-- Continuation line — hidden, PV shown inline in candidate rows -->
-    <div id="a-pv-line" style="display:none;"></div>
+    <div id="a-pv-line" style="display:none;padding:10px 12px;margin:8px 0;background:rgba(0,255,157,0.06);border-left:2px solid #00ff9d;font-size:13px;color:#ccc;line-height:1.6;"></div>
 
     <!-- Candidate moves -->
     <div class="candidates-wrap" id="candidates-wrap">
@@ -2381,6 +2381,39 @@ function scheduleAutoAnalyse() {
   }, 600);
 }
 
+// Converts a UCI move list (e.g. ["e1g3", "a3a2", "g3a3"]) into SAN
+// (e.g. ["Bg3", "Ka2", "Ra3#"]) by playing each move on a scratch board
+// starting from the given FEN. Stops cleanly at the first illegal move
+// rather than throwing, so a malformed or truncated PV degrades to
+// "however far it got" instead of breaking the whole display.
+function pvLineToSan(fen, pvLine) {
+  var tempG = new Chess(fen);
+  var sanArr = [];
+  for (var i = 0; i < Math.min(pvLine.length, 10); i++) {
+    var m = tempG.move({ from: pvLine[i].slice(0,2), to: pvLine[i].slice(2,4),
+                         promotion: pvLine[i][4] || 'q' });
+    if (!m) break;
+    sanArr.push(m.san);
+  }
+  return sanArr;
+}
+
+// Builds standard move-number notation ("1. e4 e5 2. Nf3...") from a SAN
+// array, given the game object the PV starts FROM (so move numbering and
+// whose turn it is at the start of the line are both correct).
+function sanArrToMoveNotation(sanArr, fromGame) {
+  var mn = fromGame.moveNumber ? fromGame.moveNumber() : 1;
+  var isBlack = fromGame.turn() === 'b';
+  var moveParts = [];
+  if (isBlack && sanArr.length > 0) moveParts.push(mn + '…');
+  for (var j = 0; j < sanArr.length; j++) {
+    var globalMove = j + (isBlack ? 1 : 0);
+    if (globalMove % 2 === 0) moveParts.push((mn + Math.floor(globalMove / 2)) + '.');
+    moveParts.push(sanArr[j]);
+  }
+  return moveParts;
+}
+
 function analysePosition() {
   if (!analysisCg) initAnalysisBoard();
 
@@ -2470,26 +2503,10 @@ function analysePosition() {
         }
 
         // Translate full PV to SAN
-        var tempG = new Chess(fen);
-        var sanArr = [];
-        var pvLine = ln.pvLine || (ln.pvMove ? [ln.pvMove] : []);
-        for (var i = 0; i < Math.min(pvLine.length, 10); i++) {
-          var m = tempG.move({ from: pvLine[i].slice(0,2), to: pvLine[i].slice(2,4),
-                               promotion: pvLine[i][4] || 'q' });
-          if (!m) break;
-          sanArr.push(m.san);
-        }
+        var sanArr = pvLineToSan(fen, ln.pvLine || (ln.pvMove ? [ln.pvMove] : []));
 
         // Build move number notation: "1. e4 e5 2. Nf3..."
-        var mn = analysisGame.moveNumber ? analysisGame.moveNumber() : 1;
-        var isBlack = analysisGame.turn() === 'b';
-        var moveParts = [];
-        if (isBlack && sanArr.length > 0) moveParts.push(mn + '…');
-        for (var j = 0; j < sanArr.length; j++) {
-          var globalMove = j + (isBlack ? 1 : 0);
-          if (globalMove % 2 === 0) moveParts.push((mn + Math.floor(globalMove / 2)) + '.');
-          moveParts.push(sanArr[j]);
-        }
+        var moveParts = sanArrToMoveNotation(sanArr, analysisGame);
 
         var row = document.createElement('div');
         row.className = 'candidate-row';
@@ -2545,8 +2562,25 @@ function analysePosition() {
     // displayed the full continuation right there in the candidates list.
     // finalRealPv comes from the one-time pv_final message — falls back to
     // the cheap single-move PV only if that message somehow never arrived.
-    lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: lastLine.score || 0,
-                            pv: finalRealPv.length ? finalRealPv : (lastLine.pvLine || (finalMove ? [finalMove] : [])) };
+    var realPvUci = finalRealPv.length ? finalRealPv : (lastLine.pvLine || (finalMove ? [finalMove] : []));
+    lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: lastLine.score || 0, pv: realPvUci };
+
+    // Show the actual continuation, not just the single best move — this
+    // is the whole point of fixing the engine to produce a real multi-move
+    // PV in the first place. Without this, the person had to press through
+    // the move-navigation buttons one at a time (or trust Coach Me's prose
+    // description) just to see how a forced sequence actually plays out.
+    var pvDisplayEl = document.getElementById('a-pv-line');
+    if (pvDisplayEl) {
+      var pvSanArr = pvLineToSan(fen, realPvUci);
+      if (pvSanArr.length > 1) {
+        var pvNotation = sanArrToMoveNotation(pvSanArr, analysisGame).join(' ');
+        pvDisplayEl.textContent = 'Continuation: ' + pvNotation;
+        pvDisplayEl.style.display = '';
+      } else {
+        pvDisplayEl.style.display = 'none';
+      }
+    }
 
     setAnalysisStatus('Eval: ' + evalStr + '  ·  Use Coach Me for explanation.');
     document.getElementById('btn-coach').disabled = false;

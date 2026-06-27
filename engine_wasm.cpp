@@ -2090,7 +2090,7 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
                     <<" multipv "<<(pvIdx+1)
                     <<" score cp "<<depthBestScore
                     <<" time "<<elapsed
-                    <<" pv "<<extractPV(b, depthBest)<<"\n";
+                    <<" pv "<<moveStr(depthBest)<<"\n";
             }
         } // end pvIdx loop
 
@@ -2557,6 +2557,17 @@ const char* engine_analyse(const char* fen_str,
         std::string ms = moveStr(best);
         strncpy(result, ms.c_str(), 7);
         result[7] = '\0';
+        // Print the real, full multi-move PV exactly ONCE, now that search
+        // is genuinely finished — not on every depth iteration. extractPV's
+        // real cost (a TT walk that does full legal-move generation at each
+        // step) was previously paid once per depth, compounding with search
+        // depth, which is what caused a 21-legal-move endgame position to
+        // stall at depth 4 even with a 30-second budget. Paid once here,
+        // it's negligible — a handful of cheap lookups, not a per-node cost.
+        // Uses a distinct "pvfinal" line (not "info") so it can never be
+        // mistaken for a real depth/score update and overwrite the correct
+        // final values already sent by the last per-depth info line.
+        cerr << "pvfinal " << extractPV(board, best) << "\n";
     }
     return result;
 }

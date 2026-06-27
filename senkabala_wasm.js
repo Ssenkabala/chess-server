@@ -83,6 +83,18 @@ class SenkabalaEngine {
       return;
     }
 
+    if (msg.type === 'pv_final') {
+      // The real, full multi-move PV, computed exactly once after the
+      // search genuinely finishes — separate from the streaming 'info'
+      // messages so it never overwrites the correct final depth/score
+      // with stale or fabricated values. Forwarded to the same handler;
+      // callers distinguish it by the presence of msg.type === 'pv_final'.
+      if (typeof this._analysisInfoHandler === 'function') {
+        this._analysisInfoHandler(msg);
+      }
+      return;
+    }
+
     if (msg.type === 'result' || msg.type === 'error') {
       const p = this._pending.get(msg.id);
       if (!p) return;

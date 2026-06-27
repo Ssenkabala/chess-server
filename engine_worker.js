@@ -165,6 +165,17 @@ const PG = (function() {
 
 // ── Parse and forward UCI info lines ─────────────────────────────────────────
 function handleInfoLine(text) {
+    // One-time final PV, printed exactly once after a search completes
+    // (engine_wasm.cpp's engine_analyse, after the per-depth loop is done).
+    // Deliberately a SEPARATE line type from 'info' — sharing the same
+    // depth/score fields as the streaming info lines risked overwriting the
+    // real, correct final depth/score (already sent moments earlier by the
+    // last per-depth info line) with stale or fabricated values.
+    if (text && text.startsWith('pvfinal ')) {
+        var pvLine = text.slice('pvfinal '.length).trim().split(' ').filter(Boolean);
+        self.postMessage({ type: 'pv_final', pvLine: pvLine });
+        return true;
+    }
     if (!text || !text.startsWith('info ')) return false;
     var parts = text.split(' ');
     var di  = parts.indexOf('depth'),

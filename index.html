@@ -2201,6 +2201,18 @@ renderBar('pieces-player',   captured[bottomColor], diffOpp > 0 ? diffOpp : 0, b
 // ══════════════════════════════════════════════════════════════
 //  ANALYSIS MODE
 // ══════════════════════════════════════════════════════════════
+// How long the engine is allowed to think per analysis call. The analysis
+// tab has no clock and no opponent, so there's no real reason to cap this
+// tightly the way a live game's bot move needs to be — but a chess engine
+// has no natural "I'm done" signal short of a forced mate/stalemate, so
+// SOME ceiling is unavoidable to keep this from hanging indefinitely on a
+// position it can't crack quickly. 8s was the value confirmed working well
+// before the extractPV-per-depth regression made it necessary to raise
+// this to 30s as a stopgap — now that the actual performance bug is fixed
+// (extractPV runs once after search finishes, not once per depth), 8s is
+// genuinely enough again, not just tolerable.
+var ANALYSIS_BUDGET_MS = 8000;
+
 var analysisGame = new Chess();
 // Move-navigation state — mirrors play_multiplayer.html's fenHistory/viewingMove
 // pattern. analysisFenHistory[0] is always the starting position of whatever
@@ -2401,10 +2413,22 @@ function analysePosition() {
   var analysisActive = true;
   var infoLines      = {};        // multipv index → latest line
   var bestMoveInfo   = null;      // best move from deepest info line
+  var finalRealPv    = [];        // real, full PV from the one-time pv_final message
 
   // ─── Live info handler — fires on every depth completion ──────────────────
   function onInfo(msg) {
     if (!analysisActive) return;
+
+    if (msg.type === 'pv_final') {
+      // The real, full multi-move PV, sent exactly once after the search
+      // genuinely finishes. Stored separately from infoLines (which only
+      // ever holds the cheap single-move PV from the per-depth stream) so
+      // it can be used for the final result/Coach Me without touching the
+      // live depth/score display at all.
+      finalRealPv = msg.pvLine || [];
+      return;
+    }
+
     var depth  = msg.depth;
     var score  = msg.score;       // centipawns (or mate sentinel)
     var pvMove = msg.pv;
@@ -2414,6 +2438,15 @@ function analysePosition() {
 
     if (mpv === 1 && pvMove) bestMoveInfo = pvMove;
     infoLines[mpv] = { depth: depth, score: score, pvLine: pvLine, pvMove: pvMove, isMate: isMate };
+
+    // Live depth feedback in the main status line — with a 30s budget now
+    // in play (up from the old flat 5s), it matters more that progress is
+    // visibly moving, not just a static "analysing..." message the whole
+    // time. Only updates for the primary line (mpv 1) to avoid the status
+    // line flickering between different lines' depths.
+    if (mpv === 1 && depth) {
+      setAnalysisStatus('<span class="spinner"></span> Analysing... (depth ' + depth + ')');
+    }
 
     // Candidate moves panel — one row per multipv line, Lichess style
     var keys = Object.keys(infoLines).map(Number).sort(function(a,b){return a-b;});
@@ -2510,8 +2543,10 @@ function analysePosition() {
     // move of a forced sequence and had to admit it couldn't confirm the
     // actual mating line, even when the engine had already found and
     // displayed the full continuation right there in the candidates list.
+    // finalRealPv comes from the one-time pv_final message — falls back to
+    // the cheap single-move PV only if that message somehow never arrived.
     lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: lastLine.score || 0,
-                            pv: lastLine.pvLine || (finalMove ? [finalMove] : []) };
+                            pv: finalRealPv.length ? finalRealPv : (lastLine.pvLine || (finalMove ? [finalMove] : [])) };
 
     setAnalysisStatus('Eval: ' + evalStr + '  ·  Use Coach Me for explanation.');
     document.getElementById('btn-coach').disabled = false;
@@ -2577,8 +2612,8 @@ function analysePosition() {
   if (wasmEng && _wasmReady()) {
     wasmEng._analysisInfoHandler = onInfo;
     var analyseCall = typeof wasmEng.analyse === 'function'
-      ? wasmEng.analyse(fen, [], 5000, 3)
-      : wasmEng.bestMove(fen, [], 5000);
+      ? wasmEng.analyse(fen, [], ANALYSIS_BUDGET_MS, 3)
+      : wasmEng.bestMove(fen, [], ANALYSIS_BUDGET_MS);
     analyseCall
       .then(function(move) { onDone(move); })
       .catch(function(e) {
@@ -2684,12 +2719,13 @@ function getCoaching() {
     // whole point of asking for an explanation.
     var coachPv = [];
     var coachInfoHandler = function(msg) {
+      if (msg.type === 'pv_final' && msg.pvLine) { coachPv = msg.pvLine; return; }
       if (msg.multipv === 1 && msg.pvLine) coachPv = msg.pvLine;
     };
     wasmEng._analysisInfoHandler = coachInfoHandler;
     var coachCall = typeof wasmEng.analyse === 'function'
-      ? wasmEng.analyse(fen, [], 5000, 1)
-      : wasmEng.bestMove(fen, [], 5000);
+      ? wasmEng.analyse(fen, [], ANALYSIS_BUDGET_MS, 1)
+      : wasmEng.bestMove(fen, [], ANALYSIS_BUDGET_MS);
     coachCall
       .then(function(uciMove) {
         if (!uciMove) { requestCoach(null, null, null); return; }

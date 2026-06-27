@@ -1504,8 +1504,14 @@ async function fetchStats() {
       // that's the actual point of a "top country" stat representing
       // community strength, not one person's rating.
       function eloSum(p) {
+        // Note: there is no elo_classical column in the database — classical
+        // rating is stored under the plain `elo` field (server.py: "elo col
+        // = classical"). Using elo_classical here would silently default
+        // every player's classical contribution to 1500 regardless of their
+        // real rating, which can meaningfully distort which country actually
+        // has the strongest combined field.
         return (p.elo_bullet||1500) + (p.elo_blitz||1500) +
-               (p.elo_rapid||1500)  + (p.elo_classical||1500);
+               (p.elo_rapid||1500)  + (p.elo||1500);
       }
       const countryTotals = {};   // country -> {sum, players}
       players.forEach(p => {

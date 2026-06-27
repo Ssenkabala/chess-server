@@ -468,8 +468,12 @@ function applyFilters() {
   // whichever TC tab had been clicked last instead of recomputing for the
   // actual combined ranking.
   function eloSum(p) {
+    // No elo_classical column exists in the database — classical rating is
+    // stored under the plain `elo` field. Using elo_classical here silently
+    // defaulted every player's classical contribution to 1500 regardless of
+    // their real rating.
     return (p.elo_bullet||1500) + (p.elo_blitz||1500) +
-           (p.elo_rapid||1500)  + (p.elo_classical||1500);
+           (p.elo_rapid||1500)  + (p.elo||1500);
   }
   let allTcPlayers = null;
   if (currentView === 'all-tc') {
@@ -637,7 +641,7 @@ function renderByCountry(players, col) {
 
 function renderAllTc(players, eloSumFn) {
   eloSumFn = eloSumFn || function(p) {
-    return (p.elo_bullet||1500)+(p.elo_blitz||1500)+(p.elo_rapid||1500)+(p.elo_classical||1500);
+    return (p.elo_bullet||1500)+(p.elo_blitz||1500)+(p.elo_rapid||1500)+(p.elo||1500);
   };
   const el = document.getElementById('lb-content');
   if (!players.length) {

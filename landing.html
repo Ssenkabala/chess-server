@@ -1491,6 +1491,7 @@ async function fetchStats() {
     animateCount(document.getElementById('stat-total-players'), d.total_players   || 0);
     // Fetch leaderboard for countries count + top country
     fetch('/api/leaderboard?tc=blitz').then(r=>r.json()).then(players => {
+      console.log('[topcountry-debug] raw players from API:', players);
       // Countries count
       const countries = new Set(players.map(p=>p.country).filter(Boolean));
       const cEl = document.getElementById('stat-countries-hero');
@@ -1520,8 +1521,11 @@ async function fetchStats() {
         countryTotals[p.country].sum += eloSum(p);
         countryTotals[p.country].players += 1;
       });
+      console.log('[topcountry-debug] countryTotals:', JSON.stringify(countryTotals));
       const ranked = Object.entries(countryTotals).sort((a, b) => b[1].sum - a[1].sum);
+      console.log('[topcountry-debug] ranked order:', ranked.map(r => r[0] + '=' + r[1].sum));
       const topEntry = ranked[0];
+      console.log('[topcountry-debug] topEntry chosen:', topEntry);
       if (topEntry) {
         const [topCountry, info] = topEntry;
         const flagEl    = document.getElementById('stat-top-country-flag');

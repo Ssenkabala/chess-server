@@ -1369,7 +1369,7 @@ global.Chessground = Nr;
     <div class="eval-label" id="eval-label">—</div>
 
     <!-- Continuation line — hidden, PV shown inline in candidate rows -->
-    <div id="a-pv-line" style="display:none;padding:10px 12px;margin:8px 0;background:rgba(0,255,157,0.06);border-left:2px solid #00ff9d;font-size:13px;color:#ccc;line-height:1.6;"></div>
+    <div id="a-pv-line" style="display:none;"></div>
 
     <!-- Candidate moves -->
     <div class="candidates-wrap" id="candidates-wrap">
@@ -2454,11 +2454,16 @@ function analysePosition() {
 
     if (msg.type === 'pv_final') {
       // The real, full multi-move PV, sent exactly once after the search
-      // genuinely finishes. Stored separately from infoLines (which only
-      // ever holds the cheap single-move PV from the per-depth stream) so
-      // it can be used for the final result/Coach Me without touching the
-      // live depth/score display at all.
+      // genuinely finishes. Update the top candidate row's PV in place and
+      // re-render — this extends the SAME live-updating row with the
+      // complete continuation, matching the original design where the
+      // candidate list updates as the engine finds more, rather than
+      // popping up a separate display once the search is done.
       finalRealPv = msg.pvLine || [];
+      if (finalRealPv.length && infoLines[1]) {
+        infoLines[1].pvLine = finalRealPv;
+        renderCandidateRows(fen);
+      }
       return;
     }
 
@@ -2482,6 +2487,31 @@ function analysePosition() {
     }
 
     // Candidate moves panel — one row per multipv line, Lichess style
+    renderCandidateRows(fen);
+
+    // Update status bar — just depth, quietly
+    if (Object.keys(infoLines).length > 0) {
+      var topLine = infoLines[1] || {};
+      var absTop = Math.abs(topLine.score || 0);
+      var evTop;
+      if (topLine.isMate || absTop >= 90000) {
+        var mN = absTop >= 900000 ? Math.ceil((999000 - absTop + 1) / 2) : Math.abs(Math.round((topLine.score||0)/100000));
+        evTop = (topLine.score > 0 ? '#' : '-#') + mN;
+      } else {
+        evTop = (topLine.score >= 0 ? '+' : '') + ((topLine.score||0) / 100).toFixed(2);
+      }
+      setAnalysisStatus('Depth ' + depth + '  ·  ' + evTop);
+    }
+  }
+
+  // Renders the candidate-moves panel from the current infoLines state.
+  // Factored out so the final, real PV (from the one-time pv_final
+  // message) can trigger the exact same rendering the live per-depth
+  // updates already use — extending the SAME rows in place with the
+  // complete continuation, rather than showing it in a separate box. This
+  // is what makes "the moves update as the engine finds them" extend
+  // naturally to "...and the final update fills in the real full line."
+  function renderCandidateRows(fen) {
     var keys = Object.keys(infoLines).map(Number).sort(function(a,b){return a-b;});
     if (keys.length > 0 && list && wrap) {
       wrap.classList.add('visible');
@@ -2516,18 +2546,6 @@ function analysePosition() {
           '<span class="candidate-depth">d' + ln.depth + '</span>';
         list.appendChild(row);
       });
-
-      // Update status bar — just depth, quietly
-      var topLine = infoLines[1] || {};
-      var absTop = Math.abs(topLine.score || 0);
-      var evTop;
-      if (topLine.isMate || absTop >= 90000) {
-        var mN = absTop >= 900000 ? Math.ceil((999000 - absTop + 1) / 2) : Math.abs(Math.round((topLine.score||0)/100000));
-        evTop = (topLine.score > 0 ? '#' : '-#') + mN;
-      } else {
-        evTop = (topLine.score >= 0 ? '+' : '') + ((topLine.score||0) / 100).toFixed(2);
-      }
-      setAnalysisStatus('Depth ' + depth + '  ·  ' + evTop);
     }
   }
 
@@ -2564,23 +2582,6 @@ function analysePosition() {
     // the cheap single-move PV only if that message somehow never arrived.
     var realPvUci = finalRealPv.length ? finalRealPv : (lastLine.pvLine || (finalMove ? [finalMove] : []));
     lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: lastLine.score || 0, pv: realPvUci };
-
-    // Show the actual continuation, not just the single best move — this
-    // is the whole point of fixing the engine to produce a real multi-move
-    // PV in the first place. Without this, the person had to press through
-    // the move-navigation buttons one at a time (or trust Coach Me's prose
-    // description) just to see how a forced sequence actually plays out.
-    var pvDisplayEl = document.getElementById('a-pv-line');
-    if (pvDisplayEl) {
-      var pvSanArr = pvLineToSan(fen, realPvUci);
-      if (pvSanArr.length > 1) {
-        var pvNotation = sanArrToMoveNotation(pvSanArr, analysisGame).join(' ');
-        pvDisplayEl.textContent = 'Continuation: ' + pvNotation;
-        pvDisplayEl.style.display = '';
-      } else {
-        pvDisplayEl.style.display = 'none';
-      }
-    }
 
     setAnalysisStatus('Eval: ' + evalStr + '  ·  Use Coach Me for explanation.');
     document.getElementById('btn-coach').disabled = false;

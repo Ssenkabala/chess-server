@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-KSTFB95D');</script>
+<!-- End Google Tag Manager -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>AfriChess | Play vs Engine — 8 Difficulty Levels</title>
@@ -1220,6 +1227,10 @@ global.Chessground = Nr;
   <script src="/openings_detector.js"></script>
 </head>
 <body>
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-KSTFB95D"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
 
   <div class="top-bar">
     <a href="/" class="top-logo">
@@ -1370,6 +1381,15 @@ global.Chessground = Nr;
 
     <!-- Continuation line — hidden, PV shown inline in candidate rows -->
     <div id="a-pv-line" style="display:none;"></div>
+
+    <!-- Promotion picker — analysis board specific IDs to avoid any
+         collision with play_multiplayer.html's equivalent overlay -->
+    <div class="promo-overlay" id="analysis-promo-overlay">
+      <div class="promo-box">
+        <div class="promo-title">Promote pawn to</div>
+        <div class="promo-pieces" id="analysis-promo-pieces"></div>
+      </div>
+    </div>
 
     <!-- Candidate moves -->
     <div class="candidates-wrap" id="candidates-wrap">
@@ -2252,17 +2272,31 @@ function initAnalysisBoard() {
               analysisFenHistory = analysisFenHistory.slice(0, analysisViewIndex + 1);
               analysisSanHistory = analysisSanHistory.slice(0, analysisViewIndex);
             }
-            var move = analysisGame.move({ from: source, to: target, promotion: 'q' });
-            if (move === null) { analysisCg.set({ fen: analysisGame.fen() }); return; }
-            analysisCg.set({ fen: analysisGame.fen(), lastMove: [source, target] });
-            analysisFenHistory.push(analysisGame.fen());
-            analysisSanHistory.push(move.san);
-            analysisViewIndex = -1;
-            renderAnalysisMoveList();
-            lastAnalysisResult = null;  // position changed — invalidate cache
-            resetCoachCard();
-            clearBestMoveHighlight();
-            scheduleAutoAnalyse();
+
+            function completeAnalysisMove(promo) {
+              var move = analysisGame.move({ from: source, to: target, promotion: promo });
+              if (move === null) { analysisCg.set({ fen: analysisGame.fen() }); return; }
+              analysisCg.set({ fen: analysisGame.fen(), lastMove: [source, target] });
+              analysisFenHistory.push(analysisGame.fen());
+              analysisSanHistory.push(move.san);
+              analysisViewIndex = -1;
+              renderAnalysisMoveList();
+              lastAnalysisResult = null;  // position changed — invalidate cache
+              resetCoachCard();
+              clearBestMoveHighlight();
+              scheduleAutoAnalyse();
+            }
+
+            if (isAnalysisPromotion(analysisGame, source, target)) {
+              // Don't queen automatically — ask which piece, same as a
+              // real game. Chessground has already moved the piece
+              // visually by this point; if the move turns out illegal for
+              // any reason, completeAnalysisMove's own move===null check
+              // resets the visual board back to the true game state.
+              showAnalysisPromotion(function(promo) { completeAnalysisMove(promo); });
+            } else {
+              completeAnalysisMove('q');  // irrelevant for non-promotion moves, chess.js ignores it
+            }
           }
         }
       },
@@ -2386,6 +2420,48 @@ function scheduleAutoAnalyse() {
 // starting from the given FEN. Stops cleanly at the first illegal move
 // rather than throwing, so a malformed or truncated PV degrades to
 // "however far it got" instead of breaking the whole display.
+// Detects whether a move is a pawn promotion, given the actual game object
+// (parameterized rather than depending on a global variable name, since
+// this is shared logic ported from play_multiplayer.html's working
+// implementation, adapted to work with analysisGame specifically).
+function isAnalysisPromotion(game, source, target) {
+  const piece = game.get(source);
+  if (!piece || piece.type !== 'p') return false;
+  return (piece.color === 'w' && target[1] === '8') ||
+         (piece.color === 'b' && target[1] === '1');
+}
+
+// Shows the same promotion-choice overlay used in real multiplayer games —
+// previously the analysis board always silently promoted to queen with no
+// choice at all, which is wrong whenever the actual best/intended
+// continuation needs a rook, bishop, or knight underpromotion instead.
+function showAnalysisPromotion(callback) {
+  var symbols = { q:'♛', r:'♜', b:'♝', n:'♞' };
+  var labels  = { q:'Queen', r:'Rook', b:'Bishop', n:'Knight' };
+  var pieces  = ['q','r','b','n'];
+  var container = document.getElementById('analysis-promo-pieces');
+  container.innerHTML = '';
+  pieces.forEach(function(p) {
+    var div = document.createElement('div');
+    div.className = 'promo-piece';
+    div.title = labels[p];
+    var span = document.createElement('span');
+    span.textContent = symbols[p];
+    span.style.cssText = 'font-size:42px;line-height:1;display:block;color:#e8e8e8;text-shadow:0 1px 3px rgba(0,0,0,0.8);';
+    var label = document.createElement('span');
+    label.textContent = labels[p];
+    label.style.cssText = 'font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:#888;display:block;margin-top:2px;';
+    div.appendChild(span);
+    div.appendChild(label);
+    div.onclick = function() {
+      document.getElementById('analysis-promo-overlay').classList.remove('active');
+      callback(p);
+    };
+    container.appendChild(div);
+  });
+  document.getElementById('analysis-promo-overlay').classList.add('active');
+}
+
 function pvLineToSan(fen, pvLine) {
   var tempG = new Chess(fen);
   var sanArr = [];

@@ -1734,10 +1734,21 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
 
     // Null move pruning — skip our turn and see if opponent still can't beat beta
     if (!pvNode && !inCheck && !inNull && depth >= 3 && ply > 0) {
-        // Don't null move in pawn/king-only positions (zugzwang risk)
+        // Don't null move in pawn/king-only positions (zugzwang risk), OR in
+        // any sufficiently sparse position generally. Confirmed via a
+        // controlled experiment: two real forced-mate-in-2 positions (6 and
+        // 7 pieces total) were both missed by the engine with null-move
+        // pruning active, and both found correctly the moment it was
+        // disabled — same time budget, same everything else, only this one
+        // mechanism changed. An 8-piece threshold covers both confirmed
+        // cases with margin and naturally extends to basic king-and-pawn
+        // endgames generally, which is exactly the category of position
+        // where null-move pruning's zugzwang risk is classically documented
+        // as dangerous, not just these two specific examples.
         U64 nonPawns = b.pieces[b.turn][KNIGHT]|b.pieces[b.turn][BISHOP]
                       |b.pieces[b.turn][ROOK]  |b.pieces[b.turn][QUEEN];
-        if (nonPawns) {
+        bool sparsePosition = popcnt(b.occ[2]) <= 8;
+        if (nonPawns && !sparsePosition) {
             // Make null move: just flip the turn
             UndoInfo nu;
             nu.movedPiece=-1; nu.capturedPiece=-1; nu.capturedColor=-1;
@@ -2145,12 +2156,50 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
     // structurally can't represent anything beyond line 1. Each line is
     // tagged with its multipv index so the JS side updates the right
     // candidate row instead of only ever extending the top one.
+    //
+    // Secondary lines (i >= 1) get a small, dedicated extra search before
+    // extracting their PV. During the main search, only the TOP line gets
+    // full depth — secondary lines are scored via the cheap root-move loop
+    // (one negamax call per candidate, mostly to rank them), which leaves
+    // little to no real TT data behind that branch for extractPV to walk
+    // through. Confirmed live: a 3rd-ranked line (Qb6, a genuine forced
+    // mate in 2) returned a PV of just the single move, since nothing
+    // deeper had ever actually been searched along that branch. This
+    // extra pass fixes that directly: search 7 ply specifically down each
+    // secondary move, populating real TT entries, THEN extract — bounded,
+    // small, and run only once the main search is already done, so it
+    // can't eat into the user's actual analysis time budget.
 #ifdef __EMSCRIPTEN__
     if (wasmTimerPreset && bestMove != NULL_MOVE) {
         int pvCountToPrint = std::min(multiPVCount, (int)rootMoves.size());
+        const int SECONDARY_PV_DEPTH = 7;
+        const int SECONDARY_PV_TIME_MS = 300;  // small, fixed budget per secondary line
+        bool savedStopNow     = stopNow;
+        auto savedSearchStart = searchStart;
+        int  savedSearchTimeMs = searchTimeMs;
         for (int i = 0; i < pvCountToPrint; i++) {
+            if (i >= 1) {
+                // Dedicated mini-search down this specific candidate move.
+                // Both stopNow AND the time-tracking state need resetting:
+                // timeUp() checks elapsed time against searchStart/
+                // searchTimeMs regardless of stopNow, and the main search
+                // just consumed its full budget — without a fresh window
+                // here, timeUp() would return true on the very first call
+                // and this whole pass would silently do nothing.
+                UndoInfo u;
+                if (makeMove(b, rootMoves[i].m, u)) {
+                    stopNow      = false;
+                    searchStart  = chrono::steady_clock::now();
+                    searchTimeMs = SECONDARY_PV_TIME_MS;
+                    negamax(b, SECONDARY_PV_DEPTH, -INF, INF, 1);
+                    unmakeMove(b, rootMoves[i].m, u);
+                }
+            }
             cerr << "pvfinal " << (i+1) << " " << extractPV(b, rootMoves[i].m) << "\n";
         }
+        stopNow      = savedStopNow;
+        searchStart  = savedSearchStart;
+        searchTimeMs = savedSearchTimeMs;
     }
 #endif
 

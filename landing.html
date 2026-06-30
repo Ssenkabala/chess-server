@@ -842,7 +842,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     </p>
 
     <!-- Live stats strip -->
-    <div id="live-stats" style="display:flex;gap:0;margin-top:20px;border:1px solid #1e1e1e;border-radius:3px;overflow:hidden;max-width:420px;">
+    <div id="live-stats" style="display:flex;gap:0;margin-top:20px;border:1px solid #1e1e1e;border-radius:3px;overflow:hidden;max-width:525px;">
       <div style="flex:1;padding:12px 16px;border-right:1px solid #1e1e1e;background:#0d0d0d;">
         <div style="font-size:22px;font-family:Georgia,serif;color:var(--green);letter-spacing:0.02em;" id="stat-live-games">—</div>
         <div style="font-size:9px;color:#444;letter-spacing:0.18em;text-transform:uppercase;margin-top:2px;">Games in play</div>
@@ -858,6 +858,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <div style="flex:1;padding:12px 16px;background:#0d0d0d;text-align:center;">
         <div style="font-size:22px;font-family:Georgia,serif;color:var(--green);letter-spacing:0.02em;" id="stat-total-players">—</div>
         <div style="font-size:9px;color:#444;letter-spacing:0.18em;text-transform:uppercase;margin-top:2px;">Registered players</div>
+      </div>
+      <div style="flex:1;padding:12px 16px;border-left:1px solid #1e1e1e;background:#0d0d0d;text-align:center;">
+        <div style="font-size:22px;font-family:Georgia,serif;color:var(--green);letter-spacing:0.02em;" id="stat-countries-row">—</div>
+        <div style="font-size:9px;color:#444;letter-spacing:0.18em;text-transform:uppercase;margin-top:2px;">Countries</div>
       </div>
     </div>
     <div class="elo-badge">
@@ -1506,6 +1510,8 @@ async function fetchStats() {
       const countries = new Set(players.map(p=>p.country).filter(Boolean));
       const cEl = document.getElementById('stat-countries-hero');
       if (cEl && countries.size > 0) cEl.textContent = countries.size + '+';
+      const cRowEl = document.getElementById('stat-countries-row');
+      if (cRowEl && countries.size > 0) animateCount(cRowEl, countries.size);
 
       // Top country — the country of the single highest-ranked player
       // overall (by combined ELO across all 4 time controls), matching

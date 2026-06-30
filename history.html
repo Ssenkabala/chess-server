@@ -1118,16 +1118,19 @@ async function startGameReview() {
   chess.reset();
 
   let analysedSoFar = 0;
+  console.log('[review-debug] entering main loop, replayMoves.length=', replayMoves.length, 'myColorChar=', myColorChar);
   for (let i = 0; i < replayMoves.length; i++) {
     if (reviewCancelled) break;
     const isMyMove = chess.turn() === myColorChar;
     const fenBefore = chess.fen();
     const moveNumber = Math.floor(i / 2) + 1;
+    if (i < 4) console.log('[review-debug] ply', i, 'isMyMove=', isMyMove, 'turn=', chess.turn());
 
     if (isMyMove) {
       analysedSoFar++;
       progressText.textContent = 'Analysing move ' + analysedSoFar + ' / ' + myMoveCount + '…';
       progressBar.style.width = Math.round((analysedSoFar / Math.max(1,myMoveCount)) * 100) + '%';
+      console.log('[review-debug] about to call wasmEng.analyse for ply', i, 'fen=', fenBefore);
 
       // Real engine evaluation of the position BEFORE this move. The
       // analyse() promise itself only resolves with the bare best-move
@@ -1152,7 +1155,10 @@ async function startGameReview() {
         wasmEng._analysisInfoHandler = captureHandler;
         bestMoveUci = await wasmEng.analyse(fenBefore, [], REVIEW_TIME_PER_MOVE_MS, 1);
         wasmEng._analysisInfoHandler = null;
-      } catch (e) { /* engine hiccup — skip flagging this move rather than crash the whole review */ }
+        console.log('[review-debug] analyse resolved for ply', i, 'bestMoveUci=', bestMoveUci, 'bestEval=', bestEval);
+      } catch (e) {
+        console.error('[review-debug] analyse() THREW for ply', i, ':', e);
+      }
 
       const moveObj = chess.move(replayMoves[i], { sloppy: true });
       if (!moveObj) break;

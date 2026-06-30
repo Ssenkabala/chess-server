@@ -480,7 +480,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <button class="replay-btn" onclick="replayGoto(9999)">⟩⟩</button>
       <button class="replay-btn sm" id="btn-autoplay" onclick="toggleAutoPlay()">▶ Auto</button>
       <button class="replay-btn sm" onclick="analyseCurrentPosition()">Analyse</button>
-      <button class="replay-btn sm" id="btn-review-game" onclick="console.log('[review-debug] button clicked'); startGameReview()">Review Game</button>
+      <button class="replay-btn sm" id="btn-review-game" onclick="startGameReview()">Review Game</button>
     </div>
 
     <div class="move-list-wrap" id="move-list-wrap" style="display:none;">
@@ -1066,8 +1066,6 @@ function classifyMoveGap(evalBeforeBestCp, evalAfterPlayedCp) {
 }
 
 async function startGameReview() {
-  console.log('[review-debug] startGameReview() called. reviewRunning=', reviewRunning,
-              'wasmSupported=', window._wasmSupported, 'activeGameId=', activeGameId);
   if (reviewRunning) { reviewCancelled = true; return; }
   if (!window._wasmSupported) {
     alert('Game review needs the analysis engine, which isn\'t available in this browser.');
@@ -1118,19 +1116,22 @@ async function startGameReview() {
   chess.reset();
 
   let analysedSoFar = 0;
-  console.log('[review-debug] entering main loop, replayMoves.length=', replayMoves.length, 'myColorChar=', myColorChar);
   for (let i = 0; i < replayMoves.length; i++) {
     if (reviewCancelled) break;
     const isMyMove = chess.turn() === myColorChar;
     const fenBefore = chess.fen();
     const moveNumber = Math.floor(i / 2) + 1;
-    if (i < 4) console.log('[review-debug] ply', i, 'isMyMove=', isMyMove, 'turn=', chess.turn());
+
+    // Keep the VISIBLE board in sync with what's actually being analyzed —
+    // the loop's own chess object correctly walks through every position
+    // for analysis purposes, but that's invisible on its own unless the
+    // real, on-screen board is also advanced to match.
+    replayGoto(i);
 
     if (isMyMove) {
       analysedSoFar++;
       progressText.textContent = 'Analysing move ' + analysedSoFar + ' / ' + myMoveCount + '…';
       progressBar.style.width = Math.round((analysedSoFar / Math.max(1,myMoveCount)) * 100) + '%';
-      console.log('[review-debug] about to call wasmEng.analyse for ply', i, 'fen=', fenBefore);
 
       // Real engine evaluation of the position BEFORE this move. The
       // analyse() promise itself only resolves with the bare best-move
@@ -1155,9 +1156,8 @@ async function startGameReview() {
         wasmEng._analysisInfoHandler = captureHandler;
         bestMoveUci = await wasmEng.analyse(fenBefore, [], REVIEW_TIME_PER_MOVE_MS, 1);
         wasmEng._analysisInfoHandler = null;
-        console.log('[review-debug] analyse resolved for ply', i, 'bestMoveUci=', bestMoveUci, 'bestEval=', bestEval);
       } catch (e) {
-        console.error('[review-debug] analyse() THREW for ply', i, ':', e);
+        console.error('[review] analyse() failed for ply', i, ':', e);
       }
 
       const moveObj = chess.move(replayMoves[i], { sloppy: true });

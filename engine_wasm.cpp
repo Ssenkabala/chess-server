@@ -1443,6 +1443,19 @@ int  searchTimeMs = 1000;
 atomic<bool> stopNow{false};
 // When true, search() skips time recalculation (set by WASM engine_best_move)
 bool wasmTimerPreset = false;
+
+// Exposes the top root moves (already sorted by score, same order the
+// per-depth multipv info lines report) so the caller can extract PVs using
+// ITS OWN clean board, rather than search()'s internal working board. This
+// matters because search()'s board can end up in a state that produces a
+// corrupted continuation when walked by extractPV — confirmed via direct
+// tracing (a position ending up with a duplicate piece on the board), root
+// cause not yet fully understood, but NOT something a copy of the original,
+// untouched starting position can ever exhibit, since it was never used by
+// any of the search's own recursive calls in the first place.
+const int MAX_EXPOSED_ROOT_MOVES = 5;
+Move exposedRootMoves[MAX_EXPOSED_ROOT_MOVES];
+int  exposedRootMoveCount = 0;
 atomic<bool> pondering{false};  // true while pondering (infinite search until "stop")
 Move ponderMove = NULL_MOVE;    // the expected opponent reply we're pondering on
 int  multiPVCount = 1;          // UCI MultiPV option — how many best moves to report
@@ -1870,7 +1883,7 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
 // position) or if a stored move turns out illegal in the position it's
 // being applied to (a hash collision, rare but possible with a 1M/8M-entry
 // table and no verification beyond the hash match itself).
-string extractPV(Board startBoard, Move firstMove, int maxLen = 8) {
+string extractPV(Board startBoard, Move firstMove, int maxLen = 16) {
     string result = moveStr(firstMove);
     Board cur = startBoard;
     UndoInfo u0;
@@ -2146,60 +2159,19 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
         }
     }
 
-    // Print the real, full multi-move PV for EVERY multiPV line, exactly
-    // once, now that search is genuinely finished. rootMoves is already
-    // sorted by score descending (the stable_sort at the top of each depth
-    // iteration), so the top multiPVCount entries directly correspond to
-    // each line's actual best move, in the same order the per-depth info
-    // lines reported them. This data only exists here, inside search() —
-    // engine_analyse() only ever receives the single return value, which
-    // structurally can't represent anything beyond line 1. Each line is
-    // tagged with its multipv index so the JS side updates the right
-    // candidate row instead of only ever extending the top one.
-    //
-    // Secondary lines (i >= 1) get a small, dedicated extra search before
-    // extracting their PV. During the main search, only the TOP line gets
-    // full depth — secondary lines are scored via the cheap root-move loop
-    // (one negamax call per candidate, mostly to rank them), which leaves
-    // little to no real TT data behind that branch for extractPV to walk
-    // through. Confirmed live: a 3rd-ranked line (Qb6, a genuine forced
-    // mate in 2) returned a PV of just the single move, since nothing
-    // deeper had ever actually been searched along that branch. This
-    // extra pass fixes that directly: search 7 ply specifically down each
-    // secondary move, populating real TT entries, THEN extract — bounded,
-    // small, and run only once the main search is already done, so it
-    // can't eat into the user's actual analysis time budget.
+    // Expose the top root moves so the caller can extract PVs using ITS OWN
+    // clean board, not search()'s internal one. See the comment on
+    // exposedRootMoves above for why — confirmed via direct tracing that
+    // search()'s own board can end up producing a corrupted continuation
+    // when walked, root cause not yet fully understood. This sidesteps
+    // that entirely: a freshly re-parsed board, never touched by any of
+    // search()'s own recursive calls, cannot carry that corruption forward.
 #ifdef __EMSCRIPTEN__
     if (wasmTimerPreset && bestMove != NULL_MOVE) {
-        int pvCountToPrint = std::min(multiPVCount, (int)rootMoves.size());
-        const int SECONDARY_PV_DEPTH = 7;
-        const int SECONDARY_PV_TIME_MS = 300;  // small, fixed budget per secondary line
-        bool savedStopNow     = stopNow;
-        auto savedSearchStart = searchStart;
-        int  savedSearchTimeMs = searchTimeMs;
-        for (int i = 0; i < pvCountToPrint; i++) {
-            if (i >= 1) {
-                // Dedicated mini-search down this specific candidate move.
-                // Both stopNow AND the time-tracking state need resetting:
-                // timeUp() checks elapsed time against searchStart/
-                // searchTimeMs regardless of stopNow, and the main search
-                // just consumed its full budget — without a fresh window
-                // here, timeUp() would return true on the very first call
-                // and this whole pass would silently do nothing.
-                UndoInfo u;
-                if (makeMove(b, rootMoves[i].m, u)) {
-                    stopNow      = false;
-                    searchStart  = chrono::steady_clock::now();
-                    searchTimeMs = SECONDARY_PV_TIME_MS;
-                    negamax(b, SECONDARY_PV_DEPTH, -INF, INF, 1);
-                    unmakeMove(b, rootMoves[i].m, u);
-                }
-            }
-            cerr << "pvfinal " << (i+1) << " " << extractPV(b, rootMoves[i].m) << "\n";
+        exposedRootMoveCount = std::min({multiPVCount, (int)rootMoves.size(), MAX_EXPOSED_ROOT_MOVES});
+        for (int i = 0; i < exposedRootMoveCount; i++) {
+            exposedRootMoves[i] = rootMoves[i].m;
         }
-        stopNow      = savedStopNow;
-        searchStart  = savedSearchStart;
-        searchTimeMs = savedSearchTimeMs;
     }
 #endif
 
@@ -2637,6 +2609,15 @@ const char* engine_analyse(const char* fen_str,
         }
     }
 
+    // Keep a genuinely untouched copy of the position BEFORE search() runs.
+    // search() takes its board by reference and mutates it through its own
+    // recursive calls — even if every makeMove/unmakeMove pair inside it is
+    // symmetric, that symmetry is exactly the thing not yet fully verified
+    // (a real board-state corruption was traced into search()'s recursion,
+    // root cause still open). This copy is never touched by any of that, so
+    // it's the one board PV extraction can actually trust.
+    Board cleanBoardForPV = board;
+
     // Set MultiPV for this search only — restore after so game searches are unaffected
     int savedMultiPV = multiPVCount;
     multiPVCount     = std::max(1, std::min(multipv, 5));
@@ -2649,6 +2630,48 @@ const char* engine_analyse(const char* fen_str,
     wasmTimerPreset = false;
 
     multiPVCount = savedMultiPV;  // restore — never affects game searches
+
+    // Print the real, full multi-move PV for every exposed line, using the
+    // untouched pre-search board copy — not search()'s own board, which may
+    // carry forward state from its own recursive exploration. Each line is
+    // tagged with its multipv index so the JS side updates the right
+    // candidate row instead of only ever extending the top one.
+    //
+    // Secondary lines (i >= 1) get a small, dedicated extra search before
+    // extracting their PV. During the main search, only the TOP line gets
+    // real depth — secondary lines are scored via a single shallow
+    // root-move call (enough to rank them against each other, not enough
+    // to leave a real continuation behind in the TT). Confirmed live: a
+    // genuine forced mate in 2 sitting behind a 2nd/3rd-ranked candidate
+    // produced a PV of just that one move, with the mate itself invisible
+    // even though the engine had correctly identified the right first
+    // move on its own. This extra pass searches a SEPARATE, disposable
+    // board copy — never cleanBoardForPV itself, never search()'s own
+    // board — so it can't interact with the still-open board-corruption
+    // question at all. Small, bounded, run only after the user's real
+    // wait is already over.
+    const int SECONDARY_PV_DEPTH    = 12;  // covers mate-in-6 (12 ply) directly, not just shallower lines
+    const int SECONDARY_PV_TIME_MS  = 600;
+    bool savedStopNow      = stopNow;
+    auto savedSearchStart  = searchStart;
+    int  savedSearchTimeMs = searchTimeMs;
+    for (int i = 0; i < exposedRootMoveCount; i++) {
+        if (i >= 1) {
+            Board pvScratch = cleanBoardForPV;   // fully separate, disposable
+            UndoInfo u;
+            if (makeMove(pvScratch, exposedRootMoves[i], u)) {
+                stopNow      = false;
+                searchStart  = chrono::steady_clock::now();
+                searchTimeMs = SECONDARY_PV_TIME_MS;
+                negamax(pvScratch, SECONDARY_PV_DEPTH, -INF, INF, 1);
+                // no unmake needed — pvScratch is discarded after this block
+            }
+        }
+        cerr << "pvfinal " << (i+1) << " " << extractPV(cleanBoardForPV, exposedRootMoves[i]) << "\n";
+    }
+    stopNow      = savedStopNow;
+    searchStart  = savedSearchStart;
+    searchTimeMs = savedSearchTimeMs;
 
     if (best != NULL_MOVE) {
         std::string ms = moveStr(best);

@@ -480,7 +480,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <button class="replay-btn" onclick="replayGoto(9999)">⟩⟩</button>
       <button class="replay-btn sm" id="btn-autoplay" onclick="toggleAutoPlay()">▶ Auto</button>
       <button class="replay-btn sm" onclick="analyseCurrentPosition()">Analyse</button>
-      <button class="replay-btn sm" id="btn-review-game" onclick="startGameReview()">Review Game</button>
+      <button class="replay-btn sm" id="btn-review-game" onclick="console.log('[review-debug] button clicked'); startGameReview()">Review Game</button>
     </div>
 
     <div class="move-list-wrap" id="move-list-wrap" style="display:none;">
@@ -1066,6 +1066,8 @@ function classifyMoveGap(evalBeforeBestCp, evalAfterPlayedCp) {
 }
 
 async function startGameReview() {
+  console.log('[review-debug] startGameReview() called. reviewRunning=', reviewRunning,
+              'wasmSupported=', window._wasmSupported, 'activeGameId=', activeGameId);
   if (reviewRunning) { reviewCancelled = true; return; }
   if (!window._wasmSupported) {
     alert('Game review needs the analysis engine, which isn\'t available in this browser.');

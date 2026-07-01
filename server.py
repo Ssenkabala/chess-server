@@ -71,7 +71,7 @@ app = FastAPI(lifespan=lifespan)
 # fire constantly during any active tournament and bury the actually useful
 # lines (arena pairing/forfeit events, errors) in noise.
 class EndpointFilter(logging.Filter):
-    ALWAYS_SUPPRESS  = {"/api/ping", "/api/stats", "/api/leaderboard"}
+    ALWAYS_SUPPRESS  = {"/api/ping", "/api/stats", "/api/leaderboard", "/api/notification"}
     # Only suppressed when the response was a clean 200 — a real error on
     # this endpoint (500, 404, etc.) still shows up, since that's exactly
     # the kind of thing worth seeing during a live tournament.
@@ -1819,12 +1819,16 @@ def analyse_move_times(move_times_ms: list) -> dict:
 
 
 def fairplay_log(game: dict, result: str):
-    """Log suspicious move time patterns to Railway logs for manual review."""
+    """Log suspicious move time patterns to Railway logs for manual review,
+    and persist scores to Supabase so they're queryable before prize payouts.
+    Called at every game end — only logs/persists when something is flagged."""
     gid = game.get("id", "?")
+    scores = {}
     for color, pkey, tkey in [("white","white_profile","move_times_w"),("black","black_profile","move_times_b")]:
         times = game.get(tkey, [])
         if not times: continue
         a = analyse_move_times(times)
+        scores[color] = a
         if a["score"] >= 0.6:
             p = game.get(pkey) or {}
             level = "SUSPICIOUS" if a["score"] >= 0.85 else "REVIEW"
@@ -1833,12 +1837,45 @@ def fairplay_log(game: dict, result: str):
                   f"score={a['score']} flags={a['flags']} "
                   f"moves={len(times)} mean={int(sum(times)/len(times))}ms", flush=True)
 
+    # Persist scores to Supabase so they're queryable before prize payouts.
+    # Only write if at least one player has a non-zero score — clean games
+    # don't need a record. Uses a background task so it never blocks game flow.
+    if any(v["score"] > 0 for v in scores.values()):
+        asyncio.create_task(_fairplay_persist(gid, scores))
+
+async def _fairplay_persist(game_id: str, scores: dict):
+    """Write fairplay scores to the games table for pre-payout review.
+    Silent failure — fairplay data is useful but not critical to game flow."""
+    try:
+        patch = {}
+        if "white" in scores:
+            patch["fairplay_score_w"] = scores["white"]["score"]
+            patch["fairplay_flags_w"] = ",".join(scores["white"]["flags"]) or None
+        if "black" in scores:
+            patch["fairplay_score_b"] = scores["black"]["score"]
+            patch["fairplay_flags_b"] = ",".join(scores["black"]["flags"]) or None
+        if not patch:
+            return
+        async with httpx.AsyncClient() as client:
+            await client.patch(
+                f"{SUPABASE_URL}/rest/v1/games",
+                headers={
+                    "apikey": SUPABASE_SERVICE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                    "Content-Type": "application/json",
+                },
+                params={"id": f"eq.{game_id}"},
+                json=patch,
+                timeout=5.0,
+            )
+    except Exception as e:
+        print(f"[fairplay] persist error game={game_id}: {e}", flush=True)
+
+
 
 # ═══════════════════════════════════════════════════════════════
 #  ARENA ENGINE
 # ═══════════════════════════════════════════════════════════════
-
-async def arena_send(ws, msg: dict):
     try:
         await ws.send_json(msg)
     except Exception:
@@ -5172,6 +5209,50 @@ async def health():
         "presence":        _presence_count(),
         "engine_failures": _engine_failures,
     }
+
+@app.get("/api/notification")
+async def get_notification():
+    """
+    Returns the active platform notification, if any.
+    Used by every page to show/hide the dismissible banner.
+
+    Controlled entirely from Supabase — no deployment needed:
+      INSERT INTO notifications (message, type, active)
+      VALUES ('Tournament in 1 hour!', 'info', true);
+    To take down: UPDATE notifications SET active = false WHERE active = true;
+
+    Cached 60s so a burst of page loads doesn't hammer Supabase.
+    type: 'info' (green) | 'warning' (yellow) | 'urgent' (red)
+    """
+    import time
+    cache = get_notification._cache
+    now = time.time()
+    if now - cache.get("ts", 0) < 60 and "data" in cache:
+        return cache["data"]
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/notifications",
+                headers={
+                    "apikey": SUPABASE_SERVICE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                },
+                params={
+                    "select": "id,message,type",
+                    "active": "eq.true",
+                    "order": "created_at.desc",
+                    "limit": "1",
+                },
+                timeout=5.0,
+            )
+            rows = r.json() if r.status_code == 200 else []
+            result = rows[0] if rows else None
+    except Exception:
+        result = None  # fail silently — missing notification isn't critical
+    data = {"notification": result}
+    get_notification._cache = {"ts": now, "data": data}
+    return data
+get_notification._cache = {}
 
 @app.get("/api/stats")
 async def get_live_stats():

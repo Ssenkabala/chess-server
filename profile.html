@@ -276,6 +276,77 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <!-- End Google Tag Manager (noscript) -->
 
+<!-- AfriChess notification banner — paste immediately after <body> tag -->
+<!-- CSS -->
+<style>
+#afri-banner {
+  display: none;
+  position: relative;
+  width: 100%;
+  padding: 11px 48px 11px 16px;
+  font-size: 13px;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  text-align: center;
+  z-index: 9999;
+  box-sizing: border-box;
+}
+#afri-banner.info    { background: #0d2b1e; color: #00ff9d; border-bottom: 1px solid #00ff9d33; }
+#afri-banner.warning { background: #2b2200; color: #ffcc44; border-bottom: 1px solid #ffcc4433; }
+#afri-banner.urgent  { background: #2b0d0d; color: #ff5555; border-bottom: 1px solid #ff555533; }
+#afri-banner-close {
+  position: absolute;
+  right: 14px; top: 50%;
+  transform: translateY(-50%);
+  background: none; border: none;
+  color: inherit; opacity: 0.6;
+  font-size: 18px; cursor: pointer;
+  padding: 4px 6px; line-height: 1;
+}
+#afri-banner-close:hover { opacity: 1; }
+</style>
+<div id="afri-banner" role="alert">
+  <span id="afri-banner-msg"></span>
+  <button id="afri-banner-close" onclick="afriBannerDismiss()" aria-label="Dismiss">×</button>
+</div>
+<script>
+(function() {
+  var POLL_INTERVAL = 5 * 60 * 1000; // re-check every 5 minutes
+
+  function afriBannerDismiss() {
+    var el = document.getElementById('afri-banner');
+    if (!el) return;
+    var nid = el.dataset.nid;
+    if (nid) localStorage.setItem('afri_banner_dismissed_' + nid, '1');
+    el.style.display = 'none';
+  }
+  window.afriBannerDismiss = afriBannerDismiss;
+
+  function afriBannerShow(n) {
+    if (!n || !n.message) return;
+    if (localStorage.getItem('afri_banner_dismissed_' + n.id)) return;
+    var el  = document.getElementById('afri-banner');
+    var msg = document.getElementById('afri-banner-msg');
+    if (!el || !msg) return;
+    el.className = n.type || 'info';
+    el.dataset.nid = n.id;
+    msg.textContent = n.message;
+    el.style.display = 'block';
+  }
+
+  function afriBannerPoll() {
+    fetch('/api/notification')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { if (d && d.notification) afriBannerShow(d.notification); })
+      .catch(function() {});  // fail silently
+  }
+
+  afriBannerPoll();
+  setInterval(afriBannerPoll, POLL_INTERVAL);
+})();
+</script>
+
 <div class="top-bar">
   <a href="/" class="top-logo">
     <img src="/logo.png" height="28" alt="AfriChess">
@@ -283,13 +354,13 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   </a>
   <div class="nav-links" id="nav-links-desktop">
     <a href="/">Home</a>
+    <a href="/profile" style="color:var(--green)">Profile</a>
     <a href="/play">vs Bot</a>
     <a href="/multiplayer">Live</a>
     <a href="/tournaments">Tournaments</a>
     <a href="/leaderboard">Leaderboard</a>
     <a href="/history">History</a>
     <a href="/watch">Watch</a>
-    <a href="/profile" style="color:var(--green)">Profile</a>
     <a id="nav-signin" onclick="openAuth()" style="display:none;cursor:pointer;">Sign In</a>
     <a id="nav-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
   </div>
@@ -300,8 +371,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   </button>
 </div>
 <div id="mobile-drawer" style="position:fixed;top:0;right:-260px;width:240px;height:100vh;background:#0d0d0d;border-left:1px solid #1a1a1a;display:flex;flex-direction:column;padding:72px 24px 32px;gap:20px;z-index:500;transition:right 0.28s ease;">
-  <a href="/profile" style="color:var(--green);text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Profile</a>
   <a href="/" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Home</a>
+  <a href="/profile" style="color:var(--green);text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Profile</a>
   <a href="/play" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">vs Bot</a>
   <a href="/multiplayer" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Live</a>
   <a href="/tournaments" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:8px 0;border-bottom:1px solid #1a1a1a;">Tournaments</a>
@@ -493,22 +564,34 @@ function renderProfile(d) {
         <div style="display:flex;gap:14px;margin:8px 0;flex-wrap:wrap;">
           <div>
             <div style="font-size:10px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Bullet</div>
-            <div class="profile-elo" style="font-size:20px;">${d.elo_bullet || 1500}</div>
+            <div style="display:flex;align-items:baseline;">
+              <div class="profile-elo" style="font-size:20px;">${d.elo_bullet || 1500}</div>
+              ${progressBadge(weekProgress(d.tc_histories && d.tc_histories.bullet))}
+            </div>
           </div>
           <div style="border-left:1px solid var(--border);margin:0 2px;"></div>
           <div>
             <div style="font-size:10px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Blitz</div>
-            <div class="profile-elo" style="font-size:20px;">${d.elo_blitz || 1500}</div>
+            <div style="display:flex;align-items:baseline;">
+              <div class="profile-elo" style="font-size:20px;">${d.elo_blitz || 1500}</div>
+              ${progressBadge(weekProgress(d.tc_histories && d.tc_histories.blitz))}
+            </div>
           </div>
           <div style="border-left:1px solid var(--border);margin:0 2px;"></div>
           <div>
             <div style="font-size:10px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Rapid</div>
-            <div class="profile-elo" style="font-size:20px;">${d.elo_rapid || 1500}</div>
+            <div style="display:flex;align-items:baseline;">
+              <div class="profile-elo" style="font-size:20px;">${d.elo_rapid || 1500}</div>
+              ${progressBadge(weekProgress(d.tc_histories && d.tc_histories.rapid))}
+            </div>
           </div>
           <div style="border-left:1px solid var(--border);margin:0 2px;"></div>
           <div>
             <div style="font-size:10px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:2px;">Classical</div>
-            <div class="profile-elo" style="font-size:20px;">${d.elo_classical || 1500}</div>
+            <div style="display:flex;align-items:baseline;">
+              <div class="profile-elo" style="font-size:20px;">${d.elo_classical || 1500}</div>
+              ${progressBadge(weekProgress(d.tc_histories && d.tc_histories.classical))}
+            </div>
           </div>
         </div>
         ${since ? `<div class="profile-since">Member since ${since}</div>` : ''}
@@ -690,6 +773,33 @@ function renderProfile(d) {
 
   // Draw multi-line ELO chart (all time controls on one graph)
   drawMultiEloChart(d.tc_histories || {});
+}
+
+// Compute the rating change over the last 7 days for one TC.
+// Uses the tc_histories data already returned by the API — no extra call.
+// Follows Lichess's progresses pattern: find the earliest data point
+// within the 7-day window, compare its ELO to the most recent point.
+// Returns null if there are fewer than 2 points in the window.
+function weekProgress(historyPoints) {
+  if (!historyPoints || historyPoints.length < 2) return null;
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const cutoff = sevenDaysAgo.toISOString().slice(0, 10);
+  // Filter to only points within the last 7 days
+  const inWindow = historyPoints.filter(p => p.date >= cutoff);
+  if (inWindow.length < 2) return null;
+  const oldest = inWindow[0].elo;
+  const newest = inWindow[inWindow.length - 1].elo;
+  return newest - oldest;
+}
+
+// Format a progress delta as "+12 ↑" / "−8 ↓" / "0" with appropriate color.
+function progressBadge(delta) {
+  if (delta === null || delta === 0) return '';
+  const sign  = delta > 0 ? '+' : '';
+  const arrow = delta > 0 ? '↑' : '↓';
+  const color = delta > 0 ? '#00ff9d' : '#ff5555';
+  return `<span style="font-size:11px;color:${color};font-weight:600;margin-left:5px;">${sign}${delta} ${arrow}</span>`;
 }
 
 function drawMultiEloChart(tcHistories) {

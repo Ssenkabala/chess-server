@@ -3922,6 +3922,10 @@ def serve_openings():
 def serve_openings_detector():
     return FileResponse("openings_detector.js", media_type="application/javascript")
 
+@app.get("/analysis_accuracy.js")
+def serve_analysis_accuracy():
+    return FileResponse("analysis_accuracy.js", media_type="application/javascript")
+
 @app.get("/aac_strings.js")
 def serve_aac_strings():
     return FileResponse("aac_strings.js", media_type="application/javascript")

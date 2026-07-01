@@ -1760,7 +1760,7 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
         // as dangerous, not just these two specific examples.
         U64 nonPawns = b.pieces[b.turn][KNIGHT]|b.pieces[b.turn][BISHOP]
                       |b.pieces[b.turn][ROOK]  |b.pieces[b.turn][QUEEN];
-        bool sparsePosition = popcnt(b.occ[2]) <= 8;
+        bool sparsePosition = popcnt(b.occ[2]) <= 12;
         if (nonPawns && !sparsePosition) {
             // Make null move: just flip the turn
             UndoInfo nu;

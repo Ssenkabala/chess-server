@@ -1371,7 +1371,19 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <button onclick="analysisStepForward()" title="Next move" style="padding:6px 10px;">▶</button>
       <button onclick="analysisJumpToEnd()" title="Latest" style="padding:6px 10px;">⏭</button>
     </div>
-    <div id="analysis-move-list" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-bottom:10px;font-size:13px;"></div>
+    <div id="analysis-move-list" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-bottom:6px;font-size:13px;"></div>
+
+    <!-- Move annotation panel — shown when navigating to an annotated move -->
+    <div id="analysis-annotation-panel" style="display:none;margin:0 0 8px;padding:10px 14px;background:#0e0e0e;border-left:3px solid #555;border-radius:2px;font-size:12px;line-height:1.6;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+        <span id="ann-symbol" style="font-size:18px;font-weight:bold;"></span>
+        <span id="ann-label" style="letter-spacing:0.06em;text-transform:uppercase;font-size:10.5px;color:#aaa;"></span>
+        <span id="ann-accuracy" style="margin-left:auto;font-family:'Courier New',monospace;color:#00ff9d;font-size:13px;"></span>
+      </div>
+      <div id="ann-played" style="color:#ccc;"></div>
+      <div id="ann-best" style="color:#00ff9d;margin-top:2px;"></div>
+      <div id="ann-variation" style="color:#888;margin-top:2px;font-family:'Courier New',monospace;font-size:11px;"></div>
+    </div>
 
     <!-- Eval bar -->
     <div class="eval-bar-wrap">
@@ -1401,6 +1413,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <div class="controls">
       <button onclick="analysePosition()">Analyse</button>
       <button onclick="getCoaching()" id="btn-coach">Coach Me</button>
+      <button onclick="startAnalysisReview()" id="btn-review" style="display:none;">Review</button>
       <button onclick="resetAnalysis()">Reset</button>
       <button onclick="if(analysisCg) analysisCg.toggleOrientation()">Flip</button>
     </div>
@@ -2245,6 +2258,7 @@ var analysisViewIndex  = -1;
 var analysisCg = null;
 // Cache the most recent analysis result so Coach Me can reuse it without re-running the engine
 var lastAnalysisResult = null;  // { fen, bestMove, evalCp }  — set by analysePosition on completion
+var lastCandidateLines = null;  // { fen, lines: [{pvLine, score, isMate}, ...] } — last completed search's full candidate set, used to detect "the move just played was already a known continuation" so analysis can pick up instantly instead of re-searching from scratch
 var _autoAnalyseTimer = null;
 
 function setAnalysisStatus(msg) {
@@ -2274,6 +2288,7 @@ function initAnalysisBoard() {
             }
 
             function completeAnalysisMove(promo) {
+              var fenBeforeMove = analysisGame.fen();
               var move = analysisGame.move({ from: source, to: target, promotion: promo });
               if (move === null) { analysisCg.set({ fen: analysisGame.fen() }); return; }
               analysisCg.set({ fen: analysisGame.fen(), lastMove: [source, target] });
@@ -2281,9 +2296,68 @@ function initAnalysisBoard() {
               analysisSanHistory.push(move.san);
               analysisViewIndex = -1;
               renderAnalysisMoveList();
-              lastAnalysisResult = null;  // position changed — invalidate cache
               resetCoachCard();
               clearBestMoveHighlight();
+
+              // Did this move match a continuation the engine already found
+              // and showed? If so, pick up where it left off instead of
+              // re-searching the same ground from scratch — this is what
+              // "the engine keeps re-analysing moves it already suggested"
+              // was actually about. A move qualifies if it's the FIRST move
+              // of any of the (up to 3) candidate lines from the search run
+              // on the position we just moved FROM.
+              var followedLine = null;
+              if (lastCandidateLines && lastCandidateLines.fen === fenBeforeMove) {
+                var playedUci = source + target + (move.promotion || '');
+                for (var li = 0; li < lastCandidateLines.lines.length; li++) {
+                  var ln = lastCandidateLines.lines[li];
+                  var firstMoveUci = ln.pvLine[0];
+                  // Compare ignoring a trailing promotion-piece letter
+                  // mismatch (e.g. engine said e7e8q, move object reports
+                  // 'q' separately) — both forms reduce to the same 4-5
+                  // char square pair plus optional promo letter.
+                  if (firstMoveUci && firstMoveUci.slice(0,4) === (source+target) &&
+                      (firstMoveUci.length <= 4 || firstMoveUci[4] === (move.promotion || firstMoveUci[4]))) {
+                    followedLine = ln;
+                    break;
+                  }
+                }
+              }
+
+              if (followedLine && followedLine.pvLine.length > 1) {
+                // Shift the matched line forward by one move — what was
+                // "moves 2..N" of the old PV is now "moves 1..N-1" of the
+                // new position's known continuation. Show it immediately,
+                // no waiting on a fresh search for the headline result.
+                var remainingPv = followedLine.pvLine.slice(1);
+                var newFen = analysisGame.fen();
+                var sanArr = pvLineToSan(newFen, remainingPv);
+                if (sanArr.length > 0) {
+                  var evalStr2;
+                  var sc = -followedLine.score;  // flips from the mover's perspective to the new side-to-move's
+                  if (followedLine.isMate || Math.abs(sc) >= 90000) {
+                    var absSc = Math.abs(sc);
+                    var mN = absSc >= 900000 ? Math.ceil((999000 - absSc + 1) / 2) : Math.abs(Math.round(sc/100000));
+                    evalStr2 = (sc > 0 ? '#' : '-#') + mN;
+                  } else {
+                    evalStr2 = (sc >= 0 ? '+' : '') + (sc/100).toFixed(2);
+                  }
+                  setAnalysisStatus('Eval: ' + evalStr2 + '  ·  Continuing known line — refining…');
+                  lastAnalysisResult = { fen: newFen, bestMove: remainingPv[0], evalCp: sc, pv: remainingPv };
+                  document.getElementById('btn-coach').disabled = false;
+                }
+              } else {
+                lastAnalysisResult = null;  // position changed, no known continuation — invalidate cache
+              }
+              lastCandidateLines = null;  // always cleared — the snapshot was only valid for the position we just left
+
+              // Always still triggers a real search — the cached line gives
+              // an instant, good-enough headline result so there's no
+              // visible gap, but the fresh search at the new position will
+              // genuinely go deeper than the old line's relative depth
+              // allowed, and is what actually keeps the result trustworthy
+              // rather than leaving a shallower cached guess in place
+              // indefinitely.
               scheduleAutoAnalyse();
             }
 
@@ -2331,6 +2405,16 @@ function analysisGoToIndex(idx) {
   lastAnalysisResult = null;
   resetCoachCard();
   clearBestMoveHighlight();
+
+  // Show annotation panel for the move we just navigated TO (ply = idx - 1,
+  // since analysisFenHistory[idx] is the position AFTER move at index idx-1)
+  var annPlyIdx = idx - 1;
+  if (annPlyIdx >= 0 && analysisAnnotations[annPlyIdx]) {
+    showAnnotationPanel(annPlyIdx);
+  } else {
+    clearAnnotationPanel();
+  }
+
   scheduleAutoAnalyse();
 }
 
@@ -2357,15 +2441,25 @@ function lastMoveSquaresFromSan(idx) {
 function renderAnalysisMoveList() {
   var el = document.getElementById('analysis-move-list');
   if (!el) return;
+
+  // Show/hide Review button based on whether there's a game to review
+  var reviewBtn = document.getElementById('btn-review');
+  if (reviewBtn) reviewBtn.style.display = analysisSanHistory.length >= 2 ? '' : 'none';
+
   if (analysisSanHistory.length === 0) { el.innerHTML = ''; return; }
   var html = '';
   for (var i = 0; i < analysisSanHistory.length; i++) {
     var moveNum = Math.floor(i / 2) + 1;
     var prefix  = (i % 2 === 0) ? (moveNum + '. ') : '';
     var isActive = (analysisViewIndex === -1 ? analysisFenHistory.length - 1 : analysisViewIndex) === i + 1;
+    var ann = analysisAnnotations[i];
+    var badge = '';
+    if (ann && ann.judgment) {
+      badge = '<sup style="color:' + ann.judgment.color + ';font-size:10px;font-weight:bold;margin-left:1px;">' + ann.judgment.symbol + '</sup>';
+    }
     html += '<span onclick="analysisGoToIndex(' + (i + 1) + ')" style="cursor:pointer;padding:2px 6px;border-radius:4px;' +
             (isActive ? 'background:rgba(0,255,157,0.25);color:#00ff9d;' : 'color:#ccc;') + '">' +
-            prefix + analysisSanHistory[i] + '</span>';
+            prefix + analysisSanHistory[i] + badge + '</span>';
   }
   el.innerHTML = html;
   el.scrollLeft = el.scrollWidth;
@@ -2385,7 +2479,7 @@ function loadFen() {
     resetCoachCard();
     updateEvalBar(0);
     analysisFenHistory = [analysisGame.fen()];
-    analysisSanHistory = [];
+    analysisSanHistory = []; analysisAnnotations = {}; clearAnnotationPanel();
     analysisViewIndex  = -1;
     renderAnalysisMoveList();
     return;
@@ -2402,7 +2496,7 @@ function loadFen() {
   updateEvalBar(0);
   clearBestMoveHighlight();
   analysisFenHistory = [analysisGame.fen()];
-  analysisSanHistory = [];
+  analysisSanHistory = []; analysisAnnotations = {}; clearAnnotationPanel();
   analysisViewIndex  = -1;
   renderAnalysisMoveList();
 }
@@ -2424,6 +2518,237 @@ function scheduleAutoAnalyse() {
 // (parameterized rather than depending on a global variable name, since
 // this is shared logic ported from play_multiplayer.html's working
 // implementation, adapted to work with analysisGame specifically).
+// ═══════════════════════════════════════════════════════════════════════
+// ACCURACY & MOVE CLASSIFICATION — based on Lichess's open-source
+// AccuracyPercent.scala and AccuracyCP.scala. Translated to JS.
+// ═══════════════════════════════════════════════════════════════════════
+
+function cpToWinPercent(cp) {
+  var c = Math.max(-1000, Math.min(1000, cp));
+  return 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * c)) - 1);
+}
+
+// Lichess's exact fitted exponential curve for move accuracy.
+// beforeWp/afterWp are win% from the MOVER'S perspective.
+function accuracyFromWinPercents(beforeWp, afterWp) {
+  if (afterWp >= beforeWp) return 100;
+  var diff = beforeWp - afterWp;
+  var raw = 103.1668100711649 * Math.exp(-0.04354415386753951 * diff) - 3.166924740191411;
+  return Math.max(0, Math.min(100, raw + 1));  // +1: uncertainty bonus
+}
+
+function accuracyFromCp(cpBefore, cpAfter) {
+  return accuracyFromWinPercents(cpToWinPercent(cpBefore), cpToWinPercent(cpAfter));
+}
+
+// Lichess thresholds: inaccuracy ≥50cp, mistake ≥120cp, blunder ≥300cp.
+function classifyMoveByDrop(cpDrop, isMate, playedBest) {
+  if (isMate && !playedBest) return { tag: 'missed-mate', label: 'Missed mate',  symbol: '??', color: '#ff5555', severity: 4 };
+  if (cpDrop >= 300)         return { tag: 'blunder',     label: 'Blunder',      symbol: '??', color: '#ff6644', severity: 3 };
+  if (cpDrop >= 120)         return { tag: 'mistake',     label: 'Mistake',      symbol: '?',  color: '#ffaa33', severity: 2 };
+  if (cpDrop >= 50)          return { tag: 'inaccuracy',  label: 'Inaccuracy',   symbol: '!?', color: '#aaaaaa', severity: 1 };
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ANALYSIS BOARD GAME REVIEW
+// The Lichess model: user navigates their game on the analysis board,
+// engine suggests better moves inline. Annotations sit under the move
+// list; navigating to any move shows what the engine preferred there.
+// ═══════════════════════════════════════════════════════════════════════
+
+var analysisAnnotations = {};  // ply index → annotation data
+var reviewRunning = false;
+var reviewCancelled = false;
+var REVIEW_MS_PER_MOVE = 2500;
+
+function startAnalysisReview() {
+  if (analysisSanHistory.length < 2) return;
+  if (reviewRunning) { reviewCancelled = true; return; }
+
+  var wasmEng = _ensureWasmEngine ? _ensureWasmEngine() : null;
+  if (!wasmEng) {
+    alert('Engine not available — try reloading the page.');
+    return;
+  }
+
+  // Preserve exactly where the user was before review started
+  var savedViewIndex = analysisViewIndex;
+  var savedFen       = analysisFenHistory[analysisViewIndex === -1 ? analysisFenHistory.length - 1 : analysisViewIndex];
+
+  reviewRunning     = true;
+  reviewCancelled   = false;
+  analysisAnnotations = {};
+
+  var btn = document.getElementById('btn-review');
+  if (btn) btn.textContent = '⏹ Stop';
+
+  // Run analysis asynchronously over all positions in the history
+  (function runReview(plyIdx) {
+    if (reviewCancelled || plyIdx >= analysisSanHistory.length) {
+      // Done — restore position, update display
+      reviewRunning   = false;
+      reviewCancelled = false;
+      if (btn) btn.textContent = 'Review';
+
+      // Restore the position the user was at before review started
+      var restoreIdx = savedViewIndex === -1 ? analysisFenHistory.length - 1 : savedViewIndex;
+      analysisGoToIndex(restoreIdx);
+      renderAnalysisMoveList();
+      return;
+    }
+
+    // The FEN the user was at BEFORE making move plyIdx
+    var fenBefore   = analysisFenHistory[plyIdx];
+    var playedSan   = analysisSanHistory[plyIdx];
+    // Reconstruct played move as UCI
+    var tmpGame = new Chess(fenBefore);
+    var playedMoveObj = tmpGame.move(playedSan, { sloppy: true });
+    var playedUci = playedMoveObj ? (playedMoveObj.from + playedMoveObj.to + (playedMoveObj.promotion || '')) : null;
+
+    var bestEval = null;
+    var bestFinalPv = null;
+    var captureHandler = function(msg) {
+      if (msg.type === 'pv_final') {
+        if ((msg.multipv || 1) === 1) bestFinalPv = msg.pvLine || null;
+        return;
+      }
+      if ((msg.multipv || 1) === 1) {
+        bestEval = { score: msg.score, isMate: !!msg.isMate, pvMove: msg.pvLine && msg.pvLine[0] };
+      }
+    };
+
+    wasmEng._analysisInfoHandler = captureHandler;
+    wasmEng.analyse(fenBefore, [], REVIEW_MS_PER_MOVE, 1).then(function(bestUci) {
+      wasmEng._analysisInfoHandler = null;
+
+      if (bestEval && bestUci && playedUci) {
+        var bestCp     = bestEval.isMate ? (bestEval.score > 0 ? 9000 : -9000) : (bestEval.score || 0);
+        var playedBest = bestUci.slice(0, 4) === playedUci.slice(0, 4);
+
+        // To get the eval AFTER the played move, flip the score of the
+        // position after it — we need a second engine call for accuracy,
+        // but as a practical approximation for non-best moves, we can use
+        // the difference between best and played evaluations from the
+        // perspective of the side to move, where played≠best means
+        // the engine's score for the best move is what we had BEFORE,
+        // and we estimate the played move's score from the next position.
+        // For now: use cpDrop = bestCp - 0 for non-best moves as a
+        // conservative floor (we know played ≠ best, so there IS a drop).
+        // The second-call approach is built in the full version below.
+        var fenAfterPlayed = analysisFenHistory[plyIdx + 1] || null;
+        var cpAfter = null;
+
+        if (playedBest) {
+          // Played the best move — accuracy is high, no annotation needed
+          cpAfter = bestCp;
+        }
+
+        var annotation = {
+          ply:          plyIdx,
+          san:          playedSan,
+          played:       playedUci,
+          best:         bestUci,
+          bestSan:      pvLineToSan(fenBefore, [bestUci])[0] || null,
+          variation:    bestFinalPv || [bestUci],
+          variationSan: pvLineToSan(fenBefore, bestFinalPv || [bestUci]),
+          isMate:       bestEval.isMate && bestEval.score > 0,
+          playedBest:   playedBest,
+          cpBefore:     bestCp,
+          cpAfter:      cpAfter,
+          fenBefore:    fenBefore,
+          fenAfterPlayed: fenAfterPlayed,
+          pending:      !playedBest && cpAfter === null  // needs second eval pass
+        };
+
+        if (!playedBest) {
+          // Need to evaluate the position after the move played to get
+          // an accurate cp drop. Run a second, shorter engine call.
+          if (fenAfterPlayed) {
+            var captureHandler2 = function(msg) {
+              if ((msg.multipv || 1) === 1 && msg.type !== 'pv_final') {
+                // Score is from the OPPONENT'S perspective — negate to get
+                // score from the original mover's perspective
+                annotation.cpAfter = -(msg.score || 0);
+              }
+            };
+            wasmEng._analysisInfoHandler = captureHandler2;
+            wasmEng.analyse(fenAfterPlayed, [], Math.min(REVIEW_MS_PER_MOVE, 1500), 1).then(function() {
+              wasmEng._analysisInfoHandler = null;
+              annotation.pending = false;
+              var cpDrop = annotation.cpBefore - (annotation.cpAfter || 0);
+              annotation.judgment = classifyMoveByDrop(cpDrop, annotation.isMate, playedBest);
+              annotation.accuracy = annotation.isMate ? null : Math.round(accuracyFromCp(annotation.cpBefore, annotation.cpAfter || 0));
+              if (annotation.judgment) {
+                analysisAnnotations[plyIdx] = annotation;
+                renderAnalysisMoveList();
+                showAnnotationPanel(plyIdx);
+              }
+              runReview(plyIdx + 1);
+            }).catch(function() {
+              runReview(plyIdx + 1);
+            });
+            return;  // wait for second call
+          }
+        }
+
+        // Played the best move — no annotation needed, just move on
+        runReview(plyIdx + 1);
+      } else {
+        runReview(plyIdx + 1);
+      }
+    }).catch(function() {
+      runReview(plyIdx + 1);
+    });
+  })(0);
+}
+
+function showAnnotationPanel(plyIdx) {
+  var ann = analysisAnnotations[plyIdx];
+  var panel = document.getElementById('analysis-annotation-panel');
+  if (!panel) return;
+
+  // Only show panel if currently viewing this exact ply
+  var currentIdx = analysisViewIndex === -1 ? analysisFenHistory.length - 1 : analysisViewIndex;
+  if (currentIdx !== plyIdx + 1 && !ann) { panel.style.display = 'none'; return; }
+  if (!ann) { panel.style.display = 'none'; return; }
+
+  var j = ann.judgment;
+  if (!j) { panel.style.display = 'none'; return; }
+
+  panel.style.borderLeftColor = j.color;
+  document.getElementById('ann-symbol').textContent  = j.symbol;
+  document.getElementById('ann-symbol').style.color  = j.color;
+  document.getElementById('ann-label').textContent   = j.label;
+  document.getElementById('ann-accuracy').textContent = ann.accuracy != null ? ann.accuracy + '% accuracy' : '';
+
+  document.getElementById('ann-played').textContent = 'You played: ' + ann.san;
+
+  var bestEl = document.getElementById('ann-best');
+  if (ann.bestSan && !ann.playedBest) {
+    bestEl.textContent = 'Better: ' + ann.bestSan;
+    bestEl.style.display = '';
+  } else {
+    bestEl.style.display = 'none';
+  }
+
+  var varEl = document.getElementById('ann-variation');
+  if (ann.variationSan && ann.variationSan.length > 1) {
+    var fromGame = new Chess(ann.fenBefore);
+    varEl.textContent = sanArrToMoveNotation(ann.variationSan, fromGame).join(' ');
+    varEl.style.display = '';
+  } else {
+    varEl.style.display = 'none';
+  }
+
+  panel.style.display = '';
+}
+
+function clearAnnotationPanel() {
+  var panel = document.getElementById('analysis-annotation-panel');
+  if (panel) panel.style.display = 'none';
+}
+
 function isAnalysisPromotion(game, source, target) {
   const piece = game.get(source);
   if (!piece || piece.type !== 'p') return false;
@@ -2660,6 +2985,19 @@ function analysePosition() {
     // the cheap single-move PV only if that message somehow never arrived.
     var realPvUci = finalRealPv.length ? finalRealPv : (lastLine.pvLine || (finalMove ? [finalMove] : []));
     lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: lastLine.score || 0, pv: realPvUci };
+
+    // Snapshot every candidate line's real PV (not just the top one — each
+    // line index gets its own real continuation from the pv_final handler)
+    // so a follow-up move can be checked against ALL of them, not just the
+    // engine's single top choice.
+    var snapshotLines = [];
+    Object.keys(infoLines).forEach(function(k) {
+      var ln = infoLines[k];
+      if (ln && ln.pvLine && ln.pvLine.length) {
+        snapshotLines.push({ pvLine: ln.pvLine, score: ln.score, isMate: ln.isMate });
+      }
+    });
+    lastCandidateLines = { fen: fen, lines: snapshotLines };
 
     setAnalysisStatus('Eval: ' + evalStr + '  ·  Use Coach Me for explanation.');
     document.getElementById('btn-coach').disabled = false;

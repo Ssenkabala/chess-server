@@ -1424,6 +1424,29 @@ int evaluatePos(const Board& b) {
 const int INF=1000000, MATE=999000;
 const int MAX_PLY=64;
 
+// Scores at or above this magnitude are forced mates, not normal
+// evaluations — real eval never gets remotely close to this (typical
+// evals are within a few thousand cp), so there's a huge, safe margin.
+// Used so "score mate N" can be emitted directly at the source instead
+// of every consumer downstream re-deriving mate-ness from a raw cp
+// magnitude (which is what the JS side was doing before this existed).
+const int MATE_THRESHOLD = 900000;
+
+inline bool isMateScore(int score) {
+    return std::abs(score) >= MATE_THRESHOLD;
+}
+
+// Converts a raw mate score (MATE - ply, or -MATE + ply) into a signed
+// "mate in N" move count — positive if the side to move at the score's
+// origin delivers mate, negative if they get mated. Matches standard
+// UCI "score mate N" semantics.
+inline int mateMovesFromScore(int score) {
+    int absScore = std::abs(score);
+    int plyToMate = MATE - absScore + 1;
+    int n = (plyToMate + 1) / 2;  // ceil(plyToMate / 2)
+    return score > 0 ? n : -n;
+}
+
 // LMR table
 int LMR[MAX_PLY][64];
 // LMP — max quiet moves to try at low depth before pruning
@@ -1455,6 +1478,7 @@ bool wasmTimerPreset = false;
 // any of the search's own recursive calls in the first place.
 const int MAX_EXPOSED_ROOT_MOVES = 5;
 Move exposedRootMoves[MAX_EXPOSED_ROOT_MOVES];
+int  exposedRootScores[MAX_EXPOSED_ROOT_MOVES];  // score for each exposed move, same perspective as depthBestScore
 int  exposedRootMoveCount = 0;
 atomic<bool> pondering{false};  // true while pondering (infinite search until "stop")
 Move ponderMove = NULL_MOVE;    // the expected opponent reply we're pondering on
@@ -2139,9 +2163,13 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
                 int elapsed=(int)chrono::duration_cast<chrono::milliseconds>(
                     chrono::steady_clock::now()-searchStart).count();
                 cerr<<"info depth "<<depth
-                    <<" multipv "<<(pvIdx+1)
-                    <<" score cp "<<depthBestScore
-                    <<" time "<<elapsed
+                    <<" multipv "<<(pvIdx+1);
+                if (isMateScore(depthBestScore)) {
+                    cerr << " score mate " << mateMovesFromScore(depthBestScore);
+                } else {
+                    cerr << " score cp " << depthBestScore;
+                }
+                cerr << " time "<<elapsed
                     <<" pv "<<moveStr(depthBest)<<"\n";
             }
         } // end pvIdx loop
@@ -2171,6 +2199,7 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
         exposedRootMoveCount = std::min({multiPVCount, (int)rootMoves.size(), MAX_EXPOSED_ROOT_MOVES});
         for (int i = 0; i < exposedRootMoveCount; i++) {
             exposedRootMoves[i] = rootMoves[i].m;
+            exposedRootScores[i] = rootMoves[i].score;
         }
     }
 #endif
@@ -2656,6 +2685,7 @@ const char* engine_analyse(const char* fen_str,
     auto savedSearchStart  = searchStart;
     int  savedSearchTimeMs = searchTimeMs;
     for (int i = 0; i < exposedRootMoveCount; i++) {
+        int lineScore = exposedRootScores[i];  // shallow root-move score, main-search quality for i==0
         if (i >= 1) {
             Board pvScratch = cleanBoardForPV;   // fully separate, disposable
             UndoInfo u;
@@ -2663,11 +2693,24 @@ const char* engine_analyse(const char* fen_str,
                 stopNow      = false;
                 searchStart  = chrono::steady_clock::now();
                 searchTimeMs = SECONDARY_PV_TIME_MS;
-                negamax(pvScratch, SECONDARY_PV_DEPTH, -INF, INF, 1);
+                // Negate: negamax returns the score from the opponent's
+                // perspective (the side now to move in pvScratch); flip it
+                // back to the root's perspective so it's directly
+                // comparable with exposedRootScores / depthBestScore, and
+                // so the printed eval reflects the ACTUAL continuation
+                // this mini-search just explored — not the stale, shallow
+                // estimate from before this deeper pass ran.
+                lineScore = -negamax(pvScratch, SECONDARY_PV_DEPTH, -INF, INF, 1);
                 // no unmake needed — pvScratch is discarded after this block
             }
         }
-        cerr << "pvfinal " << (i+1) << " " << extractPV(cleanBoardForPV, exposedRootMoves[i]) << "\n";
+        cerr << "pvfinal " << (i+1) << " ";
+        if (isMateScore(lineScore)) {
+            cerr << "mate " << mateMovesFromScore(lineScore);
+        } else {
+            cerr << "cp " << lineScore;
+        }
+        cerr << " " << extractPV(cleanBoardForPV, exposedRootMoves[i]) << "\n";
     }
     stopNow      = savedStopNow;
     searchStart  = savedSearchStart;

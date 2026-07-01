@@ -27,17 +27,18 @@ echo "[build_wasm] Compiling SenkabalaIII → WebAssembly..."
 emcc engine_wasm.cpp \
   -O3 \
   -std=c++17 \
+  -fno-exceptions \
   -s WASM=1 \
-  -s EXPORTED_FUNCTIONS='["_engine_init","_engine_best_move"]' \
-  -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","allocate","intArrayFromString","ALLOC_NORMAL"]' \
+  -s "EXPORTED_FUNCTIONS=['_engine_init','_engine_best_move','_engine_analyse']" \
+  -s "EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString']" \
   -s ALLOW_MEMORY_GROWTH=1 \
-  -s INITIAL_MEMORY=67108864 \
-  -s MAXIMUM_MEMORY=268435456 \
+  -s INITIAL_MEMORY=134217728 \
+  -s MAXIMUM_MEMORY=536870912 \
+  -s STACK_SIZE=4194304 \
   -s ENVIRONMENT=web \
   -s MODULARIZE=1 \
   -s EXPORT_NAME=SenkabalaModule \
   -s NO_EXIT_RUNTIME=1 \
-  -s DISABLE_EXCEPTION_CATCHING=0 \
   -o senkabala.js
 
 echo "[build_wasm] Done."

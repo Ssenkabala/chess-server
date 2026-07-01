@@ -171,27 +171,41 @@ function handleInfoLine(text) {
     // depth/score fields as the streaming info lines risked overwriting the
     // real, correct final depth/score (already sent moments earlier by the
     // last per-depth info line) with stale or fabricated values.
+    //
+    // Format: "pvfinal <multipvIdx> cp <n>|mate <n> <uci moves...>"
     if (text && text.startsWith('pvfinal ')) {
-        var rest  = text.slice('pvfinal '.length).trim().split(' ').filter(Boolean);
-        var mpvIdx = parseInt(rest[0]);
-        var pvLine = rest.slice(1);
-        self.postMessage({ type: 'pv_final', multipv: isNaN(mpvIdx) ? 1 : mpvIdx, pvLine: pvLine });
+        var rest      = text.slice('pvfinal '.length).trim().split(' ').filter(Boolean);
+        var mpvIdx    = parseInt(rest[0]);
+        var scoreType = rest[1];               // 'cp' or 'mate'
+        var scoreVal  = parseInt(rest[2]);
+        var pvLine    = rest.slice(3);
+        var isMate    = scoreType === 'mate';
+        self.postMessage({
+            type:    'pv_final',
+            multipv: isNaN(mpvIdx) ? 1 : mpvIdx,
+            pvLine:  pvLine,
+            cp:      isMate ? null : scoreVal,
+            mate:    isMate ? scoreVal : null
+        });
         return true;
     }
     if (!text || !text.startsWith('info ')) return false;
     var parts = text.split(' ');
     var di  = parts.indexOf('depth'),
-        si  = parts.indexOf('cp'),
+        cpi = parts.indexOf('cp'),
+        mti = parts.indexOf('mate'),
         ti  = parts.indexOf('time'),
         pi  = parts.indexOf('pv'),
-        mi  = parts.indexOf('multipv'),
-        mti = parts.indexOf('mate');
+        mi  = parts.indexOf('multipv');
 
     if (di < 0) return true;
 
-    var score = si >= 0 ? parseInt(parts[si + 1]) : 0;
+    // cp and mate are mutually exclusive, mirroring standard UCI and
+    // Lichess's own Score type (separate optional fields, never a single
+    // magic-number-encoded value a consumer has to decode).
     var isMate = mti >= 0;
-    if (isMate) score = parseInt(parts[mti + 1]) * 100000;
+    var cp     = (!isMate && cpi >= 0) ? parseInt(parts[cpi + 1]) : null;
+    var mate   = isMate ? parseInt(parts[mti + 1]) : null;
 
     var pvMoves = [];
     if (pi >= 0) {
@@ -204,8 +218,8 @@ function handleInfoLine(text) {
     self.postMessage({
         type:    'info',
         depth:   di >= 0 ? parseInt(parts[di + 1]) : 0,
-        score:   score,
-        isMate:  isMate,
+        cp:      cp,
+        mate:    mate,
         time:    ti >= 0 ? parseInt(parts[ti + 1]) : 0,
         pv:      pvMoves[0] || '',
         pvLine:  pvMoves,

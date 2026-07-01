@@ -305,6 +305,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <button class="filter-btn" onclick="setTc('bullet')" id="tc-bullet">🔴 Bullet</button>
       <button class="filter-btn" onclick="setTc('rapid')" id="tc-rapid">🐢 Rapid</button>
       <button class="filter-btn" onclick="setTc('classical')" id="tc-classical">♟ Classical</button>
+      <button class="filter-btn" onclick="setTc('all')" id="tc-all">∑ All</button>
     </div>
     <div class="filter-group">
       <button class="filter-btn active" onclick="setView('continental')" id="view-continental">Continental</button>
@@ -424,8 +425,9 @@ function setTc(tc) {
   currentTc = tc;
   const hdr = document.getElementById('rating-header');
   if (hdr) hdr.textContent = (tc === 'all') ? 'Total ELO' : 'Rating';
-  ['blitz','bullet','rapid','classical'].forEach(t => {
-    document.getElementById('tc-' + t).classList.toggle('active', t === tc);
+  ['blitz','bullet','rapid','classical','all'].forEach(t => {
+    const btn = document.getElementById('tc-' + t);
+    if (btn) btn.classList.toggle('active', t === tc);
   });
   applyFilters();
 }
@@ -468,8 +470,11 @@ function applyFilters() {
     return true;
   });
 
-  // Sort by chosen TC ELO desc — all players shown, sorted purely by rating
-  filtered.sort((a, b) => (b[col] || 1500) - (a[col] || 1500));
+  // Sort by chosen TC ELO desc — or by total ELO sum if 'all' is selected
+  filtered.sort((a, b) => {
+    if (currentTc === 'all') return eloSum(b) - eloSum(a);
+    return (b[col] || 1500) - (a[col] || 1500);
+  });
 
   // Compute the All-TC summed/sorted list up front so both the stats strip
   // and the table below can use the same correct data when this view is
@@ -528,9 +533,9 @@ function applyFilters() {
   if (currentView === 'all-tc') {
     renderAllTc(allTcPlayers, eloSum);
   } else if (currentView === 'continental') {
-    renderContinental(filtered, col);
+    renderContinental(filtered, currentTc === 'all' ? eloSum : col);
   } else {
-    renderByCountry(filtered, col);
+    renderByCountry(filtered, currentTc === 'all' ? eloSum : col);
   }
 }
 
@@ -548,9 +553,14 @@ function renderContinental(players, col) {
     return;
   }
 
+  const isAllTc  = typeof col === 'function';
+  const scorer   = isAllTc ? col : (p => p[col] || 0);
+  const colLabel = isAllTc ? 'Total ELO' : TC_LABEL[currentTc];
+
   const rows = players.map((p, i) => {
     const isMe = currentUser && p.user_id === currentUser.id;
     const rc   = rankClass(i);
+    const score = scorer(p);
     return `<tr class="${isMe ? 'is-me' : ''}">
       <td class="td-rank ${rc}">${rc === 'gold' ? '🥇' : rc === 'silver' ? '🥈' : rc === 'bronze' ? '🥉' : i + 1}</td>
       <td>
@@ -562,14 +572,14 @@ function renderContinental(players, col) {
           </div>
         </div>
       </td>
-      <td class="td-elo">${p[col] || '—'}</td>
-      <td class="td-games">${(p[col] || 1500) !== 1500 ? (p.games_played || 0) + ' games' : '—'}</td>
+      <td class="td-elo">${score || '—'}</td>
+      <td class="td-games">${score && score !== 6000 ? (p.games_played || 0) + ' games' : '—'}</td>
     </tr>`;
   }).join('');
 
   el.innerHTML = `
     <div class="section-hdr">
-      <span>${TC_LABEL[currentTc]}</span>
+      <span>${colLabel}</span>
       <span>${players.length} players</span>
     </div>
     <table class="lb-table">
@@ -577,7 +587,7 @@ function renderContinental(players, col) {
         <tr>
           <th style="width:44px">#</th>
           <th>Player</th>
-          <th class="num">${TC_LABEL[currentTc]}</th>
+          <th class="num">${colLabel}</th>
           <th class="num">Games</th>
         </tr>
       </thead>
@@ -592,6 +602,13 @@ function renderByCountry(players, col) {
     return;
   }
 
+  // Normalise col into a scorer function and a header label so this
+  // function works identically whether called with a single-TC column
+  // name (string) or the all-TC eloSum function.
+  const isAllTc    = typeof col === 'function';
+  const scorer     = isAllTc ? col : (p => p[col] || 0);
+  const colLabel   = isAllTc ? 'Total ELO' : TC_LABEL[currentTc];
+
   // Group by country
   const byCountry = {};
   players.forEach((p, globalRank) => {
@@ -600,9 +617,9 @@ function renderByCountry(players, col) {
     byCountry[c].push({ ...p, globalRank: globalRank + 1 });
   });
 
-  // Sort countries by their top player's ELO
+  // Sort countries by their top player's score
   const sortedCountries = Object.keys(byCountry).sort(
-    (a, b) => (byCountry[b][0][col] || 0) - (byCountry[a][0][col] || 0)
+    (a, b) => scorer(byCountry[b][0]) - scorer(byCountry[a][0])
   );
 
   let html = '';
@@ -622,7 +639,7 @@ function renderByCountry(players, col) {
         '<td><div class="td-player"><div>' +
           '<div class="td-name' + (isMe ? ' is-me' : '') + '">' + esc(p.username || 'Anonymous') + '</div>' +
         '</div></div></td>' +
-        '<td class="td-elo">' + (p[col] || '—') + '</td>' +
+        '<td class="td-elo">' + (scorer(p) || '—') + '</td>' +
         '<td class="td-games">#' + p.globalRank + ' continental</td>' +
         '</tr>';
     });
@@ -633,14 +650,14 @@ function renderByCountry(players, col) {
           '<span class="country-flag">' + FLAG(code) + '</span>' +
           '<span class="country-name">' + (COUNTRY_NAMES[code] || code) + '</span>' +
           '<span class="country-count">' + ps.length + ' player' + (ps.length !== 1 ? 's' : '') +
-            ' · Top ' + (ps[0][col] || '?') + ' ELO</span>' +
+            ' · Top ' + (scorer(ps[0]) || '?') + ' ELO</span>' +
           '<span class="country-chevron' + openCls + '" id="chev-' + code + '">▶</span>' +
         '</div>' +
         '<div class="country-players' + openCls + '" id="cp-' + code + '">' +
           '<table class="lb-table"><thead><tr>' +
             '<th style="width:44px">#</th>' +
             '<th>Player</th>' +
-            '<th class="num">' + TC_LABEL[currentTc] + '</th>' +
+            '<th class="num">' + colLabel + '</th>' +
             '<th class="num">Rank</th>' +
           '</tr></thead><tbody>' + rows + '</tbody></table>' +
         '</div>' +

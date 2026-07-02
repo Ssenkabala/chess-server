@@ -2874,10 +2874,15 @@ function analysePosition() {
       // rows with each one's complete continuation, matching the original
       // design where the candidate list updates as the engine finds more,
       // rather than popping up a separate display once the search is done.
-      // For secondary lines (multipv >= 2), this also carries a refined
-      // score from the dedicated mini-search behind that line — more
-      // accurate than the shallow estimate the streaming info lines had,
-      // so it overwrites cp/mate here too, not just the pv.
+      // For every line, the cp/mate here is the SAME score the main
+      // search already vetted during its own multiPV pass (not a
+      // recomputed one) — the scratch mini-search that extends secondary
+      // lines' continuations shares a global board-history array with the
+      // main search that just ran, and its own return value turned out
+      // not to be trustworthy standalone (confirmed live: it was
+      // producing "+0.00" on a position that was nowhere near equal). So
+      // it's used only for its side effect of extending the PV; the
+      // engine always reports the already-vetted score alongside it.
       var mpv = msg.multipv || 1;
       var pv  = msg.pvLine || [];
       if (mpv === 1) finalRealPv = pv;  // line 1 specifically feeds the cached result / Coach Me

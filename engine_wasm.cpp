@@ -2194,8 +2194,22 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
     // when walked, root cause not yet fully understood. This sidesteps
     // that entirely: a freshly re-parsed board, never touched by any of
     // search()'s own recursive calls, cannot carry that corruption forward.
+    //
+    // rootMoves is only ever re-sorted at the TOP of each depth iteration,
+    // using the PREVIOUS depth's scores (see the stable_sort a few dozen
+    // lines up) — scores get updated in place during the pvIdx loop, but
+    // the vector's ORDER doesn't catch up until the next depth's sort,
+    // which never runs for whichever depth was last to complete. Without
+    // one final sort here, rootMoves[0] can still be whatever was best a
+    // depth ago even after bestMove has already moved on to something
+    // stronger this depth — confirmed live: bestMove was correctly Qd6,
+    // but the displayed line 1 was the previous depth's Qc6. Sorting here,
+    // right before exposing, guarantees rootMoves[0] actually matches
+    // bestMove.
 #ifdef __EMSCRIPTEN__
     if (wasmTimerPreset && bestMove != NULL_MOVE) {
+        stable_sort(rootMoves.begin(), rootMoves.end(),
+            [](const RootMove& a, const RootMove& b){ return a.score > b.score; });
         exposedRootMoveCount = std::min({multiPVCount, (int)rootMoves.size(), MAX_EXPOSED_ROOT_MOVES});
         for (int i = 0; i < exposedRootMoveCount; i++) {
             exposedRootMoves[i] = rootMoves[i].m;
@@ -2685,7 +2699,20 @@ const char* engine_analyse(const char* fen_str,
     auto savedSearchStart  = searchStart;
     int  savedSearchTimeMs = searchTimeMs;
     for (int i = 0; i < exposedRootMoveCount; i++) {
-        int lineScore = exposedRootScores[i];  // shallow root-move score, main-search quality for i==0
+        // The score shown is ALWAYS the one the real main search already
+        // vetted (exposedRootScores[i]) — never the return value of the
+        // mini-search below. That mini-search shares the same global
+        // posHistory array the main search just finished writing through
+        // (see the repetitionCount/posHistory comments elsewhere in this
+        // file — board/search state leaking across calls sharing global
+        // arrays is a known, still-open issue here), and its return value
+        // was never meant to be trusted standalone: originally it was
+        // always discarded, only its side effect of populating the TT
+        // mattered (so extractPV below can walk a longer line). Treating
+        // its return value as a display score was the actual bug —
+        // confirmed live as bogus "+0.00" lines on a position that was
+        // nowhere near equal.
+        int lineScore = exposedRootScores[i];
         if (i >= 1) {
             Board pvScratch = cleanBoardForPV;   // fully separate, disposable
             UndoInfo u;
@@ -2693,14 +2720,7 @@ const char* engine_analyse(const char* fen_str,
                 stopNow      = false;
                 searchStart  = chrono::steady_clock::now();
                 searchTimeMs = SECONDARY_PV_TIME_MS;
-                // Negate: negamax returns the score from the opponent's
-                // perspective (the side now to move in pvScratch); flip it
-                // back to the root's perspective so it's directly
-                // comparable with exposedRootScores / depthBestScore, and
-                // so the printed eval reflects the ACTUAL continuation
-                // this mini-search just explored — not the stale, shallow
-                // estimate from before this deeper pass ran.
-                lineScore = -negamax(pvScratch, SECONDARY_PV_DEPTH, -INF, INF, 1);
+                negamax(pvScratch, SECONDARY_PV_DEPTH, -INF, INF, 1);  // return value intentionally discarded — see comment above
                 // no unmake needed — pvScratch is discarded after this block
             }
         }

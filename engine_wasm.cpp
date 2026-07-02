@@ -8,7 +8,7 @@
 // rebuild, the browser/CDN is still running a cached senkabala.wasm (or the
 // .wasm was never recompiled) — no source change can take effect until the
 // running binary actually updates.
-#define ENGINE_BUILD_ID "2026-07-02-ttmate-2"
+#define ENGINE_BUILD_ID "2026-07-02-mpvrank-4"
 
 // MSVC compatibility -- replace GCC built-ins
 #ifdef _MSC_VER
@@ -2107,9 +2107,30 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
 
             int prevScore = rootMoves[pvIdx].score;
             int alpha = -INF, beta = INF;
+            // Single-PV (game play): tight two-sided aspiration window, left
+            // exactly as it was. MultiPV (analysis): a one-sided SEEDED window
+            // — a lower anchor (prevScore - margin) so the PVS scouts below can
+            // still cut off worse moves cheaply (this is what buys back the
+            // search depth a fully-open window gives up), but beta stays at INF
+            // so a line is never clamped from above and always gets its true
+            // score. If the whole line turns out to be below the anchor (its
+            // real score dropped this depth), the fail-low re-search below
+            // widens the anchor and re-runs, so correctness holds. The margin
+            // is generous because analysis lines can swing more than a tight
+            // game-play window allows.
+            int mpvAnchor = -INF;
             if(depth >= 4){
-                alpha = max(-INF, prevScore - 50);
-                beta  = min( INF, prevScore + 50);
+                if(multiPVCount == 1){
+                    alpha = max(-INF, prevScore - 50);
+                    beta  = min( INF, prevScore + 50);
+                } else if(prevScore > -MATE_THRESHOLD && prevScore < MATE_THRESHOLD){
+                    // Only seed a finite anchor for normal scores. If the line
+                    // was a mate last depth, keep alpha=-INF: mate scores are
+                    // tens of thousands of cp away and any finite anchor would
+                    // just fail and force a re-search.
+                    alpha     = max(-INF, prevScore - 300);
+                    mpvAnchor = alpha;
+                }
             }
 
             Move depthBest      = NULL_MOVE;
@@ -2151,7 +2172,7 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
                     if(alpha >= beta) break;
                 }
 
-                if(depth >= 4){
+                if(depth >= 4 && multiPVCount == 1){
                     if(depthBestScore <= alpha - 50){
                         researchAttempts++;
                         if(researchAttempts >= 4){
@@ -2180,6 +2201,18 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
                             beta = min(INF, beta+100);
                         }
                         research = true;
+                    }
+                }
+                else if(multiPVCount > 1 && mpvAnchor > -INF){
+                    // MultiPV fail-low: the whole line came back at or below the
+                    // seeded lower anchor, so the anchor was too high and every
+                    // score is a clamped bound. Drop the anchor fully open and
+                    // re-run so the true ranking/score are found. (beta was INF
+                    // throughout, so there is never a fail-high to handle here.)
+                    if(depthBestScore <= mpvAnchor){
+                        alpha     = -INF;
+                        mpvAnchor = -INF;   // don't retrigger
+                        research  = true;
                     }
                 }
             } while(research && !stopNow);

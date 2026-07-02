@@ -1203,7 +1203,7 @@ global.Chessground = Nr;
   <!-- Load WASM engine only if browser supports it -->
   <script>
     if (window._wasmSupported) {
-      var _v = '?v=3';   // bump this whenever senkabala.js or senkabala_wasm.js changes
+      var _v = '?v=4';   // bump on every engine rebuild — busts senkabala.js, senkabala_wasm.js AND senkabala.wasm (the .wasm inherits this query, see senkabala_wasm.js)
       var s1 = document.createElement('script');
       s1.src = '/senkabala.js' + _v;
       s1.onload = function() {

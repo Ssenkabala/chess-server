@@ -2,6 +2,14 @@
  * SenkabalaIII v20 — classical evaluation engine
  */
 
+// Build stamp — printed to the console on engine_init(). Bump this whenever
+// you recompile so you can confirm from the browser console EXACTLY which
+// binary is live. If the console doesn't show the ID you expect after a
+// rebuild, the browser/CDN is still running a cached senkabala.wasm (or the
+// .wasm was never recompiled) — no source change can take effect until the
+// running binary actually updates.
+#define ENGINE_BUILD_ID "2026-07-02-pvfix-1"
+
 // MSVC compatibility -- replace GCC built-ins
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -2580,6 +2588,7 @@ extern "C" {
 EMSCRIPTEN_KEEPALIVE
 void engine_init() {
     if (wasmInitDone) return;
+    cerr << "[engine] build " << ENGINE_BUILD_ID << "\n";  // confirms which binary is actually running
     tt = new TTEntry[TT_SIZE]();
     initAttacks();
     initMasks();   // required for pawn structure eval, rook open-file bonuses

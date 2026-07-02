@@ -7,6 +7,25 @@
  * instantiate it (milliseconds) rather than recompile (minutes).
  */
 
+// Capture THIS script's own cache-busting query (e.g. "?v=3") at load time.
+// index.html loads this file as "/senkabala_wasm.js?v=N", and we reuse that
+// exact query when fetching the .wasm binary below — so bumping the single
+// _v in index.html busts the loader JS AND the binary together.
+//
+// The binary is the file that actually changes on every recompile, yet it
+// was previously fetched as a bare "/senkabala.wasm" with no version at all.
+// That meant a rebuilt, redeployed engine could keep running from the
+// browser/CDN cache indefinitely — recompile, redeploy, and see byte-for-byte
+// identical behaviour, because the old binary was never re-fetched. Inheriting
+// the loader's version closes that gap.
+var _WASM_VER = (function () {
+  try {
+    var s = document.currentScript && document.currentScript.src;
+    if (s && s.indexOf('?') >= 0) return s.slice(s.indexOf('?'));
+  } catch (e) {}
+  return '';
+})();
+
 class SenkabalaEngine {
   constructor() {
     this._worker  = null;
@@ -21,9 +40,11 @@ class SenkabalaEngine {
 
   async _start() {
     try {
-      // Step 1: compile WASM on the main thread (streaming = fastest)
+      // Step 1: compile WASM on the main thread (streaming = fastest).
+      // _WASM_VER carries the same "?v=N" as this loader script so a rebuilt
+      // binary is actually re-fetched instead of served stale from cache.
       const wasmModule = await WebAssembly.compileStreaming(
-        fetch('/senkabala.wasm')
+        fetch('/senkabala.wasm' + _WASM_VER)
       );
 
       // Step 2: spin up the worker

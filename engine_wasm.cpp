@@ -8,7 +8,7 @@
 // rebuild, the browser/CDN is still running a cached senkabala.wasm (or the
 // .wasm was never recompiled) — no source change can take effect until the
 // running binary actually updates.
-#define ENGINE_BUILD_ID "2026-07-02-pvfix-1"
+#define ENGINE_BUILD_ID "2026-07-02-ttmate-2"
 
 // MSVC compatibility -- replace GCC built-ins
 #ifdef _MSC_VER
@@ -1304,6 +1304,15 @@ int evaluate(const Board& b) {
 // ============================================================
 // TRANSPOSITION TABLE
 // ============================================================
+
+// Search score constants — defined here (rather than lower in SEARCH
+// GLOBALS) because the TT store/probe below need MATE_THRESHOLD to adjust
+// mate scores by ply. Real evaluations never approach MATE_THRESHOLD, so
+// any score at or beyond it is a forced-mate score.
+const int INF=1000000, MATE=999000;
+const int MAX_PLY=64;
+const int MATE_THRESHOLD = 900000;
+
 enum TTFlag { TT_EXACT, TT_LOWER, TT_UPPER };
 struct TTEntry { U64 hash; int score, depth; Move bestMove; TTFlag flag; };
 #ifdef __EMSCRIPTEN__
@@ -1317,24 +1326,49 @@ void ttClear() { if(tt) memset(tt, 0, TT_SIZE*sizeof(TTEntry)); }
 
 struct TTResult { int score, depth, flag; Move bestMove; };
 
-bool ttProbe(U64 hash, TTResult& out) {
+// ── Mate-score TT adjustment ──────────────────────────────────────────
+// Mate scores are stored as (MATE - distance_from_root). But the TT is
+// keyed by position, and the SAME position can be probed at a different
+// ply than it was stored at (transpositions, and iterative deepening
+// re-searching the same line). If a root-relative mate score is written
+// and later read back at a different ply, it's wrong — and it drifts
+// toward MATE-1 ("mate in 1"), which then dominates every deeper search
+// via the TT and poisons the result (observed live: a real mate-in-5
+// degrading into a phantom mate-in-1 on an unrelated move once the search
+// ran deep enough to keep re-probing it).
+//
+// Standard fix: store mate scores relative to the CURRENT node (add ply
+// on the way in), and translate back to root-relative on the way out
+// (subtract ply). Non-mate scores pass through untouched.
+inline int scoreToTT(int score, int ply) {
+    if (score >=  MATE_THRESHOLD) return score + ply;
+    if (score <= -MATE_THRESHOLD) return score - ply;
+    return score;
+}
+inline int scoreFromTT(int score, int ply) {
+    if (score >=  MATE_THRESHOLD) return score - ply;
+    if (score <= -MATE_THRESHOLD) return score + ply;
+    return score;
+}
+
+bool ttProbe(U64 hash, TTResult& out, int ply) {
     if (!tt) return false;
     TTEntry* e = &tt[hash & (TT_SIZE-1)];
     if (e->hash != hash) return false;
-    out.score    = e->score;
+    out.score    = scoreFromTT(e->score, ply);
     out.depth    = e->depth;
     out.flag     = (int)e->flag;
     out.bestMove = e->bestMove;
     return true;
 }
 
-void ttStore(U64 hash, int score, int depth, Move best, TTFlag flag) {
+void ttStore(U64 hash, int score, int depth, Move best, TTFlag flag, int ply) {
     if (!tt) return;
     TTEntry* e = &tt[hash & (TT_SIZE-1)];
     if (e->hash == hash || depth >= e->depth) {
         if (best == NULL_MOVE && e->hash == hash) best = e->bestMove;
         e->hash     = hash;
-        e->score    = score;
+        e->score    = scoreToTT(score, ply);
         e->depth    = depth;
         e->bestMove = best;
         e->flag     = flag;
@@ -1429,16 +1463,8 @@ int evaluatePos(const Board& b) {
 // ============================================================
 // SEARCH GLOBALS
 // ============================================================
-const int INF=1000000, MATE=999000;
-const int MAX_PLY=64;
-
-// Scores at or above this magnitude are forced mates, not normal
-// evaluations — real eval never gets remotely close to this (typical
-// evals are within a few thousand cp), so there's a huge, safe margin.
-// Used so "score mate N" can be emitted directly at the source instead
-// of every consumer downstream re-deriving mate-ness from a raw cp
-// magnitude (which is what the JS side was doing before this existed).
-const int MATE_THRESHOLD = 900000;
+// INF, MATE, MATE_THRESHOLD are defined earlier (just above the TT code,
+// which needs MATE_THRESHOLD for mate-score adjustment).
 
 inline bool isMateScore(int score) {
     return std::abs(score) >= MATE_THRESHOLD;
@@ -1709,7 +1735,7 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
             int sc = tbScore(wdl, ply);
             TTFlag flag = (wdl==TB_WIN||wdl==TB_CURSED_WIN) ? TT_LOWER :
                           (wdl==TB_LOSS||wdl==TB_BLESSED_LOSS) ? TT_UPPER : TT_EXACT;
-            ttStore(b.hash, sc, depth, NULL_MOVE, flag);
+            ttStore(b.hash, sc, depth, NULL_MOVE, flag, ply);
             return sc;
         }
     }
@@ -1728,7 +1754,7 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
     // We still use the TT move for ordering — just don't early-return the score.
     bool inRepLine = (repetitionCount(b) > 0);
     if (ply > 0) {
-        TTResult tte; bool tteHit = ttProbe(b.hash, tte);
+        TTResult tte; bool tteHit = ttProbe(b.hash, tte, ply);
         if (tteHit) {
             ttMove = tte.bestMove;
             if (tte.depth >= depth && !inRepLine) {
@@ -1743,14 +1769,14 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
     // IID — no TT move at deep node: do shallow search to get a good move to order first
     if (ttMove == NULL_MOVE && depth >= 5 && pvNode) {
         negamax(b, depth-4, alpha, beta, ply);
-        TTResult iidTTE; if (ttProbe(b.hash, iidTTE)) ttMove = iidTTE.bestMove;
+        TTResult iidTTE; if (ttProbe(b.hash, iidTTE, ply)) ttMove = iidTTE.bestMove;
     }
 
     // Singular extension — if TT move is much better than all alternatives,
     // extend its search by 1 ply
     bool singularExtension = false;
     if (!pvNode && ply > 0 && depth >= 6 && ttMove != NULL_MOVE) {
-        TTResult tte2; bool tte2Hit = ttProbe(b.hash, tte2);
+        TTResult tte2; bool tte2Hit = ttProbe(b.hash, tte2, ply);
         if (tte2Hit && tte2.depth >= depth-3 && tte2.flag == TT_LOWER) {
             int singBeta = tte2.score - depth*2;
             // Search all moves EXCEPT the TT move at reduced depth
@@ -1899,7 +1925,7 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
 
     if (!stopNow) {
         TTFlag flag = (bestScore<=alphaOrig)?TT_UPPER:(bestScore>=beta)?TT_LOWER:TT_EXACT;
-        ttStore(b.hash, bestScore, depth, bestMove, flag);
+        ttStore(b.hash, bestScore, depth, bestMove, flag, ply);
     }
     return bestScore;
 }
@@ -1943,7 +1969,7 @@ string extractPV(Board startBoard, Move firstMove, int maxLen = 16) {
         }
 
         TTResult tte;
-        if (!ttProbe(cur.hash, tte)) break;
+        if (!ttProbe(cur.hash, tte, 0)) break;  // ply irrelevant here — only tte.bestMove is used, not the score
         if (tte.bestMove == NULL_MOVE) break;
 
         // Verify the stored move is actually legal here before trusting it —
@@ -2056,6 +2082,18 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
 
     for(int depth=1; depth<=64; depth++){
 
+        // Per-line results for THIS depth, captured in multipv order (line 0
+        // = best, line 1 = 2nd best, ...) exactly as the pvIdx loop finds
+        // them. These are the source of truth for what gets exposed to the
+        // analysis path — NOT rootMoves, whose order is re-sorted at the top
+        // of each depth and so does not reliably match the multipv ranking
+        // the search actually reported. Only overwritten by a FULLY
+        // completed depth (see the commit after the pvIdx loop), so an
+        // interrupted final depth can't corrupt a good previous one.
+        Move thisDepthMoves[MAX_EXPOSED_ROOT_MOVES];
+        int  thisDepthScores[MAX_EXPOSED_ROOT_MOVES];
+        int  thisDepthCount = 0;
+
         // Sort root moves by score from previous depth (best first)
         if(depth > 1)
             stable_sort(rootMoves.begin(), rootMoves.end(),
@@ -2151,6 +2189,15 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
                 for(auto& rm : rootMoves) if(rm.m == depthBest){ rm.score = depthBestScore; break; }
                 excluded.push_back(depthBest);
 
+                // Record this line's result in multipv order (pvIdx 0,1,2...)
+                // so exposed lines match exactly what the search reports here,
+                // regardless of how rootMoves gets re-sorted next depth.
+                if(pvIdx < MAX_EXPOSED_ROOT_MOVES){
+                    thisDepthMoves[pvIdx]  = depthBest;
+                    thisDepthScores[pvIdx] = depthBestScore;
+                    if(pvIdx + 1 > thisDepthCount) thisDepthCount = pvIdx + 1;
+                }
+
                 if(pvIdx == 0){
 #ifdef __EMSCRIPTEN__
                     if (wasmTimerPreset) {
@@ -2199,6 +2246,20 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
             }
         } // end pvIdx loop
 
+        // Commit this depth's per-line results to the exposed arrays, but
+        // ONLY if the depth completed all its lines without being cut off by
+        // time — a fully completed later depth supersedes an earlier one,
+        // while an interrupted depth leaves the last good depth's results
+        // intact. Order here is the true multipv ranking (line 0 = best),
+        // so exposedRootMoves[0] always equals the reported best move.
+        if(!stopNow && thisDepthCount > 0){
+            exposedRootMoveCount = min(thisDepthCount, MAX_EXPOSED_ROOT_MOVES);
+            for(int i = 0; i < exposedRootMoveCount; i++){
+                exposedRootMoves[i]  = thisDepthMoves[i];
+                exposedRootScores[i] = thisDepthScores[i];
+            }
+        }
+
         int elapsed=(int)chrono::duration_cast<chrono::milliseconds>(
             chrono::steady_clock::now()-searchStart).count();
         if(elapsed>=searchTimeMs) break;
@@ -2212,34 +2273,22 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
         }
     }
 
-    // Expose the top root moves so the caller can extract PVs using ITS OWN
-    // clean board, not search()'s internal one. See the comment on
-    // exposedRootMoves above for why — confirmed via direct tracing that
-    // search()'s own board can end up producing a corrupted continuation
-    // when walked, root cause not yet fully understood. This sidesteps
-    // that entirely: a freshly re-parsed board, never touched by any of
-    // search()'s own recursive calls, cannot carry that corruption forward.
+    // exposedRootMoves / exposedRootScores were already populated per-depth,
+    // in true multipv order, by the commit block at the end of each completed
+    // depth above — the caller (engine_analyse) reads them directly. They're
+    // walked for PV extraction using the caller's OWN clean board copy, never
+    // search()'s internal board, which is confirmed to sometimes carry
+    // corrupted continuation state (root cause still open); a freshly
+    // re-parsed board sidesteps that entirely.
     //
-    // rootMoves is only ever re-sorted at the TOP of each depth iteration,
-    // using the PREVIOUS depth's scores (see the stable_sort a few dozen
-    // lines up) — scores get updated in place during the pvIdx loop, but
-    // the vector's ORDER doesn't catch up until the next depth's sort,
-    // which never runs for whichever depth was last to complete. Without
-    // one final sort here, rootMoves[0] can still be whatever was best a
-    // depth ago even after bestMove has already moved on to something
-    // stronger this depth — confirmed live: bestMove was correctly Qd6,
-    // but the displayed line 1 was the previous depth's Qc6. Sorting here,
-    // right before exposing, guarantees rootMoves[0] actually matches
-    // bestMove.
+    // Defensive fallback: if for some reason nothing was committed (e.g. the
+    // very first depth was cut off before completing), at least expose the
+    // final bestMove as line 0 so the analysis path still shows something.
 #ifdef __EMSCRIPTEN__
-    if (wasmTimerPreset && bestMove != NULL_MOVE) {
-        stable_sort(rootMoves.begin(), rootMoves.end(),
-            [](const RootMove& a, const RootMove& b){ return a.score > b.score; });
-        exposedRootMoveCount = std::min({multiPVCount, (int)rootMoves.size(), MAX_EXPOSED_ROOT_MOVES});
-        for (int i = 0; i < exposedRootMoveCount; i++) {
-            exposedRootMoves[i] = rootMoves[i].m;
-            exposedRootScores[i] = rootMoves[i].score;
-        }
+    if (wasmTimerPreset && bestMove != NULL_MOVE && exposedRootMoveCount == 0) {
+        exposedRootMoves[0]  = bestMove;
+        exposedRootScores[0] = bestScore;
+        exposedRootMoveCount = 1;
     }
 #endif
 

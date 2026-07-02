@@ -47,8 +47,11 @@ class SenkabalaEngine {
         fetch('/senkabala.wasm' + _WASM_VER)
       );
 
-      // Step 2: spin up the worker
-      this._worker = new Worker('/engine_worker.js');
+      // Step 2: spin up the worker — pass our version query through so the
+      // worker loads a glue (senkabala.js) matching this binary. Without this,
+      // the worker's importScripts would fall back to a stale hardcoded version
+      // and instantiate the new .wasm against the wrong glue (hang on load).
+      this._worker = new Worker('/engine_worker.js' + _WASM_VER);
       this._worker.onmessage = (e) => this._onMessage(e.data);
       this._worker.onerror   = (err) => {
         console.error('[SenkabalaWASM] Worker error:', err.message);

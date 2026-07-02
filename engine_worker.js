@@ -14,7 +14,16 @@
  *   { type: 'info',   depth, score, time, pv, multipv }
  */
 
-importScripts('/senkabala.js?v=3');
+// Load the Emscripten glue at the SAME version as everything else. The glue
+// (senkabala.js) and the binary (senkabala.wasm) are generated together by a
+// single emcc run and are a matched pair — instantiating a new binary against
+// a stale glue traps or hangs (engine never signals ready; the page sits on
+// "Loading engine..." forever). This was previously hardcoded to "?v=3", so a
+// rebuilt engine would silently mismatch. self.location.search is the query
+// this worker was created with (senkabala_wasm.js now appends it — see there),
+// so bumping the single _v in index.html keeps glue + binary + worker in lockstep.
+var _WORKER_VER = self.location.search || '?v=4';
+importScripts('/senkabala.js' + _WORKER_VER);
 
 let _module   = null;
 let _init     = null;

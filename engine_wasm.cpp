@@ -1917,6 +1917,23 @@ string extractPV(Board startBoard, Move firstMove, int maxLen = 16) {
     seenHashes.push_back(cur.hash);
 
     for (int i = 1; i < maxLen; i++) {
+        // Stop if the current side to move has no legal moves — the line
+        // has reached checkmate or stalemate, which is the true end of the
+        // PV. Without this, a completed mating line could keep appending
+        // whatever the TT happened to hold for the mated position,
+        // producing extra "moves" after a mate that has already ended the
+        // game — part of what made a mate-in-1 score show up next to a
+        // multi-move line that never actually delivered the mate.
+        {
+            MoveList term; genMoves(cur, term);
+            bool anyLegal = false;
+            for (int mi = 0; mi < term.n; mi++) {
+                UndoInfo tu;
+                if (makeMove(cur, term.m[mi], tu)) { unmakeMove(cur, term.m[mi], tu); anyLegal = true; break; }
+            }
+            if (!anyLegal) break;  // checkmate or stalemate — PV ends here
+        }
+
         TTResult tte;
         if (!ttProbe(cur.hash, tte)) break;
         if (tte.bestMove == NULL_MOVE) break;
@@ -2681,38 +2698,50 @@ const char* engine_analyse(const char* fen_str,
     // candidate row instead of only ever extending the top one.
     //
     // Secondary lines (i >= 1) get a small, dedicated extra search before
-    // extracting their PV. During the main search, only the TOP line gets
-    // real depth — secondary lines are scored via a single shallow
-    // root-move call (enough to rank them against each other, not enough
-    // to leave a real continuation behind in the TT). Confirmed live: a
-    // genuine forced mate in 2 sitting behind a 2nd/3rd-ranked candidate
-    // produced a PV of just that one move, with the mate itself invisible
-    // even though the engine had correctly identified the right first
-    // move on its own. This extra pass searches a SEPARATE, disposable
-    // board copy — never cleanBoardForPV itself, never search()'s own
-    // board — so it can't interact with the still-open board-corruption
-    // question at all. Small, bounded, run only after the user's real
-    // wait is already over.
+    // extracting their PV — NOT to fix their score (the main search's
+    // multiPV loop already gives every exposed line a real, aspiration-
+    // windowed score; exposedRootScores[i] is trustworthy), but purely to
+    // leave a deeper continuation behind in the shared TT so extractPV has
+    // a full line to walk. During the main search the top line's
+    // continuation gets the most TT reinforcement; a lower line's deeper
+    // continuation can be thin enough that its walked PV was just the one
+    // root move. Confirmed live: a genuine forced mate sitting behind a
+    // 2nd/3rd-ranked candidate produced a PV of just that one move, the
+    // mate itself invisible even though the score correctly reported it.
+    // This extra pass searches a SEPARATE, disposable board copy — never
+    // cleanBoardForPV itself, never search()'s own board — so it can't
+    // interact with the still-open board-corruption question at all.
+    // Small, bounded, run only after the user's real wait is already over.
     const int SECONDARY_PV_DEPTH    = 12;  // covers mate-in-6 (12 ply) directly, not just shallower lines
     const int SECONDARY_PV_TIME_MS  = 600;
     bool savedStopNow      = stopNow;
     auto savedSearchStart  = searchStart;
     int  savedSearchTimeMs = searchTimeMs;
+
+    // Extract each line's PV into a string IMMEDIATELY after that line's own
+    // search, while the shared global TT still reflects that exact line —
+    // then print them all afterwards. The TT is one global table shared by
+    // the main search and every secondary mini-search below; extractPV
+    // walks it hop-by-hop from the root, so it only returns a coherent line
+    // if the TT entries along the way were all written by the SAME search.
+    //
+    // The previous structure searched line i then printed line i in one
+    // loop, but that still let line i's deep mini-search overwrite TT
+    // entries that a *neighbouring* line's walk depended on, and could even
+    // clobber the root entry a later extract needed — producing PVs that
+    // were legal move-by-move (each move passes extractPV's own legality
+    // check) yet globally incoherent: a sequence stitched together from
+    // different searches that led nowhere real, including phantom mates
+    // that had no actual forcing path. Capturing each line's PV the instant
+    // its own search finishes, before the next one runs, is the only order
+    // that stays correct under a single shared TT.
+    //
+    // Line 1 (i == 0) is captured FIRST, before any mini-search runs at
+    // all, because it's the one line whose real, full-depth continuation
+    // the main search just left in the TT — any secondary mini-search would
+    // start overwriting exactly those entries.
+    std::string pvStrings[MAX_EXPOSED_ROOT_MOVES];
     for (int i = 0; i < exposedRootMoveCount; i++) {
-        // The score shown is ALWAYS the one the real main search already
-        // vetted (exposedRootScores[i]) — never the return value of the
-        // mini-search below. That mini-search shares the same global
-        // posHistory array the main search just finished writing through
-        // (see the repetitionCount/posHistory comments elsewhere in this
-        // file — board/search state leaking across calls sharing global
-        // arrays is a known, still-open issue here), and its return value
-        // was never meant to be trusted standalone: originally it was
-        // always discarded, only its side effect of populating the TT
-        // mattered (so extractPV below can walk a longer line). Treating
-        // its return value as a display score was the actual bug —
-        // confirmed live as bogus "+0.00" lines on a position that was
-        // nowhere near equal.
-        int lineScore = exposedRootScores[i];
         if (i >= 1) {
             Board pvScratch = cleanBoardForPV;   // fully separate, disposable
             UndoInfo u;
@@ -2720,21 +2749,31 @@ const char* engine_analyse(const char* fen_str,
                 stopNow      = false;
                 searchStart  = chrono::steady_clock::now();
                 searchTimeMs = SECONDARY_PV_TIME_MS;
-                negamax(pvScratch, SECONDARY_PV_DEPTH, -INF, INF, 1);  // return value intentionally discarded — see comment above
+                negamax(pvScratch, SECONDARY_PV_DEPTH, -INF, INF, 1);  // return value intentionally discarded — only its TT side effect is used
                 // no unmake needed — pvScratch is discarded after this block
             }
         }
+        // Capture NOW, before the next line's mini-search perturbs the TT.
+        pvStrings[i] = extractPV(cleanBoardForPV, exposedRootMoves[i]);
+    }
+
+    stopNow      = savedStopNow;
+    searchStart  = savedSearchStart;
+    searchTimeMs = savedSearchTimeMs;
+
+    // Now print — scores come straight from the main search's already-vetted
+    // per-move scores (never a mini-search return value; see the "+0.00"
+    // fix), PVs from the strings captured above.
+    for (int i = 0; i < exposedRootMoveCount; i++) {
+        int lineScore = exposedRootScores[i];
         cerr << "pvfinal " << (i+1) << " ";
         if (isMateScore(lineScore)) {
             cerr << "mate " << mateMovesFromScore(lineScore);
         } else {
             cerr << "cp " << lineScore;
         }
-        cerr << " " << extractPV(cleanBoardForPV, exposedRootMoves[i]) << "\n";
+        cerr << " " << pvStrings[i] << "\n";
     }
-    stopNow      = savedStopNow;
-    searchStart  = savedSearchStart;
-    searchTimeMs = savedSearchTimeMs;
 
     if (best != NULL_MOVE) {
         std::string ms = moveStr(best);

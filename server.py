@@ -1612,6 +1612,22 @@ async def send(ws: WebSocket, msg: dict):
         pass
 
 
+async def arena_send(ws: WebSocket, msg: dict):
+    """Safe send for arena/tournament WebSockets. This is what every arena
+    handler (join, pause/resume, pairing, game_ready) uses to talk to a
+    player's tournament socket. It went missing during refactoring - the 17
+    call sites remained but the definition was gone, so EVERY tournament
+    WebSocket connection crashed with NameError: name 'arena_send' is not
+    defined the instant it tried to send the first "connected" message. That
+    killed the socket immediately, the client auto-reconnected, and it crashed
+    again - the reconnect storm that made join/pause/resume/pairing all appear
+    broken. Restored as a thin safe-send wrapper (same behaviour as send)."""
+    try:
+        await ws.send_json(msg)
+    except Exception:
+        pass
+
+
 async def broadcast(game: dict, msg: dict):
     # Prefer the dedicated game WebSocket; fall back to lobby ws; skip if None
     w_ws = game.get("white_game_ws") or game.get("white_ws")

@@ -955,7 +955,10 @@ async function init() {
         { headers: { 'x-user-id': currentUser.id } });
       if (pr.ok) {
         const pd = await pr.json();
-        currentProfile = { username: pd.username, elo: pd.elo, country: pd.country };
+        currentProfile = {
+          username: pd.username, elo: pd.elo, country: pd.country,
+          created_at: pd.created_at, games_played: pd.games_played
+        };
       }
     } catch(e) { console.warn('Profile load failed', e); }
   } else {
@@ -1213,6 +1216,29 @@ async function viewTournament(id) {
 
   let actionBtn = '';
 
+  // Prize-tournament eligibility (account age, rated games) — mirrors the
+  // server's check_prize_eligibility() exactly, so a player sees the SAME
+  // requirement on the page that the server will enforce, instead of only
+  // finding out via a 403 alert() after clicking Join. If currentProfile
+  // or created_at isn't available yet, don't block — same as the server's
+  // own "can't parse date, don't block" fallback; the server is still the
+  // real gate either way, this is purely an informational pre-check.
+  function prizeEligibilityStatus() {
+    if (!currentProfile) return { eligible: true };
+    const gamesPlayed = currentProfile.games_played || 0;
+    const gamesOk = gamesPlayed >= 10;
+    let ageOk = true, ageDays = null;
+    if (currentProfile.created_at) {
+      ageDays = Math.floor((Date.now() - new Date(currentProfile.created_at).getTime()) / 86400000);
+      if (!isNaN(ageDays)) ageOk = ageDays >= 7;
+    }
+    if (ageOk && gamesOk) return { eligible: true };
+    const parts = [];
+    if (!ageOk)   parts.push(`account ${ageDays}/7 days old`);
+    if (!gamesOk) parts.push(`${gamesPlayed}/10 rated games`);
+    return { eligible: false, reason: 'Prize tournament — needs ' + parts.join(', ') };
+  }
+
   // Shared eligibility check — used both for pre-start joining and
   // late-joining an active arena tournament.
   function eligibilityCheckedJoinButton() {
@@ -1226,13 +1252,19 @@ async function viewTournament(id) {
       central_africa: ['CD','CG','CF','GA','GQ','TD'],
     };
     const allowedRegion = !t.region || (userCountry && (REGION_COUNTRIES[t.region]||[]).includes(userCountry));
-    if (allowedCountry && allowedRegion) {
-      return `<button class="btn btn-sm" id="btn-join-${id}" onclick="joinTournament('${id}')">Join</button>`;
-    } else if (!allowedCountry) {
+    if (!allowedCountry) {
       return `<span style="font-size:11px;color:var(--muted)">Restricted to ${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country}</span>`;
-    } else {
+    }
+    if (!allowedRegion) {
       return `<span style="font-size:11px;color:var(--muted)">Restricted to ${REGION_LABELS_JS[t.region] || t.region} players</span>`;
     }
+    if (t.prize_pool > 0) {
+      const elig = prizeEligibilityStatus();
+      if (!elig.eligible) {
+        return `<span style="font-size:11px;color:var(--muted)" title="${elig.reason}">🔒 ${elig.reason}</span>`;
+      }
+    }
+    return `<button class="btn btn-sm" id="btn-join-${id}" onclick="joinTournament('${id}')">Join</button>`;
   }
 
   if (currentUser) {

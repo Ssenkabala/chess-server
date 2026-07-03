@@ -1104,6 +1104,8 @@ function stopListPoll() {
 }
 
 async function viewTournament(id) {
+  console.log('[DBG client] viewTournament CALLED id=', id, 'currentDetailId=', currentDetailId,
+              'wsState=', tournamentWs ? tournamentWs.readyState : 'null', '@', new Date().toISOString().slice(11,23));
   // Stop any existing poll + timer if switching to a different tournament
   if (currentDetailId && currentDetailId !== id) {
     stopDetailPoll();
@@ -1659,13 +1661,6 @@ function connectTournamentWs(tid, tournament) {
     }, 20000);
   };
 
-  tournamentWs.onerror = (ev) => {
-    console.log('[DBG client] tournamentWs ERROR', ev);
-  };
-  tournamentWs.onclose = (ev) => {
-    console.log('[DBG client] tournamentWs CLOSED code=', ev.code, 'reason=', ev.reason, 'wasClean=', ev.wasClean);
-  };
-
   tournamentWs.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
@@ -1762,7 +1757,9 @@ function connectTournamentWs(tid, tournament) {
     } catch(err) {}
   };
 
-  tournamentWs.onclose = () => {
+  tournamentWs.onclose = (ev) => {
+    console.log('[DBG client] tournamentWs CLOSED code=', ev.code, 'reason=', ev.reason,
+                'wasClean=', ev.wasClean, '— reconnect scheduled in 3s @', new Date().toISOString().slice(11,23));
     if (tournamentWs && tournamentWs._ping) clearInterval(tournamentWs._ping);
     // Attempt reconnect after 3s if we're still on this detail view
     setTimeout(() => {
@@ -1771,6 +1768,7 @@ function connectTournamentWs(tid, tournament) {
           // Fetch fresh tournament data for reconnect
           fetch(`/api/tournaments/${tid}`).then(r => r.json()).then(data => {
             if (data && data.tournament && data.tournament.status === 'active') {
+              console.log('[DBG client] onclose reconnect firing for', tid);
               connectTournamentWs(tid, data.tournament);
             }
           }).catch(() => {});
@@ -1779,7 +1777,7 @@ function connectTournamentWs(tid, tournament) {
     }, 3000);
   };
 
-  tournamentWs.onerror = () => {};
+  tournamentWs.onerror = (ev) => { console.log('[DBG client] tournamentWs ERROR', ev && ev.type); };
 }
 
 let _notifyBarTarget = null;

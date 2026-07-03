@@ -1552,6 +1552,7 @@ async def first_move_timeout_loop(game_id: str):
                 if not game.get("_elo_updated"):
                     game["_elo_updated"] = True
                     await update_elos(game, "black")
+                await finalize_tournament_scoring(game, "black")
                 await tournament_handle_forfeit(game, loser_id=game.get("white_id"), winner_id=game.get("black_id"), result="black")
                 await asyncio.sleep(1)
                 active_games.pop(game_id, None)
@@ -1588,6 +1589,7 @@ async def first_move_timeout_loop(game_id: str):
                 if not game.get("_elo_updated"):
                     game["_elo_updated"] = True
                     await update_elos(game, "white")
+                await finalize_tournament_scoring(game, "white")
                 await tournament_handle_forfeit(game, loser_id=game.get("black_id"), winner_id=game.get("white_id"), result="white")
                 await asyncio.sleep(1)
                 active_games.pop(game_id, None)
@@ -1693,6 +1695,7 @@ async def clock_loop(game_id: str):
                 game["_elo_updated"] = True
                 await update_elos(game, winner)
             fairplay_log(game, winner)
+            await finalize_tournament_scoring(game, winner)
             await asyncio.sleep(1)
             active_games.pop(game_id, None)
             return
@@ -1718,6 +1721,28 @@ def validate_and_push(game: dict, uci_move: str) -> chess.Move | None:
 
 
 # ΓöÇΓöÇΓöÇ ELO update helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+
+async def finalize_tournament_scoring(game: dict, result: str):
+    """
+    Apply tournament standings scoring for a game that just ended, SERVER-SIDE.
+    No-op for casual (non-tournament) games. Idempotent: safe to call alongside
+    the client's /api/tournament/result POST — the per-game lock and the
+    "already submitted" guard inside _apply_tournament_result make whichever
+    call arrives second a harmless 400. Call this at EVERY game-end path
+    (checkmate/stalemate, resignation, timeout/flag, draw agreement) right
+    after update_elos(), so standings never depend on the client calling back.
+    """
+    tdb = game.get("tournament_db_id")
+    if not tdb or not game.get("tournament_id"):
+        return
+    try:
+        await _apply_tournament_result(tdb, result)
+    except HTTPException as he:
+        if he.status_code != 400:   # 400 = already submitted (client beat us); expected
+            print(f"[arena] server-side scoring error for {tdb}: {he.detail}", flush=True)
+    except Exception as e:
+        print(f"[arena] server-side scoring exception for {tdb}: {e}", flush=True)
+
 
 async def update_elos(game: dict, result: str):
     """
@@ -3257,6 +3282,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                             game["_elo_updated"] = True
                             await update_elos(game, winner)
                         fairplay_log(game, winner)
+                        await finalize_tournament_scoring(game, winner)
                         active_games.pop(game_id, None)
                     continue
 
@@ -3301,6 +3327,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                         game["_elo_updated"] = True
                         await update_elos(game, result)
                     fairplay_log(game, result)
+                    await finalize_tournament_scoring(game, result)
                     active_games.pop(game_id, None)
                 else:
                     await broadcast(game, {
@@ -3325,6 +3352,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                     game["_elo_updated"] = True
                     await update_elos(game, winner)
                 fairplay_log(game, winner)
+                await finalize_tournament_scoring(game, winner)
                 asyncio.create_task(cleanup_game(game_id, delay=10))
 
             # ── Draw offer ─────────────────────────────────────────────────────
@@ -3351,6 +3379,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                     game["_elo_updated"] = True
                     await update_elos(game, "draw")
                 fairplay_log(game, "draw")
+                await finalize_tournament_scoring(game, "draw")
                 asyncio.create_task(cleanup_game(game_id, delay=10))
 
             elif msg_type == "draw_claim":
@@ -3372,6 +3401,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                     if not game.get("_elo_updated"):
                         game["_elo_updated"] = True
                         await update_elos(game, "draw")
+                    await finalize_tournament_scoring(game, "draw")
                     asyncio.create_task(cleanup_game(game_id, delay=10))
 
             elif msg_type == "takeback_offer":
@@ -3468,6 +3498,7 @@ async def game_ws(ws: WebSocket, game_id: str):
             if not game.get("_elo_updated"):
                 game["_elo_updated"] = True
                 await update_elos(game, winner)
+            await finalize_tournament_scoring(game, winner)
             active_games.pop(game_id, None)
     except Exception as e:
         # Any OTHER error in this loop (not a clean disconnect) previously
@@ -3495,6 +3526,7 @@ async def game_ws(ws: WebSocket, game_id: str):
                 if not game.get("_elo_updated"):
                     game["_elo_updated"] = True
                     await update_elos(game, winner)
+                await finalize_tournament_scoring(game, winner)
                 active_games.pop(game_id, None)
         except Exception as cleanup_err:
             print(f"[game] {game_id} cleanup after error also failed: {cleanup_err}", flush=True)
@@ -3922,10 +3954,6 @@ def serve_openings():
 def serve_openings_detector():
     return FileResponse("openings_detector.js", media_type="application/javascript")
 
-@app.get("/analysis_accuracy.js")
-def serve_analysis_accuracy():
-    return FileResponse("analysis_accuracy.js", media_type="application/javascript")
-
 @app.get("/aac_strings.js")
 def serve_aac_strings():
     return FileResponse("aac_strings.js", media_type="application/javascript")
@@ -4289,31 +4317,51 @@ async def next_round(req: TournamentStartRequest, authorization: str = Header(No
 @app.post("/api/tournament/result")
 async def submit_result(req: TournamentResultRequest, authorization: str = Header(None)):
     """
-    Submit a tournament game result.
-    - Marks the game result in tournament_games
-    - Updates tournament_players.score (win=2, draw=1, loss=0, +1 streak bonus on 3rd+ consecutive win)
-    - Syncs tournament_players.elo snapshot from profiles (ELO already updated by update_elos via WS)
-    - Does NOT recalculate ELO — that is handled by update_elos() when the game ends over WebSocket
+    Submit a tournament game result (client-called endpoint).
+    Thin authentication wrapper around _apply_tournament_result(), which holds
+    all the actual scoring logic so the SERVER can also apply results directly
+    at game-end (see the game-over path in the game WebSocket) without relying
+    on the client to call back — the client callback is fragile (needs the
+    tournament_db_id in its URL, a live session, and the page not to navigate
+    away first), and if it doesn't fire, standings never update. Both callers
+    are safe to run for the same game: the per-game lock plus the
+    "result already submitted" guard inside make it idempotent.
     """
     if not SUPABASE_SERVICE_KEY:
         raise HTTPException(503, "Service unavailable")
     user_id = await verify_jwt(authorization)
     if req.result not in ('white', 'black', 'draw'):
         raise HTTPException(400, "Invalid result")
+    return await _apply_tournament_result(req.game_id, req.result, submitting_user_id=user_id)
 
-    # Both players' clients independently call this endpoint after receiving
-    # the same gameover broadcast. Without this lock, two near-simultaneous
-    # requests for the same game_id could each read tournament_games.result
-    # as still null (neither has committed yet) and both proceed to score
-    # the game — doubling every point awarded. Confirmed live: every win in
-    # a tournament was recorded at exactly double its correct value.
-    lock = _submit_result_locks.setdefault(req.game_id, asyncio.Lock())
+
+async def _apply_tournament_result(game_db_id: str, result: str, submitting_user_id: str = None):
+    """
+    Core tournament-result scoring. Called by the client endpoint (with an
+    authenticated submitting_user_id) AND directly by the server at game-end
+    (submitting_user_id=None, already authorized). Idempotent per game.
+
+    - Marks the game result in tournament_games
+    - Updates tournament_players.score (win=2, draw=1, loss=0, +1 streak bonus on 3rd+ consecutive win)
+    - Syncs tournament_players.elo snapshot from profiles (ELO already updated by update_elos via WS)
+    - Does NOT recalculate ELO — that is handled by update_elos() when the game ends over WebSocket
+    """
+    if result not in ('white', 'black', 'draw'):
+        raise HTTPException(400, "Invalid result")
+
+    # Both players' clients AND the server can independently trigger scoring
+    # for the same game. Without this lock, two near-simultaneous calls for the
+    # same game_id could each read tournament_games.result as still null
+    # (neither has committed yet) and both proceed to score the game — doubling
+    # every point awarded. Confirmed live: every win in a tournament was
+    # recorded at exactly double its correct value.
+    lock = _submit_result_locks.setdefault(game_db_id, asyncio.Lock())
     async with lock:
         async with httpx.AsyncClient() as client:
             # Get the game
             r = await client.get(
                 f"{SUPABASE_URL}/rest/v1/tournament_games",
-                params={"id": f"eq.{req.game_id}", "select": "*"},
+                params={"id": f"eq.{game_db_id}", "select": "*"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             )
             games = r.json()
@@ -4323,9 +4371,14 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
             if g.get('result'):
                 raise HTTPException(400, "Result already submitted")
 
-            # Only white or black player can submit
-            if user_id not in (g['white_id'], g['black_id']):
+            # Only white or black player can submit — but ONLY enforced for
+            # client calls. Server-side calls (submitting_user_id=None) are
+            # already trusted: the server owns the game and knows the result.
+            if submitting_user_id is not None and submitting_user_id not in (g['white_id'], g['black_id']):
                 raise HTTPException(403, "Not a player in this game")
+
+            req_game_id = game_db_id  # local alias so the body below reads unchanged
+            req_result  = result
 
             tid = g['tournament_id']
 
@@ -4348,10 +4401,10 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
             # even for a game that outlived its tournament.
             await client.patch(
                 f"{SUPABASE_URL}/rest/v1/tournament_games",
-                params={"id": f"eq.{req.game_id}"},
+                params={"id": f"eq.{req_game_id}"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                          "Content-Type": "application/json"},
-                json={"result": req.result, "played_at": datetime.utcnow().isoformat()}
+                json={"result": req_result, "played_at": datetime.utcnow().isoformat()}
             )
 
             if tournament_status != "active":
@@ -4364,9 +4417,9 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                 # updated separately by update_elos() over the game's own
                 # WebSocket the moment it actually ends, independent of this
                 # endpoint and independent of tournament status.
-                print(f"[arena] game {req.game_id} finished after tournament {tid} ended — "
+                print(f"[arena] game {req_game_id} finished after tournament {tid} ended — "
                       f"result recorded, standings NOT updated", flush=True)
-                return {"ok": True, "result": req.result, "counted_toward_standings": False}
+                return {"ok": True, "result": req_result, "counted_toward_standings": False}
 
             # Fetch updated ELOs from the correct column (already written by update_elos over WS)
             elo_r = await asyncio.gather(
@@ -4456,12 +4509,12 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                     conns_now[uid]["consecutive_wins"] = 0
                     return 0
 
-            if req.result == 'white':
+            if req_result == 'white':
                 w_bonus = streak_bonus(g['white_id'], won=True)
                 b_bonus = streak_bonus(g['black_id'], won=False)
                 await add_score(g['white_id'], 2 + w_bonus, w_elo)
                 await add_score(g['black_id'], 0,            b_elo)
-            elif req.result == 'black':
+            elif req_result == 'black':
                 w_bonus = streak_bonus(g['white_id'], won=False)
                 b_bonus = streak_bonus(g['black_id'], won=True)
                 await add_score(g['white_id'], 0,            w_elo)
@@ -4493,8 +4546,8 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                         # disabled.
                         if not conns[uid].get("paused") and conns[uid].get("connected"):
                             conns[uid]["available"] = True
-                        won = (req.result == "white" and uid == g['white_id']) or \
-                              (req.result == "black" and uid == g['black_id'])
+                        won = (req_result == "white" and uid == g['white_id']) or \
+                              (req_result == "black" and uid == g['black_id'])
                         # NOTE: do NOT recompute pts/streak and add to conns[uid]["score"]
                         # here — add_score() above already updated this exact value
                         # (conns_now and conns are the same dict, same tournament_id).
@@ -4523,7 +4576,7 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
                         old_elo = w_elo if uid == g['white_id'] else b_elo
                         await arena_send(conns[uid]["ws"], {
                             "type":       "game_over",
-                            "result":     req.result,
+                            "result":     req_result,
                             "my_score":   conns[uid]["score"],
                             "streak":     streak if won else 0,
                             "streak_bonus": bonus,
@@ -4536,7 +4589,7 @@ async def submit_result(req: TournamentResultRequest, authorization: str = Heade
         except Exception as e:
             print(f"[arena] re-pair error: {e}", flush=True)
 
-        return {"ok": True, "result": req.result}
+        return {"ok": True, "result": req_result}
 
 
 
@@ -4973,6 +5026,7 @@ async def force_end_game(request: Request, authorization: str = Header(None)):
     if winner != "draw" and not game.get("_elo_updated"):
         game["_elo_updated"] = True
         await update_elos(game, winner)
+    await finalize_tournament_scoring(game, result_msg)
     await asyncio.sleep(1)
     active_games.pop(game_id, None)
     print(f"[admin] {caller_id} force-ended game {game_id} → {winner}", flush=True)

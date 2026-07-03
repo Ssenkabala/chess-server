@@ -1624,17 +1624,25 @@ function connectTournamentWs(tid, tournament) {
   // Already connected to this tournament — don't reconnect
   if (tournamentWs && currentTournamentId === tid &&
       (tournamentWs.readyState === WebSocket.OPEN || tournamentWs.readyState === WebSocket.CONNECTING)) {
+    console.log('[DBG client] connectTournamentWs: already connected to', tid, '— skipping');
     return;
   }
   if (tournamentWs) { tournamentWs.close(); tournamentWs = null; }
   currentTournamentId = tid;
-  if (!currentUser || tournament.format !== 'arena') return;
+  if (!currentUser || tournament.format !== 'arena') {
+    console.log('[DBG client] connectTournamentWs: EARLY RETURN — currentUser=', !!currentUser,
+                'format=', tournament && tournament.format, '(need arena)');
+    return;
+  }
   _myArenaScore = 0;  // reset on fresh connect — server will update via game_over
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  tournamentWs = new WebSocket(`${proto}://${location.host}/ws/tournament/${tid}`);
+  const wsUrl = `${proto}://${location.host}/ws/tournament/${tid}`;
+  console.log('[DBG client] connectTournamentWs: OPENING', wsUrl, 'user=', currentUser.id);
+  tournamentWs = new WebSocket(wsUrl);
 
   tournamentWs.onopen = () => {
+    console.log('[DBG client] tournamentWs OPEN — sending identity');
     tournamentWs.send(JSON.stringify({
       user_id:    currentUser.id,
       username:   currentProfile ? currentProfile.username : (currentUser.email || 'player'),
@@ -1649,6 +1657,13 @@ function connectTournamentWs(tid, tournament) {
       if (tournamentWs && tournamentWs.readyState === WebSocket.OPEN)
         tournamentWs.send(JSON.stringify({ type: 'ping' }));
     }, 20000);
+  };
+
+  tournamentWs.onerror = (ev) => {
+    console.log('[DBG client] tournamentWs ERROR', ev);
+  };
+  tournamentWs.onclose = (ev) => {
+    console.log('[DBG client] tournamentWs CLOSED code=', ev.code, 'reason=', ev.reason, 'wasClean=', ev.wasClean);
   };
 
   tournamentWs.onmessage = (e) => {

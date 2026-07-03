@@ -692,8 +692,22 @@ global.Chessground = Nr;
     @media (max-width: 600px) {
       body { padding: 0 !important; overflow-x: hidden; }
       #board-wrap {
-        width:  100vw !important;
-        height: 100vw !important;
+        /* Was width/height: 100vw !important — the classic mobile "100vw
+           overflow" bug. 100vw measures the browser's full LAYOUT width,
+           which can be wider than what's actually visible on screen (e.g.
+           a scrollbar gutter, or ANY unrelated element elsewhere on the
+           page nudging the page's horizontal layout wide, even briefly).
+           With overflow-x:hidden on body, that excess gets silently
+           clipped at the screen edge — no scrollbar, no error, just the
+           last file cropped off exactly as reported. Sizing from the
+           board's own container (100%, which .game-wrap keeps genuinely
+           full-width with zero horizontal padding) instead of the
+           viewport avoids the mismatch entirely. aspect-ratio keeps it
+           square without needing a vw-based height hack. */
+        width: 100% !important;
+        height: auto !important;
+        aspect-ratio: 1 / 1;
+        max-width: 100vw;  /* safety ceiling only — width:100% is the real source of truth now */
       }
       cg-resize { display: none; }
       .clock { font-size: 20px; }

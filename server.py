@@ -2104,9 +2104,24 @@ async def arena_auto_start(tournament_id: str):
 async def _arena_pair_impl(tournament_id: str):
     conns = tournament_connections.get(tournament_id, {})
     pg    = tournament_player_game.setdefault(tournament_id, {})
+    # "connected" matters here, not just available/paused/pg. Right after a
+    # forfeit, the winner is marked available immediately (server-side,
+    # synchronous) — but their BROWSER is still sitting on the just-ended
+    # game's page for a few seconds (the "returning to tournament in Ns…"
+    # countdown) before it navigates back and re-opens a tournament socket.
+    # Without this check, a pairing tick landing in that window would pick
+    # the winner using their OLD, already-closed tournament WebSocket —
+    # arena_send() on it fails silently (by design, for a closed socket),
+    # so game_ready never reaches them. There IS a resend-on-reconnect
+    # fallback for this (see tournament_ws, "resent game_ready ... on
+    # reconnect"), so it self-heals once they land back on the page — but
+    # not pairing a demonstrably-disconnected socket in the first place
+    # closes the race instead of just recovering from it a few seconds
+    # late, which is what showed up as "network challenges" in whichever
+    # game got silently created while they were still in transit.
     available = [uid for uid, info in conns.items()
                  if info.get("available") and not info.get("paused")
-                 and pg.get(uid) is None]
+                 and info.get("connected") and pg.get(uid) is None]
     # Full snapshot of every connected player and why they are / aren't eligible.
     _snapshot = {uid: {"avail": i.get("available"), "paused": i.get("paused"),
                        "conn": i.get("connected"), "pg": pg.get(uid)}

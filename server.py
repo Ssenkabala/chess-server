@@ -3255,8 +3255,20 @@ async def game_ws(ws: WebSocket, game_id: str):
                     continue
 
 
-            # ΓöÇΓöÇ Keepalive ping (ignore) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            # ── Keepalive ping — REPLY with pong ──────────────────────────
+            # Previously just discarded ("continue", no reply). That made the
+            # client's ping purely one-directional — it never got confirmation
+            # the server (and the path to it) was actually still alive. On a
+            # "zombie" connection (looks OPEN to the browser but the underlying
+            # pipe is dead — happens after extended idle periods on mobile
+            # data, backgrounded tabs, certain NAT timeouts), neither onclose
+            # nor onerror reliably fires, so without a reply the client had no
+            # way to ever detect it: moves stopped arriving, moves stopped
+            # sending, with no error at all. Replying lets the client's
+            # watchdog (see play_multiplayer.html) detect a MISSED pong and
+            # proactively reconnect instead of hanging silently.
             if msg_type == "ping":
+                await send(ws, {"type": "pong"})
                 continue
 
             # ΓöÇΓöÇ Profile (sent on connect) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ

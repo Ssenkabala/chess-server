@@ -10,17 +10,15 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 <!-- End Google Tag Manager -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>AfriChess | Play Live Chess vs Real Opponents</title>
+  <title>Africhess — Play</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon_16x16.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
   <meta name="theme-color" content="#0a0a0a">
-  <meta name="description" content="Play live chess against real opponents across the continent. Choose your time control — bullet, blitz, or rapid — get matched instantly, and climb the AfriChess leaderboard. Built for African players.">
-  <meta property="og:type" content="website">
-  <meta property="og:title" content="AfriChess — Play Live Chess vs Real Opponents">
-  <meta property="og:description" content="Play live chess against real opponents across the continent. Bullet, blitz, or rapid — get matched instantly and climb the leaderboard.">
+  <meta name="description" content="Play live chess against other players on AfriChess.">
+  <meta property="og:title" content="AfriChess — Live Multiplayer">
   <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
   <meta property="og:url" content="https://www.africhess.org/multiplayer">
   <!-- Set zoom CSS variable BEFORE any style renders -->
@@ -1931,6 +1929,81 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ═══════════════════════════════════════════════════════════════
+//  GAME WS CONNECTION WATCHDOG
+// ═══════════════════════════════════════════════════════════════
+// Detects a "zombie" gameWs — one that still reports readyState === OPEN
+// but can no longer actually move data in either direction. This happens
+// after extended idle periods (mobile data, backgrounded tabs, some NAT
+// timeouts around the ~1hr mark) and neither onclose nor onerror reliably
+// fires for it. Without active detection, moves silently stop arriving
+// AND stop sending, with no error shown at all — confirmed live during a
+// tournament: both moves and clock kept working per the sender's own
+// screen, but nothing was actually reaching the other side.
+//
+// Detection: _lastGameWsMsgAt is updated on EVERY message received from
+// the server (see onGameMessage). The server now replies to "ping" with
+// "pong" (previously discarded silently), so under a healthy connection
+// this timestamp refreshes at least every ~20s. If it goes stale for
+// more than ~2 ping cycles, the pipe is almost certainly dead even
+// though the browser hasn't noticed yet — reconnect proactively instead
+// of waiting for an onclose that may never come.
+let _lastGameWsMsgAt = 0;
+const GAMEWS_STALE_MS = 45000;   // a bit over 2x the 20s ping interval
+
+function startGameWsWatchdog() {
+  if (!gameWs) return;
+  _lastGameWsMsgAt = Date.now();
+  gameWs._ping = setInterval(() => {
+    if (!gameWs) return;
+    if (gameWs.readyState === WebSocket.OPEN) {
+      gameWs.send(JSON.stringify({ type: 'ping' }));
+      if (Date.now() - _lastGameWsMsgAt > GAMEWS_STALE_MS && !gameOver) {
+        console.warn('[gamews] no server activity for', Date.now() - _lastGameWsMsgAt, 'ms — reconnecting');
+        reconnectGameWs();
+      }
+    }
+  }, 20000);
+}
+
+function reconnectGameWs() {
+  if (!gameId || !myColor || gameOver) return;
+  showGameStatus('Connection lost — reconnecting…');
+  if (gameWs) {
+    gameWs.onclose = null;   // don't let the old socket's onclose fire a
+    gameWs.onerror = null;   // "connection lost" message over this one
+    if (gameWs._ping) clearInterval(gameWs._ping);
+    try { gameWs.close(); } catch (e) {}
+  }
+  gameWs = new WebSocket(WS_BASE + '/ws/game/' + gameId);
+  gameWs.onopen = () => {
+    gameWs.send(JSON.stringify({ type: 'claim', color: myColor }));
+    if (myProfile && currentUser) {
+      gameWs.send(JSON.stringify({
+        type:         'profile',
+        username:     myProfile.username,
+        elo:          myProfile.elo,
+        elo_bullet:   myProfile.elo_bullet   || null,
+        elo_blitz:    myProfile.elo_blitz    || null,
+        elo_rapid:    myProfile.elo_rapid    || null,
+        elo_classical:myProfile.elo_classical || null,
+        user_id:      currentUser.id,
+        time_control: window._timeControl || null,
+      }));
+    }
+    showGameStatus('Reconnected.');
+    startGameWsWatchdog();
+  };
+  gameWs.onmessage = onGameMessage;
+  gameWs.onclose = (ev) => {
+    if (gameWs && gameWs._ping) clearInterval(gameWs._ping);
+    setTimeout(() => {
+      if (!gameOver) showGameStatus('Connection lost. Opponent may have disconnected.');
+    }, 400);
+  };
+  gameWs.onerror = () => {};
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  GAME INIT
 // ═══════════════════════════════════════════════════════════════
 function startGame() {
@@ -2021,12 +2094,11 @@ function startGame() {
         time_control: window._timeControl || null,
       }));
     }
-    // Keepalive — Railway kills idle connections after ~30s
-    gameWs._ping = setInterval(() => {
-      if (gameWs && gameWs.readyState === WebSocket.OPEN) {
-        gameWs.send(JSON.stringify({ type: 'ping' }));
-      }
-    }, 20000);
+    // Keepalive + active staleness detection — see startGameWsWatchdog().
+    // Previously just pinged with no way to notice a dead connection; a
+    // zombie socket (readyState still OPEN, but nothing actually gets
+    // through) could sit silent for the rest of the game.
+    startGameWsWatchdog();
   };
   gameWs.onmessage = onGameMessage;
   gameWs.onclose   = (ev) => {
@@ -2053,6 +2125,11 @@ function startGame() {
 // ═══════════════════════════════════════════════════════════════
 function onGameMessage(e) {
   const msg = JSON.parse(e.data);
+
+  // ANY message proves the pipe is alive in both directions — refresh the
+  // watchdog timestamp before the early-return below, so a pong (or any
+  // other message) counts as a heartbeat.
+  _lastGameWsMsgAt = Date.now();
 
   // Keepalive — ignore pings from server
   if (msg.type === 'ping' || msg.type === 'pong') return;
@@ -2286,9 +2363,8 @@ function onGameMessage(e) {
           time_control: window._timeControl || null
         }));
       }
-      gameWs._ping = setInterval(() => {
-        if (gameWs && gameWs.readyState === WebSocket.OPEN) gameWs.send(JSON.stringify({ type: 'ping' }));
-      }, 20000);
+      // Keepalive + active staleness detection — see startGameWsWatchdog().
+      startGameWsWatchdog();
     };
     gameWs.onmessage = onGameMessage;
     gameWs.onclose = () => {

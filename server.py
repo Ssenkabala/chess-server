@@ -1504,6 +1504,9 @@ async def tournament_handle_forfeit(game: dict, loser_id: str, winner_id: str, r
     if winner_id in pg:
         pg[winner_id] = None
 
+    print(f"[DBG forfeit] {tid}: loser={loser_id} paused={conns.get(loser_id,{}).get('paused')} | "
+          f"winner={winner_id} available={conns.get(winner_id,{}).get('available')} "
+          f"connected={conns.get(winner_id,{}).get('connected')} pg={pg.get(winner_id)}", flush=True)
     print(f"[arena] forfeit in {tid}: {loser_id} paused, {winner_id} returned to pool", flush=True)
     # No longer triggers arena_pair() directly — the single poller in
     # arena_pairing_loop picks up this state change on its next tick (every
@@ -2088,6 +2091,11 @@ async def _arena_pair_impl(tournament_id: str):
     available = [uid for uid, info in conns.items()
                  if info.get("available") and not info.get("paused")
                  and pg.get(uid) is None]
+    # Full snapshot of every connected player and why they are / aren't eligible.
+    _snapshot = {uid: {"avail": i.get("available"), "paused": i.get("paused"),
+                       "conn": i.get("connected"), "pg": pg.get(uid)}
+                 for uid, i in conns.items()}
+    print(f"[DBG pair] {tournament_id}: tick — eligible={available} | all={_snapshot}", flush=True)
     if len(available) < 1:
         return
 
@@ -2241,8 +2249,11 @@ async def _arena_pair_impl(tournament_id: str):
                     "type":    "waiting",
                     "message": "Waiting for an available opponent…"
                 })
-                print(f"[arena] {uid} waiting (odd player) in {tournament_id}", flush=True)
+                print(f"[DBG pair] {tournament_id}: {uid} left WAITING (odd player out)", flush=True)
                 break
+
+    print(f"[DBG pair] {tournament_id}: DECISION paired={paired} "
+          f"(from {len(available)} eligible)", flush=True)
 
     for white_id, black_id in paired:
         # Mark both players as committed to this pairing IMMEDIATELY, inside
@@ -2306,8 +2317,10 @@ async def arena_pairing_loop(tournament_id: str):
     previous tick.
     """
     if tournament_id in _active_pairing_loops:
+        print(f"[DBG loop] {tournament_id}: pairing loop already running — not starting a second", flush=True)
         return  # already running for this tournament — don't start a second one
     _active_pairing_loops.add(tournament_id)
+    print(f"[DBG loop] {tournament_id}: PAIRING LOOP STARTED", flush=True)
     try:
         while True:
             await asyncio.sleep(5)  # per design spec: check the lobby every 5 seconds
@@ -2321,10 +2334,10 @@ async def arena_pairing_loop(tournament_id: str):
                     )
                     rows = r.json()
                 if not rows or rows[0].get("status") != "active":
-                    print(f"[arena] pairing loop stopping for {tournament_id} (status={rows[0].get('status') if rows else 'not found'})", flush=True)
+                    print(f"[DBG loop] {tournament_id}: STOPPING (status={rows[0].get('status') if rows else 'not found'})", flush=True)
                     break
             except Exception as e:
-                print(f"[arena] pairing loop status check error for {tournament_id}: {e}", flush=True)
+                print(f"[DBG loop] {tournament_id}: status check error: {e}", flush=True)
                 continue  # transient DB error — try again next tick rather than stopping
 
             try:
@@ -2406,8 +2419,11 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
             )
             db_rows = ins.json()
             db_game_id = db_rows[0]["id"] if db_rows else None
+            if db_game_id is None:
+                print(f"[DBG launch] {tournament_id}: WARNING tournament_games insert returned NO ROW "
+                      f"(status={ins.status_code}, body={str(db_rows)[:200]}) — scoring will be impossible for this game", flush=True)
     except Exception as e:
-        print(f"[arena] launch error: {e}", flush=True)
+        print(f"[DBG launch] {tournament_id}: tournament_games INSERT FAILED: {type(e).__name__}: {e}", flush=True)
         pg[white_id] = None; pg[black_id] = None
         white_info["available"] = True; black_info["available"] = True
         return
@@ -2466,6 +2482,9 @@ async def arena_launch_game(tournament_id: str, white_id: str, black_id: str):
         "tournament_db_id": db_game_id,
         "time_control": time_control,
     })
+    print(f"[DBG launch] {tournament_id}: game_ready SENT game_id={game_id} db_id={db_game_id} "
+          f"white={white_id}(ws={'live' if white_info.get('ws') else 'MISSING'}) "
+          f"black={black_id}(ws={'live' if black_info.get('ws') else 'MISSING'})", flush=True)
 
 
 async def arena_pair_delayed(tournament_id: str, delay: float = 2.5):
@@ -2514,10 +2533,13 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
         username = ident.get("username", "?")
         elo      = int(ident.get("elo", 1500))
         score    = float(ident.get("score", 0))
-    except Exception:
+    except Exception as _e:
+        print(f"[DBG join] {tournament_id}: identity receive FAILED: {type(_e).__name__}: {_e}", flush=True)
         await ws.close(); return
     if not user_id:
+        print(f"[DBG join] {tournament_id}: no user_id in identity payload {ident!r}", flush=True)
         await ws.close(); return
+    print(f"[DBG join] {tournament_id}: identity ok user={user_id} name={username} elo={elo} score={score}", flush=True)
 
     # ── Registration gate ────────────────────────────────────────────────────
     # Opening this WebSocket must NOT be sufficient to enter pairing. A player
@@ -2536,14 +2558,16 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
                          "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
             )
         if not reg_check.json():
+            print(f"[DBG join] {tournament_id}: user={user_id} NOT REGISTERED — rejecting WS (must click Join first)", flush=True)
             await arena_send(ws, {
                 "type": "error",
                 "detail": "You haven't joined this tournament yet. Go to the tournament page and click Join."
             })
             await ws.close()
             return
+        print(f"[DBG join] {tournament_id}: user={user_id} registration OK", flush=True)
     except Exception as e:
-        print(f"[arena] registration check failed for {user_id} on {tournament_id}: {e}", flush=True)
+        print(f"[DBG join] {tournament_id}: registration check EXCEPTION for {user_id}: {type(e).__name__}: {e}", flush=True)
         await ws.close()
         return
 
@@ -2577,6 +2601,13 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
     }
     if tournament_player_game[tournament_id].get(user_id):
         tournament_connections[tournament_id][user_id]["available"] = False
+
+    _st = tournament_connections[tournament_id][user_id]
+    print(f"[DBG join] {tournament_id}: state set user={user_id} "
+          f"available={_st['available']} paused={_st['paused']} "
+          f"pg={tournament_player_game[tournament_id].get(user_id)} "
+          f"carried_from_existing={{score:{_existing.get('score')}, paused:{_existing.get('paused')}}} "
+          f"total_conns={len(tournament_connections[tournament_id])}", flush=True)
 
     await arena_send(ws, {"type": "connected", "user_id": user_id})
     if _existing.get("paused"):
@@ -2642,21 +2673,15 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
             elif data.get("type") == "available":
                 conns = tournament_connections.get(tournament_id, {})
                 pg    = tournament_player_game.get(tournament_id, {})
+                _was_paused = conns.get(user_id, {}).get("paused")
                 if user_id in conns:
-                    # IMPORTANT: do NOT clear "paused" here. This message fires
-                    # automatically from the client after every game ends —
-                    # it does not represent the player explicitly choosing to
-                    # resume. If the server just paused this player for a
-                    # no-show/forfeit, this message must not undo that, or a
-                    # forfeited player gets silently re-paired against their
-                    # will and can forfeit repeatedly in a tight loop with a
-                    # small player pool. Only "available" -> True is honoured
-                    # here for players who were never paused in the first
-                    # place (the common case: just finished a normal game).
                     if not conns[user_id].get("paused"):
                         conns[user_id]["available"] = True
                 if user_id in pg and not conns.get(user_id, {}).get("paused"):
                     pg[user_id] = None
+                print(f"[DBG avail] {tournament_id}: user={user_id} sent 'available' "
+                      f"was_paused={_was_paused} -> available={conns.get(user_id,{}).get('available')} "
+                      f"pg={pg.get(user_id)}", flush=True)
                 # No direct arena_pair() call — the poller's next tick handles it.
 
             elif data.get("type") == "pause":
@@ -2666,7 +2691,9 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
                     conns[user_id]["paused"]    = True
                 await arena_send(ws, {"type": "paused",
                     "message": "You are paused. You won't be paired until you resume."})
-                print(f"[arena] {username} paused in {tournament_id}", flush=True)
+                print(f"[DBG pause] {tournament_id}: user={user_id} PAUSED "
+                      f"available={conns.get(user_id,{}).get('available')} "
+                      f"paused={conns.get(user_id,{}).get('paused')}", flush=True)
 
             elif data.get("type") == "resume":
                 conns = tournament_connections.get(tournament_id, {})
@@ -2678,7 +2705,10 @@ async def tournament_ws(ws: WebSocket, tournament_id: str):
                     pg[user_id] = None
                 await arena_send(ws, {"type": "resumed",
                     "message": "You're back! Looking for an opponent…"})
-                print(f"[arena] {username} resumed in {tournament_id}", flush=True)
+                print(f"[DBG resume] {tournament_id}: user={user_id} RESUMED "
+                      f"available={conns.get(user_id,{}).get('available')} "
+                      f"paused={conns.get(user_id,{}).get('paused')} pg={pg.get(user_id)} "
+                      f"connected={conns.get(user_id,{}).get('connected')}", flush=True)
                 # No direct pairing call — the poller picks this up on its next tick.
     except WebSocketDisconnect:
         pass

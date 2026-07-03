@@ -1654,6 +1654,7 @@ function connectTournamentWs(tid, tournament) {
   tournamentWs.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
+      console.log('[DBG client] tournamentWs recv:', msg.type, '|', JSON.stringify(msg).slice(0, 200));
       if (msg.type === 'game_ready') {
         showArenaGameReady(msg);
       } else if (msg.type === 'game_over') {
@@ -1791,6 +1792,8 @@ function showArenaGameReady(msg) {
   hideArenaCountdown();
   const tc   = encodeURIComponent(msg.time_control || '');
   const href = `/multiplayer?game_id=${msg.game_id}&color=${msg.color}&tournament_id=${currentTournamentId}&tournament_db_id=${msg.tournament_db_id || ''}&time_control=${tc}&my_rank=${msg.my_rank||0}&opponent_rank=${msg.opponent_rank||0}`;
+  console.log('[DBG client] game_ready received:', JSON.stringify(msg));
+  console.log('[DBG client] redirect href:', href, '| tournament_db_id present?', !!msg.tournament_db_id);
 
   // Show bottom notification bar
   showNotifyBar(`♟ Game ready! ${msg.color} vs ${msg.opponent} (${msg.opponent_elo}) — Tap to play`, href);

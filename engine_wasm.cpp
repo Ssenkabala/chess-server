@@ -1,29 +1,12 @@
 /*
  * SenkabalaIII v20 — classical evaluation engine
+ * (sliding-attack PEXT tables, NNUE-ready, WASM deployment layer)
  */
 
 // Build stamp — printed to the console on engine_init(). Bump this whenever
 // you recompile so you can confirm from the browser console EXACTLY which
-// binary is live. If the console doesn't show the ID you expect after a
-// rebuild, the browser/CDN is still running a cached senkabala.wasm (or the
-// .wasm was never recompiled) — no source change can take effect until the
-// running binary actually updates.
-#define ENGINE_BUILD_ID "2026-07-02-mpvrank-4"
-
-// MSVC compatibility -- replace GCC built-ins
-#ifdef _MSC_VER
-#include <intrin.h>
-#pragma intrinsic(_BitScanForward64, _BitScanReverse64, __popcnt64)
-inline int __builtin_ctzll(unsigned long long x) {
-    unsigned long idx; _BitScanForward64(&idx, x); return (int)idx;
-}
-inline int __builtin_clzll(unsigned long long x) {
-    unsigned long idx; _BitScanReverse64(&idx, x); return 63 - (int)idx;
-}
-inline int __builtin_popcountll(unsigned long long x) {
-    return (int)__popcnt64(x);
-}
-#endif
+// binary is live.
+#define ENGINE_BUILD_ID "2026-07-05-sliding-mpvfix-1"
 
 #include <iostream>
 #include <string>
@@ -38,6 +21,19 @@ inline int __builtin_popcountll(unsigned long long x) {
 #include <cmath>
 #include <vector>
 #include <cmath>
+#ifdef _MSC_VER
+#include <intrin.h>
+#include <cstdint>
+static inline int __builtin_ctzll(unsigned long long x) {
+    unsigned long i; _BitScanForward64(&i, x); return (int)i;
+}
+static inline int __builtin_clzll(unsigned long long x) {
+    unsigned long i; _BitScanReverse64(&i, x); return 63 - (int)i;
+}
+static inline int __builtin_popcountll(unsigned long long x) {
+    return (int)__popcnt64(x);
+}
+#endif
 /* intrinsics replaced with GCC builtins */
 
 using namespace std;
@@ -255,7 +251,8 @@ void initAttacks() {
 }
 
 // Loop-based sliding attacks — 100% correct, no magic needed
-U64 rookAtt(Square sq, U64 occ) {
+// ---- loop-based sliding attacks: kept as reference / table builders ----
+U64 rookAttSlow(Square sq, U64 occ) {
     U64 att=0; int r=RANK_OF(sq),f=FILE_OF(sq);
     for(int i=r+1;i<8;i++){int s=SQ(f,i);att|=BIT(s);if(occ&BIT(s))break;}
     for(int i=r-1;i>=0;i--){int s=SQ(f,i);att|=BIT(s);if(occ&BIT(s))break;}
@@ -263,7 +260,7 @@ U64 rookAtt(Square sq, U64 occ) {
     for(int i=f-1;i>=0;i--){int s=SQ(i,r);att|=BIT(s);if(occ&BIT(s))break;}
     return att;
 }
-U64 bishAtt(Square sq, U64 occ) {
+U64 bishAttSlow(Square sq, U64 occ) {
     U64 att=0; int r=RANK_OF(sq),f=FILE_OF(sq);
     for(int i=1;r+i<8&&f+i<8;i++){int s=SQ(f+i,r+i);att|=BIT(s);if(occ&BIT(s))break;}
     for(int i=1;r+i<8&&f-i>=0;i++){int s=SQ(f-i,r+i);att|=BIT(s);if(occ&BIT(s))break;}
@@ -271,7 +268,70 @@ U64 bishAtt(Square sq, U64 occ) {
     for(int i=1;r-i>=0&&f-i>=0;i++){int s=SQ(f-i,r-i);att|=BIT(s);if(occ&BIT(s))break;}
     return att;
 }
+
+// ============================================================
+// PEXT SLIDING ATTACKS (BMI2) — same results as the loop versions,
+// computed with a single table lookup. Falls back to a portable
+// software pext if BMI2 is unavailable (still correct, just slower).
+// ============================================================
+#if defined(__BMI2__) || defined(_MSC_VER)
+#include <immintrin.h>
+static inline U64 pext_u64(U64 v, U64 m){ return _pext_u64(v, m); }
+#else
+static inline U64 pext_u64(U64 v, U64 m){
+    U64 r=0; int i=0;
+    while(m){ U64 b=m&(~m+1); if(v&b) r|=(1ULL<<i); i++; m&=m-1; }
+    return r;
+}
+#endif
+
+U64 RookMask[64], BishopMask[64];
+U64 RookTable[64][4096];    // 2^12 max
+U64 BishopTable[64][512];   // 2^9  max
+
+static U64 rookMaskCalc(int sq){
+    U64 m=0; int r=RANK_OF(sq),f=FILE_OF(sq);
+    for(int i=r+1;i<=6;i++) m|=BIT(SQ(f,i));
+    for(int i=r-1;i>=1;i--) m|=BIT(SQ(f,i));
+    for(int i=f+1;i<=6;i++) m|=BIT(SQ(i,r));
+    for(int i=f-1;i>=1;i--) m|=BIT(SQ(i,r));
+    return m;
+}
+static U64 bishopMaskCalc(int sq){
+    U64 m=0; int r=RANK_OF(sq),f=FILE_OF(sq);
+    for(int i=1;r+i<=6&&f+i<=6;i++) m|=BIT(SQ(f+i,r+i));
+    for(int i=1;r+i<=6&&f-i>=1;i++) m|=BIT(SQ(f-i,r+i));
+    for(int i=1;r-i>=1&&f+i<=6;i++) m|=BIT(SQ(f+i,r-i));
+    for(int i=1;r-i>=1&&f-i>=1;i++) m|=BIT(SQ(f-i,r-i));
+    return m;
+}
+void initSliders(){
+    for(int sq=0;sq<64;sq++){
+        RookMask[sq]   = rookMaskCalc(sq);
+        BishopMask[sq] = bishopMaskCalc(sq);
+        U64 m = RookMask[sq], sub=0;
+        do { RookTable[sq][pext_u64(sub,m)] = rookAttSlow(sq,sub); sub=(sub-m)&m; } while(sub);
+        m = BishopMask[sq]; sub=0;
+        do { BishopTable[sq][pext_u64(sub,m)] = bishAttSlow(sq,sub); sub=(sub-m)&m; } while(sub);
+    }
+}
+static inline U64 rookAtt(Square sq, U64 occ){ return RookTable[sq][pext_u64(occ, RookMask[sq])]; }
+static inline U64 bishAtt(Square sq, U64 occ){ return BishopTable[sq][pext_u64(occ, BishopMask[sq])]; }
 U64 queenAtt(Square sq,U64 occ){return rookAtt(sq,occ)|bishAtt(sq,occ);}
+
+// Verify fast == slow across all squares and many random occupancies.
+static bool verifySliders(){
+    U64 st=0x123456789abcdefULL;
+    auto rng=[&](){ st^=st>>12; st^=st<<25; st^=st>>27; return st*0x2545F4914F6CDD1DULL; };
+    for(int sq=0;sq<64;sq++){
+        for(int t=0;t<20000;t++){
+            U64 occ = rng() & rng();  // sparse-ish random occupancy
+            if(rookAtt(sq,occ)!=rookAttSlow(sq,occ)) return false;
+            if(bishAtt(sq,occ)!=bishAttSlow(sq,occ)) return false;
+        }
+    }
+    return true;
+}
 
 // Precomputed file masks (avoids inner-loop recomputation in eval)
 U64 fileMask[8];
@@ -302,6 +362,24 @@ U64 pawnKey(const Board& b) {
     tmp=bp;     while(tmp) k^=zPiece[BLACK][PAWN][popLSB(tmp)];
     return k;
 }
+#ifdef TUNE
+  #define WCONST
+#else
+  #define WCONST const
+#endif
+
+// ===== WAVE 2 TUNABLE SCALARS (defaults = old hardcoded values) =====
+WCONST int MOB_N_MG = -3,  MOB_N_EG = 10;    // knight mobility multiplier
+WCONST int MOB_B_MG = 4,  MOB_B_EG = 9;    // bishop mobility
+WCONST int MOB_R_MG = 6,  MOB_R_EG = 4;    // rook mobility
+WCONST int MOB_Q_MG = 0,  MOB_Q_EG = 22;    // queen mobility
+WCONST int BISHOP_PAIR_MG = 11, BISHOP_PAIR_EG = 68;
+WCONST int ROOK_OPEN_MG = 53, ROOK_OPEN_EG = 33;   // rook on fully open file
+WCONST int ROOK_SEMI_MG = 37, ROOK_SEMI_EG = 51;   // rook on semi-open file
+WCONST int DOUBLED_MG = -3, DOUBLED_EG = -1;
+WCONST int ISOLATED_MG = -9, ISOLATED_EG = -36;
+WCONST int TEMPO = 43;
+// ====================================================================
 
 // Evaluate pawn structure only (no king, no pieces)
 // Returns mg and eg scores from White's perspective
@@ -317,13 +395,13 @@ void evalPawnStructure(const Board& b, int& mg, int& eg) {
             U64 file = fileMask[f];
 
             // Doubled pawn penalty
-            if (popcnt(ourPawns & file) > 1) { mg+=mul*(-10); eg+=mul*(-20); }
+            if (popcnt(ourPawns & file) > 1) { mg+=mul*DOUBLED_MG; eg+=mul*DOUBLED_EG; }
 
             // Isolated pawn penalty
             U64 adjFiles = 0;
             if (f>0) adjFiles |= fileMask[f-1];
             if (f<7) adjFiles |= fileMask[f+1];
-            if (!(ourPawns & adjFiles)) { mg+=mul*(-15); eg+=mul*(-20); }
+            if (!(ourPawns & adjFiles)) { mg+=mul*ISOLATED_MG; eg+=mul*ISOLATED_EG; }
 
             // Passed pawn bonus
             U64 passedMask = 0;
@@ -390,6 +468,9 @@ void evalPawnStructure(const Board& b, int& mg, int& eg) {
 
 // Cached pawn eval lookup
 void evalPawnsCached(const Board& b, int& mg, int& eg) {
+#ifdef TUNE
+    evalPawnStructure(b, mg, eg); return;   // no caching while tuning
+#endif
     U64 k = pawnKey(b);
     PawnEntry& pe = pawnTT[k & (PAWN_TT_SIZE-1)];
     if (pe.key == k) { mg=pe.mg; eg=pe.eg; return; }
@@ -645,133 +726,49 @@ void genMoves(const Board& b, MoveList& ml) {
 
 // Piece values [mg, eg]
 const int MAT[6]   = {100, 320, 330, 500, 900, 0};  // used by move ordering
-const int MAT_MG[6]= {100, 325, 335, 500, 975, 0};
-const int MAT_EG[6]= {120, 290, 305, 560, 990, 0};
+WCONST int MAT_MG[6]= {41, 315, 348, 429, 1027, 0};
+WCONST int MAT_EG[6]= {74, 351, 393, 631, 1078, 0};
 
 // Game phase weights (max phase = 24)
 const int PHASE_W[6] = {0, 1, 1, 2, 4, 0};
 const int MAX_PHASE  = 24;
 
 // PST tables [mg][eg] — white relative (a1=0)
-const int PST_MG[6][64] = {
+WCONST int PST_MG[6][64] = {
 // PAWN mg
-{ 0, 0, 0, 0, 0, 0, 0, 0,
- -5, 0, 0,-10,-10, 0, 0,-5,
- -5,-5,-5,  0,  0,-5,-5,-5,
-  0, 0, 0, 20, 20, 0, 0, 0,
-  5, 5,10, 25, 25,10, 5, 5,
- 10,10,20, 30, 30,20,10,10,
- 50,50,50, 50, 50,50,50,50,
-  0, 0, 0,  0,  0, 0, 0, 0},
+{0,0,0,0,0,0,0,0,-6,0,-5,-96,-3,18,36,-29,8,-10,-6,-8,5,10,27,4,-3,-1,-5,33,55,24,27,-8,19,18,51,58,66,57,16,1,-28,-56,-2,-58,-58,41,-16,-24,-38,-38,-38,-38,-38,-38,-38,-38,0,0,0,0,0,0,0,0},
 // KNIGHT mg
-{-50,-40,-30,-30,-30,-30,-40,-50,
- -40,-20,  0,  5,  5,  0,-20,-40,
- -30,  5, 10, 15, 15, 10,  5,-30,
- -30,  0, 15, 20, 20, 15,  0,-30,
- -30,  5, 15, 20, 20, 15,  5,-30,
- -30,  0, 10, 15, 15, 10,  0,-30,
- -40,-20,  0,  0,  0,  0,-20,-40,
- -50,-40,-30,-30,-30,-30,-40,-50},
+{-94,-79,3,-25,35,-12,-34,8,-118,-108,-56,-3,-8,-4,36,45,-107,-26,-7,24,27,15,-1,-44,-32,-61,56,-26,45,55,-36,16,54,-24,85,42,-4,45,21,58,9,40,8,53,0,77,-43,9,-52,61,88,60,26,-26,-14,-81,-61,-113,-16,-23,-3,-110,-4,-126},
 // BISHOP mg
-{-20,-10,-10,-10,-10,-10,-10,-20,
- -10,  0,  0,  0,  0,  0,  0,-10,
- -10,  0,  5, 10, 10,  5,  0,-10,
- -10,  5,  5, 10, 10,  5,  5,-10,
- -10,  0, 10, 10, 10, 10,  0,-10,
- -10, 10, 10, 10, 10, 10, 10,-10,
- -10,  5,  0,  0,  0,  0,  5,-10,
- -20,-10,-10,-10,-10,-10,-10,-20},
+{-2,-37,23,12,-2,-21,34,63,45,30,-1,23,3,7,64,20,22,17,28,15,27,19,24,-14,32,-15,-21,36,38,26,-24,19,-2,-11,6,-23,7,-3,14,-49,22,53,-76,-16,-75,-78,-21,10,-50,36,-10,-35,-76,20,-72,38,-72,-52,-31,-93,-46,-98,16,-5},
 // ROOK mg
-{  0,  0,  0,  5,  5,  0,  0,  0,
-  -5,  0,  0,  0,  0,  0,  0, -5,
-  -5,  0,  0,  0,  0,  0,  0, -5,
-  -5,  0,  0,  0,  0,  0,  0, -5,
-  -5,  0,  0,  0,  0,  0,  0, -5,
-  -5,  0,  0,  0,  0,  0,  0, -5,
-   5, 10, 10, 10, 10, 10, 10,  5,
-   0,  0,  0,  0,  0,  0,  0,  0},
+{-14,-25,4,17,10,29,-42,-13,-9,-78,-42,-55,-58,10,-60,-91,-29,-32,-18,-18,10,28,-18,-28,-18,-27,36,-13,-15,-9,-26,2,50,-53,33,2,36,43,-73,38,77,65,28,74,62,70,48,83,41,-6,73,69,60,87,76,82,-28,-2,-40,-47,-30,14,47,86},
 // QUEEN mg
-{-20,-10,-10, -5, -5,-10,-10,-20,
- -10,  0,  0,  0,  0,  0,  0,-10,
- -10,  0,  5,  5,  5,  5,  0,-10,
-  -5,  0,  5,  5,  5,  5,  0, -5,
-   0,  0,  5,  5,  5,  5,  0, -5,
- -10,  5,  5,  5,  5,  5,  0,-10,
- -10,  0,  5,  0,  0,  0,  0,-10,
- -20,-10,-10, -5, -5,-10,-10,-20},
-// KING mg — want castled, tucked away
-{ 30, 40, 40, 10, 10, 20, 40, 30,
-  30, 30,  0,  0,  0,  0, 30, 30,
- -10,-20,-20,-20,-20,-20,-20,-10,
- -20,-30,-30,-40,-40,-30,-30,-20,
- -30,-40,-40,-50,-50,-40,-40,-30,
- -30,-40,-40,-50,-50,-40,-40,-30,
- -30,-40,-40,-50,-50,-40,-40,-30,
- -30,-40,-40,-50,-50,-40,-40,-30}
+{-5,8,-14,35,-9,4,-22,-9,-11,27,41,24,36,41,-43,-84,0,-20,49,15,35,33,9,-27,-10,-35,20,21,24,2,-22,7,53,15,-5,20,18,67,-52,25,9,-38,9,52,-45,23,56,-3,49,-11,-34,35,22,34,2,19,36,21,-40,3,37,65,37,59},
+// KING mg
+{27,63,38,-46,46,-32,76,53,48,-3,-60,3,-32,50,60,21,-68,-44,-33,-8,-10,-19,-32,-68,-84,13,-50,-108,-52,-45,-41,-96,-103,-41,-100,-65,-81,-49,16,-24,-58,43,-7,-71,-69,43,45,6,-69,27,-7,-64,10,-19,40,-3,-89,-31,-17,2,-12,-28,-28,21}
 };
 
-const int PST_EG[6][64] = {
-// PAWN eg — advanced pawns rewarded heavily
-{ 0, 0, 0, 0, 0, 0, 0, 0,
-  5,10,10,10,10,10,10, 5,
- -5, 0, 0, 0, 0, 0, 0,-5,
- -5, 0, 0, 0, 0, 0, 0,-5,
-  0, 0, 0, 5, 5, 0, 0, 0,
-  5, 5,10,20,20,10, 5, 5,
- 20,25,30,40,40,30,25,20,
-  0, 0, 0, 0, 0, 0, 0, 0},
-// KNIGHT eg — centralise, avoid edges
-{-50,-40,-30,-30,-30,-30,-40,-50,
- -40,-20,  0,  0,  0,  0,-20,-40,
- -30,  0, 10, 15, 15, 10,  0,-30,
- -30,  5, 15, 20, 20, 15,  5,-30,
- -30,  0, 15, 20, 20, 15,  0,-30,
- -30,  5, 10, 15, 15, 10,  5,-30,
- -40,-20,  0,  5,  5,  0,-20,-40,
- -50,-40,-30,-30,-30,-30,-40,-50},
+WCONST int PST_EG[6][64] = {
+// PAWN eg
+{0,0,0,0,0,0,0,0,21,16,9,-53,19,38,27,16,3,15,12,-29,-39,17,2,-15,39,26,19,-51,-15,15,23,4,39,20,8,-34,-29,9,39,6,-29,-41,-73,-68,-68,-29,-14,-19,-68,-63,-58,-48,-48,-58,-63,-68,0,0,0,0,0,0,0,0},
+// KNIGHT eg
+{-89,-102,-76,26,-22,-4,29,-47,-51,13,43,-19,-2,27,19,-89,7,-24,11,47,26,11,62,-12,-6,30,-21,68,47,36,45,-74,-45,52,59,28,63,85,7,46,27,43,36,38,46,54,47,8,-59,-37,6,89,-37,45,-56,-6,-117,-128,36,-36,-59,-36,-23,-83},
 // BISHOP eg
-{-20,-10,-10,-10,-10,-10,-10,-20,
- -10,  0,  0,  0,  0,  0,  0,-10,
- -10,  0,  5,  5,  5,  5,  0,-10,
- -10,  0,  5, 10, 10,  5,  0,-10,
- -10,  0,  5, 10, 10,  5,  0,-10,
- -10,  0,  5,  5,  5,  5,  0,-10,
- -10,  0,  0,  0,  0,  0,  0,-10,
- -20,-10,-10,-10,-10,-10,-10,-20},
+{-101,30,-1,15,-10,-19,12,-27,51,12,48,40,35,77,9,27,56,20,86,40,74,65,36,5,14,44,80,69,15,70,6,43,6,77,93,49,98,-9,60,61,17,46,11,88,-9,55,86,30,17,58,35,18,68,65,79,27,-9,74,64,16,29,-41,-34,16},
 // ROOK eg
-{  0,  0,  0,  0,  0,  0,  0,  0,
-   5, 10, 10, 10, 10, 10, 10,  5,
-  -5,  0,  0,  0,  0,  0,  0, -5,
-  -5,  0,  0,  0,  0,  0,  0, -5,
-  -5,  0,  0,  0,  0,  0,  0, -5,
-  -5,  0,  0,  0,  0,  0,  0, -5,
-  -5,  0,  0,  0,  0,  0,  0, -5,
-   0,  0,  0,  5,  5,  0,  0,  0},
+{4,3,-2,3,-7,-5,-14,-10,-19,-45,-18,-7,-2,-32,-24,-4,34,-2,0,-5,-41,13,-21,-33,23,41,-15,7,-21,12,16,-11,68,60,79,10,35,23,34,64,80,79,84,46,55,34,59,67,24,26,10,10,14,-3,47,27,18,51,44,18,30,14,36,87},
 // QUEEN eg
-{-20,-10,-10, -5, -5,-10,-10,-20,
- -10,  0,  0,  0,  0,  0,  0,-10,
- -10,  0,  5,  5,  5,  5,  0,-10,
-  -5,  0,  5,  5,  5,  5,  0, -5,
-   0,  0,  5,  5,  5,  5,  0, -5,
- -10,  5,  5,  5,  5,  5,  0,-10,
- -10,  0,  5,  0,  0,  0,  0,-10,
- -20,-10,-10, -5, -5,-10,-10,-20},
-// KING eg — centralise in endgame
-{-50,-40,-30,-20,-20,-30,-40,-50,
- -30,-20,-10,  0,  0,-10,-20,-30,
- -30,-10, 20, 30, 30, 20,-10,-30,
- -30,-10, 30, 40, 40, 30,-10,-30,
- -30,-10, 30, 40, 40, 30,-10,-30,
- -30,-10, 20, 30, 30, 20,-10,-30,
- -30,-30,  0,  0,  0,  0,-30,-30,
- -50,-30,-30,-30,-30,-30,-30,-50}
+{-30,-75,-83,-41,-46,-58,-73,-37,10,16,-45,-3,-6,-16,-46,-63,15,11,18,39,2,49,10,-14,19,-6,-7,41,56,62,-31,35,49,53,49,76,87,2,76,23,57,58,72,75,85,84,78,50,51,71,30,66,70,82,77,58,62,73,58,80,76,58,32,64},
+// KING eg
+{-37,-35,-10,2,-53,-40,-25,-83,-41,4,18,-20,-18,-13,9,-24,-44,-7,-26,-17,-14,-2,13,-1,1,-46,-14,-18,-13,9,7,-31,-41,29,22,-1,9,73,78,40,58,78,104,64,65,108,78,58,-117,58,75,71,71,49,58,56,-138,53,-60,49,53,-33,57,-51}
 };
 
 int evaluate(const Board& b) {
     int mg=0, eg=0, phase=0;
 
     // Tempo bonus — small reward for side to move
-    mg += (b.turn==WHITE) ? 10 : -10;
+    mg += (b.turn==WHITE) ? TEMPO : -TEMPO;
 
     // Pawn structure via cache
     { int pmg=0, peg=0; evalPawnsCached(b,pmg,peg); mg+=pmg; eg+=peg; }
@@ -790,7 +787,7 @@ int evaluate(const Board& b) {
         }
 
         // Bishop pair bonus
-        if (popcnt(b.pieces[c][BISHOP]) >= 2) { mg += mul*30; eg += mul*50; }
+        if (popcnt(b.pieces[c][BISHOP]) >= 2) { mg += mul*BISHOP_PAIR_MG; eg += mul*BISHOP_PAIR_EG; }
 
         // Rook on open/semi-open file + rook on 7th rank + endgame patterns
         U64 rooks = b.pieces[c][ROOK], tmp=rooks;
@@ -804,8 +801,8 @@ int evaluate(const Board& b) {
             U64 file = fileMask[f];
             bool noOurs   = !(b.pieces[c][PAWN]   & file);
             bool noTheirs = !(b.pieces[1-c][PAWN] & file);
-            if (noOurs && noTheirs) { mg += mul*25; eg += mul*30; }
-            else if (noOurs)        { mg += mul*12; eg += mul*18; }
+            if (noOurs && noTheirs) { mg += mul*ROOK_OPEN_MG; eg += mul*ROOK_OPEN_EG; }
+            else if (noOurs)        { mg += mul*ROOK_SEMI_MG; eg += mul*ROOK_SEMI_EG; }
             // Rook on 7th
             if (r==rank7 && (b.pieces[1-c][PAWN] || (enemyKing && RANK_OF(lsb(enemyKing))==rank8)))
                 { mg += mul*20; eg += mul*30; }
@@ -865,13 +862,13 @@ int evaluate(const Board& b) {
         // Mobility
         U64 all = b.occ[2], myPieces = b.occ[c];
         U64 kn=b.pieces[c][KNIGHT];
-        while(kn){Square sq=popLSB(kn);int km=popcnt(knightAtt[sq]&~myPieces)-4;mg+=mul*km*3;eg+=mul*km*4;}
+        while(kn){Square sq=popLSB(kn);int km=popcnt(knightAtt[sq]&~myPieces)-4;mg+=mul*km*MOB_N_MG;eg+=mul*km*MOB_N_EG;}
         U64 bi=b.pieces[c][BISHOP];
-        while(bi){Square sq=popLSB(bi);int bm=popcnt(bishAtt(sq,all)&~myPieces)-7;mg+=mul*bm*2;eg+=mul*bm*3;}
+        while(bi){Square sq=popLSB(bi);int bm=popcnt(bishAtt(sq,all)&~myPieces)-7;mg+=mul*bm*MOB_B_MG;eg+=mul*bm*MOB_B_EG;}
         U64 ro=b.pieces[c][ROOK];
-        while(ro){Square sq=popLSB(ro);int rm=popcnt(rookAtt(sq,all)&~myPieces)-7;mg+=mul*rm*2;eg+=mul*rm*3;}
+        while(ro){Square sq=popLSB(ro);int rm=popcnt(rookAtt(sq,all)&~myPieces)-7;mg+=mul*rm*MOB_R_MG;eg+=mul*rm*MOB_R_EG;}
         U64 qu2=b.pieces[c][QUEEN];
-        while(qu2){Square sq=popLSB(qu2);int qm=popcnt(queenAtt(sq,all)&~myPieces)-14;mg+=mul*qm;eg+=mul*qm*2;}
+        while(qu2){Square sq=popLSB(qu2);int qm=popcnt(queenAtt(sq,all)&~myPieces)-14;mg+=mul*qm*MOB_Q_MG;eg+=mul*qm*MOB_Q_EG;}
 
         // Knight outposts — knights on squares that can't be attacked by enemy pawns
         // and are supported by our own pawn
@@ -1313,18 +1310,18 @@ const int INF=1000000, MATE=999000;
 const int MAX_PLY=64;
 const int MATE_THRESHOLD = 900000;
 
-enum TTFlag { TT_EXACT, TT_LOWER, TT_UPPER };
-struct TTEntry { U64 hash; int score, depth; Move bestMove; TTFlag flag; };
-#ifdef __EMSCRIPTEN__
-const int TT_SIZE = 1<<20;  // WASM: 1M entries ~20MB
-#else
-const int TT_SIZE = 1<<23;  // Native: 8M entries ~160MB
-#endif
-TTEntry* tt = nullptr;
-
-void ttClear() { if(tt) memset(tt, 0, TT_SIZE*sizeof(TTEntry)); }
-
-struct TTResult { int score, depth, flag; Move bestMove; };
+inline bool isMateScore(int score) {
+    return std::abs(score) >= MATE_THRESHOLD;
+}
+// Converts a raw mate score (MATE - ply, or -MATE + ply) into a signed
+// "mate in N" move count — positive if the side to move at the score's
+// origin delivers mate, negative if they get mated. Standard UCI semantics.
+inline int mateMovesFromScore(int score) {
+    int absScore = std::abs(score);
+    int plyToMate = MATE - absScore + 1;
+    int n = (plyToMate + 1) / 2;
+    return score > 0 ? n : -n;
+}
 
 // ── Mate-score TT adjustment ──────────────────────────────────────────
 // Mate scores are stored as (MATE - distance_from_root). But the TT is
@@ -1333,13 +1330,13 @@ struct TTResult { int score, depth, flag; Move bestMove; };
 // re-searching the same line). If a root-relative mate score is written
 // and later read back at a different ply, it's wrong — and it drifts
 // toward MATE-1 ("mate in 1"), which then dominates every deeper search
-// via the TT and poisons the result (observed live: a real mate-in-5
-// degrading into a phantom mate-in-1 on an unrelated move once the search
-// ran deep enough to keep re-probing it).
+// via the TT and poisons the result. This exact bug was found and fixed
+// in the WASM build earlier — this file predates that fix (no ply
+// parameter on ttStore/ttProbe at all), and it's the same TT here.
 //
-// Standard fix: store mate scores relative to the CURRENT node (add ply
-// on the way in), and translate back to root-relative on the way out
-// (subtract ply). Non-mate scores pass through untouched.
+// Fix: store mate scores relative to the CURRENT node (add ply on the way
+// in), translate back to root-relative on the way out (subtract ply).
+// Non-mate scores pass through untouched.
 inline int scoreToTT(int score, int ply) {
     if (score >=  MATE_THRESHOLD) return score + ply;
     if (score <= -MATE_THRESHOLD) return score - ply;
@@ -1351,9 +1348,53 @@ inline int scoreFromTT(int score, int ply) {
     return score;
 }
 
+enum TTFlag { TT_EXACT, TT_LOWER, TT_UPPER };
+struct TTEntry { U64 hash; int score, depth; Move bestMove; TTFlag flag; };
+#ifdef __EMSCRIPTEN__
+const int TT_SIZE     = 1<<20;  // WASM: 1M entries ~20MB — main table: pvIdx==0 and single-PV (bot play) only
+const int TT_SIZE_MPV = 1<<15;  // WASM: 32K entries ~640KB — scratch table: excluded-move (pvIdx>=1) searches only
+#else
+const int TT_SIZE     = 1<<23;  // Native: 8M entries ~160MB — main table: pvIdx==0 and single-PV (bot play) only
+const int TT_SIZE_MPV = 1<<18;  // Native: 256K entries ~5MB — scratch table: excluded-move (pvIdx>=1) searches only
+#endif
+TTEntry* tt  = nullptr;
+TTEntry* tt2 = nullptr;
+
+// ttStore/ttProbe read through activeTT/activeTTMask rather than a
+// hardcoded table. This is what lets the multipv loop isolate excluded-move
+// (pvIdx>=1) searches into their OWN table without touching negamax's
+// signature at all.
+//
+// Why this exists: pvIdx=0's deep exploration of the true best line fills
+// the (shared) TT with many entries, including mate scores correctly
+// ply-adjusted for THAT search's own recursion. When pvIdx>=1 then explores
+// a totally different, unrelated root move, its recursion can transpose
+// into (or hash-collide with) a position that only has a real mate
+// available via a forcing sequence pvIdx=0 found — not one the excluded
+// move actually forces. The cached score gets read back and ply-adjusted
+// "correctly" for that isolated read, but it doesn't describe what the
+// excluded move actually achieves. Confirmed live: fully clearing the TT
+// before every pvIdx>=1 search eliminated the corruption outright (a
+// non-checking rook move stopped reporting "mate in 1"), which pinned the
+// mechanism down precisely — but a full clear of the 160MB main table on
+// every secondary line, every depth, is far too expensive to ship. A
+// separate, much smaller table for exactly those searches gets the same
+// isolation without that cost, and never touches the main table pvIdx==0
+// and single-PV (bot play) depend on — those two are completely unaffected
+// by any of this.
+TTEntry* activeTT     = nullptr;
+int      activeTTMask = 0;
+
+void ttClear() {
+    if(tt)  memset(tt,  0, TT_SIZE*sizeof(TTEntry));
+    if(tt2) memset(tt2, 0, TT_SIZE_MPV*sizeof(TTEntry));
+}
+
+struct TTResult { int score, depth, flag; Move bestMove; };
+
 bool ttProbe(U64 hash, TTResult& out, int ply) {
-    if (!tt) return false;
-    TTEntry* e = &tt[hash & (TT_SIZE-1)];
+    if (!activeTT) return false;
+    TTEntry* e = &activeTT[hash & activeTTMask];
     if (e->hash != hash) return false;
     out.score    = scoreFromTT(e->score, ply);
     out.depth    = e->depth;
@@ -1363,8 +1404,8 @@ bool ttProbe(U64 hash, TTResult& out, int ply) {
 }
 
 void ttStore(U64 hash, int score, int depth, Move best, TTFlag flag, int ply) {
-    if (!tt) return;
-    TTEntry* e = &tt[hash & (TT_SIZE-1)];
+    if (!activeTT) return;
+    TTEntry* e = &activeTT[hash & activeTTMask];
     if (e->hash == hash || depth >= e->depth) {
         if (best == NULL_MOVE && e->hash == hash) best = e->bestMove;
         e->hash     = hash;
@@ -1453,6 +1494,26 @@ int evaluatePos(const Board& b) {
         float feats[NN_INPUT];
         extractFeatures(feats, pieces, b.turn);
         int score = nnueForward(feats);
+        // Defensive guard: a NaN or Inf produced somewhere inside
+        // nnueForward's floating-point math (malformed/corrupted weights,
+        // an overflow in the forward pass, etc.) converting to `int` is
+        // undefined behavior — it will NOT reliably be caught by a normal
+        // range check, since the resulting int can be anything, including
+        // a value that happens to land in or near MATE_THRESHOLD and gets
+        // misread as a forced mate downstream. Since nnueForward's return
+        // is already `int` here (whatever conversion happens is inside
+        // nnue.h, which this file doesn't have visibility into), the most
+        // robust check available at this boundary is a plausibility range:
+        // no real chess evaluation is anywhere close to a mate score.
+        // Falling back to the classical eval (always sane, pure integer
+        // arithmetic, no floating point at all) is far safer than trusting
+        // a value this implausible. This does NOT fix whatever is actually
+        // producing the bad value inside nnue.h — it only stops it from
+        // corrupting search/comparisons elsewhere. The real fix needs
+        // nnue.h itself.
+        if (score <= -MATE_THRESHOLD || score >= MATE_THRESHOLD) {
+            return evaluate(b);
+        }
         // score is already from side-to-move perspective (extractFeatures flips for black)
         return score;
     }
@@ -1463,23 +1524,8 @@ int evaluatePos(const Board& b) {
 // ============================================================
 // SEARCH GLOBALS
 // ============================================================
-// INF, MATE, MATE_THRESHOLD are defined earlier (just above the TT code,
-// which needs MATE_THRESHOLD for mate-score adjustment).
-
-inline bool isMateScore(int score) {
-    return std::abs(score) >= MATE_THRESHOLD;
-}
-
-// Converts a raw mate score (MATE - ply, or -MATE + ply) into a signed
-// "mate in N" move count — positive if the side to move at the score's
-// origin delivers mate, negative if they get mated. Matches standard
-// UCI "score mate N" semantics.
-inline int mateMovesFromScore(int score) {
-    int absScore = std::abs(score);
-    int plyToMate = MATE - absScore + 1;
-    int n = (plyToMate + 1) / 2;  // ceil(plyToMate / 2)
-    return score > 0 ? n : -n;
-}
+// INF, MATE, MAX_PLY, MATE_THRESHOLD are defined earlier (just above the
+// TT code, which needs MATE_THRESHOLD for mate-score adjustment).
 
 // LMR table
 int LMR[MAX_PLY][64];
@@ -1498,25 +1544,31 @@ Move counterMove[64][64];
 auto searchStart = chrono::steady_clock::now();
 int  searchTimeMs = 1000;
 atomic<bool> stopNow{false};
-// When true, search() skips time recalculation (set by WASM engine_best_move)
-bool wasmTimerPreset = false;
-
-// Exposes the top root moves (already sorted by score, same order the
-// per-depth multipv info lines report) so the caller can extract PVs using
-// ITS OWN clean board, rather than search()'s internal working board. This
-// matters because search()'s board can end up in a state that produces a
-// corrupted continuation when walked by extractPV — confirmed via direct
-// tracing (a position ending up with a duplicate piece on the board), root
-// cause not yet fully understood, but NOT something a copy of the original,
-// untouched starting position can ever exhibit, since it was never used by
-// any of the search's own recursive calls in the first place.
-const int MAX_EXPOSED_ROOT_MOVES = 5;
-Move exposedRootMoves[MAX_EXPOSED_ROOT_MOVES];
-int  exposedRootScores[MAX_EXPOSED_ROOT_MOVES];  // score for each exposed move, same perspective as depthBestScore
-int  exposedRootMoveCount = 0;
+bool nativeMovetimeRequest = false;  // true only for the duration of a "go movetime N"
+                                      // search — see the movetime-bypass branch in search()
 atomic<bool> pondering{false};  // true while pondering (infinite search until "stop")
 Move ponderMove = NULL_MOVE;    // the expected opponent reply we're pondering on
-int  multiPVCount = 1;          // UCI MultiPV option — how many best moves to report
+
+// ── WASM / MultiPV support ──────────────────────────────────────────
+// wasmTimerPreset: set true only by the Emscripten entry points
+// (engine_best_move/engine_analyse) right before calling search(), so the
+// clock-percentage time formula is bypassed in favour of an exact
+// millisecond budget from JS. Always false in a native build (no other
+// code ever sets it), so this has zero effect on native UCI play.
+bool wasmTimerPreset = false;
+
+// Exposes the top root moves (in true multipv order) so a caller — the
+// WASM analysis path — can extract PVs using its OWN clean board copy,
+// never search()'s internal one (which can carry corrupted continuation
+// state across its own recursive calls; a freshly re-parsed board sidesteps
+// that entirely). Populated once per depth, only on a depth that completed
+// without being cut off by time.
+const int MAX_EXPOSED_ROOT_MOVES = 5;
+Move exposedRootMoves[MAX_EXPOSED_ROOT_MOVES];
+int  exposedRootScores[MAX_EXPOSED_ROOT_MOVES];
+int  exposedRootMoveCount = 0;
+
+int  multiPVCount = 1;  // UCI MultiPV option — how many best moves to report
 
 // Search runs in a background thread so the UCI loop stays responsive
 // to "stop" and "ponderhit" commands during pondering.
@@ -1664,7 +1716,7 @@ int scoreMove(const Board& b, Move m, Move ttMove, int ply) {
         if (m == killers[0][ply]) return 900000;
         if (m == killers[1][ply]) return 800000;
     }
-    if(ply>0){Move prev=killers[0][ply-1];if(prev&&counterMove[MV_FROM(prev)][MV_TO(prev)]==m)return 750000;}
+    if(ply>0 && ply-1<MAX_PLY){Move prev=killers[0][ply-1];if(prev&&counterMove[MV_FROM(prev)][MV_TO(prev)]==m)return 750000;}
     int from=MV_FROM(m),to=MV_TO(m);
     return history[(int)b.turn][from][to];
 }
@@ -1687,6 +1739,27 @@ void sortMoves(const Board& b, MoveList& ml, Move ttMove, int ply) {
 int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false) {
     if(stopNow||timeUp()){stopNow=true;return 0;}
     if(b.halfmove>=100) return 0;
+    // killers[2][MAX_PLY] is sized for the OUTER iterative-deepening depth
+    // limit (64), but ply itself is NOT bounded by that — check and
+    // singular extensions add +1 to the effective remaining depth on every
+    // recursive call, so a long enough forcing sequence (many consecutive
+    // checks) pushes ply past MAX_PLY-1 with no relation to how deep the
+    // current iterative-deepening iteration nominally is. Every killers[]
+    // access below used the raw ply directly, with no bounds check —
+    // genuine undefined behavior once ply reached 64+. Confirmed live: a
+    // MultiPV secondary line (searching a bad move with the real best line
+    // excluded, in a position with overwhelming material offering many
+    // spite-checks) reached ply 60+ and produced a physically-impossible
+    // "mate in 1" for a move that doesn't even give check — memory
+    // corruption near the scoring/TT logic producing a value that
+    // happened to read as a mate score. Single-PV/bot-play never hits
+    // this: the real best line resolves quickly and never approaches
+    // anywhere near this depth. killerPly is used ONLY for the killers[]
+    // indexing below; every other use of ply (mate-distance math,
+    // repetition-contempt scaling, the ply+1 passed to recursive calls)
+    // keeps the true, unclamped value — clamping those would silently cap
+    // reported mate distances and break repetition scoring.
+    int killerPly = min(ply, MAX_PLY-1);
     if(ply>0){
         int rc = repetitionCount(b);
         // Repetition contempt — scaled by ply, always negative.
@@ -1708,21 +1781,11 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
         // accepting repetition when it's actually losing.
         if(rc >= 2) return 0;
         if(rc == 1) {
-            // Contempt — engine should strongly avoid self-imposed draws.
-            // Values are deliberately high: a won position is worth 300-500cp,
-            // so contempt must exceed that to prevent the engine choosing repetition
-            // over a genuinely winning line.
-            //   ply 1: -300  (engine directly choosing to repeat — almost never acceptable)
-            //   ply 2: -200  (opponent's reply leads to repeat — still strongly avoid)
-            //   ply 3: -150
-            //   ply 4: -100
-            //   ply 5+: -60  (deep in tree — opponent may be forcing it)
-            //   rc>=2:   0   (third occurrence = draw by rule, must accept)
-            int contempt = (ply==1) ? -300 : (ply==2) ? -200 : (ply==3) ? -150 : (ply==4) ? -100 : -60;
+            int contempt = (ply==1) ? -80 : (ply==2) ? -60 : (ply==3) ? -45 : (ply==4) ? -30 : -20;
             // Scale with static eval: penalise draw much harder when winning.
             int se = evaluate(b);
-            if (se > 100)  contempt -= (se - 100) / 2;   // stronger penalty when clearly winning
-            if (se < -200) contempt += (-se - 200) / 8;  // slight relief when clearly losing
+            if (se > 100)  contempt -= (se - 100) / 3;   // much stronger penalty when winning
+            if (se < -150) contempt += (-se - 150) / 16;  // slight relief when losing
             return contempt;
         }
     }
@@ -1805,21 +1868,10 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
 
     // Null move pruning — skip our turn and see if opponent still can't beat beta
     if (!pvNode && !inCheck && !inNull && depth >= 3 && ply > 0) {
-        // Don't null move in pawn/king-only positions (zugzwang risk), OR in
-        // any sufficiently sparse position generally. Confirmed via a
-        // controlled experiment: two real forced-mate-in-2 positions (6 and
-        // 7 pieces total) were both missed by the engine with null-move
-        // pruning active, and both found correctly the moment it was
-        // disabled — same time budget, same everything else, only this one
-        // mechanism changed. An 8-piece threshold covers both confirmed
-        // cases with margin and naturally extends to basic king-and-pawn
-        // endgames generally, which is exactly the category of position
-        // where null-move pruning's zugzwang risk is classically documented
-        // as dangerous, not just these two specific examples.
+        // Don't null move in pawn/king-only positions (zugzwang risk)
         U64 nonPawns = b.pieces[b.turn][KNIGHT]|b.pieces[b.turn][BISHOP]
                       |b.pieces[b.turn][ROOK]  |b.pieces[b.turn][QUEEN];
-        bool sparsePosition = popcnt(b.occ[2]) <= 12;
-        if (nonPawns && !sparsePosition) {
+        if (nonPawns) {
             // Make null move: just flip the turn
             UndoInfo nu;
             nu.movedPiece=-1; nu.capturedPiece=-1; nu.capturedColor=-1;
@@ -1831,7 +1883,7 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
             b.turn = (Color)(1-b.turn);
             b.hash ^= zTurn;
 
-            int R = (depth >= 6) ? 3 : 2;
+            int R = (depth >= 7) ? 3 : 2;
             int nullSc = -negamax(b, depth-R-1, -beta, -beta+1, ply+1, true);
 
             // Restore
@@ -1934,13 +1986,20 @@ int negamax(Board& b, int depth, int alpha, int beta, int ply, bool inNull=false
 // position's stored best move, to reconstruct a real multi-move principal
 // variation. Without this, the engine's info output only ever reported the
 // single root move — even for a forced mate, where the actual winning line
-// is several moves deep and was always sitting right there in the TT,
-// just never collected into a sequence. Capped at a modest depth and
-// defended against TT collisions/cycles: stops cleanly if a position
-// repeats (a corrupted or shallow TT entry pointing back at an earlier
-// position) or if a stored move turns out illegal in the position it's
-// being applied to (a hash collision, rare but possible with a 1M/8M-entry
-// table and no verification beyond the hash match itself).
+// is several moves deep and was always sitting right there in the TT, just
+// never collected into a sequence. Capped at a modest depth and defended
+// against TT collisions/cycles: stops cleanly if a position repeats (a
+// corrupted or shallow TT entry pointing back at an earlier position) or if
+// a stored move turns out illegal in the position it's being applied to (a
+// hash collision, rare but possible with a limited-size table and no
+// verification beyond the hash match itself).
+//
+// IMPORTANT: this always reads through whatever activeTT currently points
+// to. Every caller of this function is responsible for explicitly setting
+// activeTT = tt (the main table) immediately before calling it — this
+// function does NOT do that itself, because it has no way to know whether
+// it's being asked about the main line or an excluded-move scratch line.
+// Getting this wrong would silently read from the wrong table.
 string extractPV(Board startBoard, Move firstMove, int maxLen = 16) {
     string result = moveStr(firstMove);
     Board cur = startBoard;
@@ -1956,8 +2015,7 @@ string extractPV(Board startBoard, Move firstMove, int maxLen = 16) {
         // PV. Without this, a completed mating line could keep appending
         // whatever the TT happened to hold for the mated position,
         // producing extra "moves" after a mate that has already ended the
-        // game — part of what made a mate-in-1 score show up next to a
-        // multi-move line that never actually delivered the mate.
+        // game.
         {
             MoveList term; genMoves(cur, term);
             bool anyLegal = false;
@@ -1974,9 +2032,7 @@ string extractPV(Board startBoard, Move firstMove, int maxLen = 16) {
 
         // Verify the stored move is actually legal here before trusting it —
         // a hash collision could otherwise produce a bogus or illegal move
-        // in the printed PV, which is exactly the class of bug we already
-        // chased once this session (the server-side fallback returning an
-        // unvalidated move). Cheap insurance: confirm it appears in the
+        // in the printed PV. Cheap insurance: confirm it appears in the
         // genuinely-generated legal move list for this exact position.
         MoveList ml; genMoves(cur, ml);
         bool isLegal = false;
@@ -2008,63 +2064,99 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
     searchStart=chrono::steady_clock::now();
     stopNow=false;
 
-    // Declare all time variables up front so they stay in scope
-    // throughout search() even when recalculation is skipped in WASM.
     int totalTime = (b.turn==WHITE) ? wtime : btime;
-    int timeMs    = max(0, totalTime - 200);
-    int inc       = (b.turn==WHITE) ? winc  : binc;
-    bool isBullet = (totalTime <= 60000);
-    bool isBlitz  = (totalTime > 60000 && totalTime <= 300000);
-    bool isRapid  = (totalTime > 300000 && totalTime <= 600000);
-    int pctCap    = isBullet ? 50 : isBlitz ? 25 : isRapid ? 33 : 40;
+    int timeMs  = max(0, totalTime - 200);  // subtract 200ms safety buffer
+    int inc     = (b.turn==WHITE) ? winc  : binc;
+    int baseTime;
+    bool isBullet;
 
+    // TWO independent bypasses of the clock-based formula below, for two
+    // different calling contexts:
+    //   - nativeMovetimeRequest: a native UCI "go movetime N" — see the
+    //     detailed comment where this flag is declared.
+    //   - wasmTimerPreset (Emscripten builds only): engine_best_move /
+    //     engine_analyse call in from JS with an exact millisecond budget,
+    //     same idea, different caller.
+    // Neither exists in the other build target, so without both, a native
+    // build compiled from what's otherwise the WASM source would silently
+    // reintroduce the exact movetime-collapse bug this fixes — confirmed
+    // while testing this exact scenario.
+    bool bypassClockFormula = nativeMovetimeRequest;
 #ifdef __EMSCRIPTEN__
-    if (!wasmTimerPreset)
+    bypassClockFormula = bypassClockFormula || wasmTimerPreset;
 #endif
-    {
-        // TIME MANAGEMENT (v18 revision) — skipped in WASM when movetime preset
-        // Bullet (<=60s): pctCap=50. Blitz (60-300s): 25. Rapid+: 33/40.
-        int safetyMs     = isBullet ? 400 : 200;
-        timeMs           = max(0, totalTime - safetyMs);
+
+    if (bypassClockFormula) {
+        searchTimeMs = max(10, totalTime - 200);
+        baseTime     = searchTimeMs;
+        isBullet     = (totalTime <= 60000);
+    } else {
+        // ----------------------------------------------------------------
+        // TIME MANAGEMENT (v18 revision)
+        //
+        // Bullet (<=60s): assume 30 moves remaining — positions resolve
+        // faster, opponent moves quickly. Cap raised to 5% so the engine
+        // uses available think time per move without going short.
+        //
+        // Blitz (60-300s): assume 40 moves, 4% cap.
+        // Rapid+ (>300s):  assume 40 moves, 3% cap.
+        // ----------------------------------------------------------------
+        isBullet = (totalTime <= 60000);
+        bool isBlitz  = (totalTime > 60000 && totalTime <= 300000);
+        bool isRapid  = (totalTime > 300000 && totalTime <= 600000);
+        int safetyMs  = isBullet ? 400 : 200;
+        timeMs        = max(0, totalTime - safetyMs);
         int defaultMoves = isBullet ? 50 : 40;
-        int moves        = (movestogo > 0) ? movestogo : defaultMoves;
-        searchTimeMs     = max(10, timeMs / moves + (inc * 4) / 5);
-        searchTimeMs     = min(searchTimeMs, timeMs / pctCap);
-        searchTimeMs     = max(searchTimeMs, 10);
+        int moves = (movestogo > 0) ? movestogo : defaultMoves;
+        searchTimeMs = max(10, timeMs / moves + (inc * 4) / 5);
+        int pctCap;
+        if      (isBullet) pctCap = 50;
+        else if (isBlitz)  pctCap = 25;
+        else if (isRapid)  pctCap = 33;
+        else               pctCap = 40;
+        searchTimeMs = min(searchTimeMs, timeMs / pctCap);
+        searchTimeMs = max(searchTimeMs, 10);
+
+        // Advanced passed pawn: one-shot +15% extension, only for our pawns
+        // on rank 6+ (truly about to promote). Does not compound. Only
+        // meaningful with a real clock — skipped when bypassed above.
+        {
+            int bestAdv = 0;
+            U64 pawns = b.pieces[(int)b.turn][PAWN];
+            while (pawns) {
+                Square psq = popLSB(pawns);
+                int pr = RANK_OF(psq), pf = FILE_OF(psq);
+                int adv = (b.turn==WHITE) ? pr : 7-pr;
+                if (adv >= 5) {
+                    U64 pm = 0;
+                    if (b.turn==WHITE) { for(int rr=pr+1;rr<8;rr++){ if(pf>0)pm|=BIT(SQ(pf-1,rr)); pm|=BIT(SQ(pf,rr)); if(pf<7)pm|=BIT(SQ(pf+1,rr)); } }
+                    else               { for(int rr=pr-1;rr>=0;rr--){ if(pf>0)pm|=BIT(SQ(pf-1,rr)); pm|=BIT(SQ(pf,rr)); if(pf<7)pm|=BIT(SQ(pf+1,rr)); } }
+                    if (!(b.pieces[1-(int)b.turn][PAWN] & pm))
+                        if (adv > bestAdv) bestAdv = adv;
+                }
+            }
+            if (bestAdv >= 5)
+                searchTimeMs = min((int)(searchTimeMs * 1.15), timeMs / pctCap);
+        }
+        baseTime = searchTimeMs;  // save for instability extension
     }
 
-    // Advanced passed pawn: one-shot +15% extension, only for our pawns
-    // on rank 6+ (truly about to promote). Does not compound.
-    {
-        int bestAdv = 0;
-        U64 pawns = b.pieces[(int)b.turn][PAWN];
-        while (pawns) {
-            Square psq = popLSB(pawns);
-            int pr = RANK_OF(psq), pf = FILE_OF(psq);
-            int adv = (b.turn==WHITE) ? pr : 7-pr;
-            if (adv >= 5) {
-                U64 pm = 0;
-                if (b.turn==WHITE) { for(int rr=pr+1;rr<8;rr++){ if(pf>0)pm|=BIT(SQ(pf-1,rr)); pm|=BIT(SQ(pf,rr)); if(pf<7)pm|=BIT(SQ(pf+1,rr)); } }
-                else               { for(int rr=pr-1;rr>=0;rr--){ if(pf>0)pm|=BIT(SQ(pf-1,rr)); pm|=BIT(SQ(pf,rr)); if(pf<7)pm|=BIT(SQ(pf+1,rr)); } }
-                if (!(b.pieces[1-(int)b.turn][PAWN] & pm))
-                    if (adv > bestAdv) bestAdv = adv;
-            }
-        }
-        if (bestAdv >= 5)
-#ifdef __EMSCRIPTEN__
-            if (!wasmTimerPreset)
-#endif
-            searchTimeMs = min((int)(searchTimeMs * 1.15), timeMs / pctCap);
-    }
-    int baseTime = searchTimeMs;  // save for instability extension
 
     // Reset per-search state
     memset(killers,     0, sizeof(killers));
     memset(counterMove, 0, sizeof(counterMove));
     for(int c=0;c<2;c++) for(int f=0;f<64;f++) for(int t=0;t<64;t++) history[c][f][t]/=4;
-
+    // Guarantee a legal move exists BEFORE searching, so no interrupt path
+    // can ever return NULL_MOVE (0000). Fixes illegal-move losses in
+    // positions with very few legal moves.
     Move bestMove=NULL_MOVE;
     int  bestScore=0;
+    {
+        MoveList ml; genMoves(b,ml);
+        for(int i=0;i<ml.n;i++){
+            UndoInfo u; if(makeMove(b,ml.m[i],u)){ unmakeMove(b,ml.m[i],u); bestMove=ml.m[i]; break; }
+        }
+    }
 
     // ----------------------------------------------------------------
     // ROOT MOVE LIST — persists across depths, carries per-move scores
@@ -2088,8 +2180,8 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
         // analysis path — NOT rootMoves, whose order is re-sorted at the top
         // of each depth and so does not reliably match the multipv ranking
         // the search actually reported. Only overwritten by a FULLY
-        // completed depth (see the commit after the pvIdx loop), so an
-        // interrupted final depth can't corrupt a good previous one.
+        // completed depth, so an interrupted final depth can't corrupt a
+        // good previous one.
         Move thisDepthMoves[MAX_EXPOSED_ROOT_MOVES];
         int  thisDepthScores[MAX_EXPOSED_ROOT_MOVES];
         int  thisDepthCount = 0;
@@ -2105,29 +2197,42 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
 
         for(int pvIdx = 0; pvIdx < pvLimit; pvIdx++){
 
+            // Main table for the true best line and all single-PV (bot play)
+            // search — completely unaffected by anything below. Scratch
+            // table, freshly cleared, for every excluded-move line — see the
+            // detailed comment on activeTT above for why this isolation is
+            // necessary. Clearing tt2 here (not just once) matters: it's
+            // cheap (256K entries vs the main table's 8M) and prevents one
+            // secondary line's exploration from contaminating the NEXT
+            // secondary line the same way the main table was contaminating
+            // all of them before this fix.
+            if(pvIdx == 0 || multiPVCount == 1){
+                activeTT     = tt;
+                activeTTMask = TT_SIZE - 1;
+            } else {
+                memset(tt2, 0, TT_SIZE_MPV*sizeof(TTEntry));
+                activeTT     = tt2;
+                activeTTMask = TT_SIZE_MPV - 1;
+            }
+
             int prevScore = rootMoves[pvIdx].score;
             int alpha = -INF, beta = INF;
-            // Single-PV (game play): tight two-sided aspiration window, left
-            // exactly as it was. MultiPV (analysis): a one-sided SEEDED window
-            // — a lower anchor (prevScore - margin) so the PVS scouts below can
-            // still cut off worse moves cheaply (this is what buys back the
-            // search depth a fully-open window gives up), but beta stays at INF
-            // so a line is never clamped from above and always gets its true
-            // score. If the whole line turns out to be below the anchor (its
-            // real score dropped this depth), the fail-low re-search below
-            // widens the anchor and re-runs, so correctness holds. The margin
-            // is generous because analysis lines can swing more than a tight
-            // game-play window allows.
+            // Single-PV (game play): tight two-sided aspiration window.
+            // MultiPV (analysis): a one-sided SEEDED window — a lower
+            // anchor (prevScore - margin) so the PVS scouts below can still
+            // cut off worse moves cheaply, but beta stays at INF so a line
+            // is never clamped from above and always gets its true score.
+            // If the whole line turns out to be below the anchor, the
+            // fail-low re-search below widens the anchor and re-runs.
             int mpvAnchor = -INF;
             if(depth >= 4){
                 if(multiPVCount == 1){
                     alpha = max(-INF, prevScore - 50);
                     beta  = min( INF, prevScore + 50);
                 } else if(prevScore > -MATE_THRESHOLD && prevScore < MATE_THRESHOLD){
-                    // Only seed a finite anchor for normal scores. If the line
-                    // was a mate last depth, keep alpha=-INF: mate scores are
-                    // tens of thousands of cp away and any finite anchor would
-                    // just fail and force a re-search.
+                    // Only seed a finite anchor for normal scores — a mate
+                    // score last depth is tens of thousands of cp away and
+                    // any finite anchor would just fail and force a re-search.
                     alpha     = max(-INF, prevScore - 300);
                     mpvAnchor = alpha;
                 }
@@ -2176,17 +2281,11 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
                     if(depthBestScore <= alpha - 50){
                         researchAttempts++;
                         if(researchAttempts >= 4){
-                            // A handful of narrow re-search attempts have all
-                            // failed — the true score is far outside the
-                            // aspiration window, which happens when a forced
-                            // mate is found partway through this depth (mate
-                            // scores are tens of thousands of centipawns away
-                            // from a normal position's evaluation, nowhere
-                            // close to reachable by widening 100cp at a time).
-                            // Fall back to a fully open window so the real
-                            // score and real best move are found directly,
-                            // instead of either looping a huge number of times
-                            // or settling for a stale, shallow best move.
+                            // Repeated narrow re-search attempts all failed —
+                            // the true score is far outside the aspiration
+                            // window (typically a forced mate found partway
+                            // through this depth). Fall back to a fully open
+                            // window so the real score/move are found directly.
                             alpha = -INF;
                         } else {
                             alpha = max(-INF, alpha-100);
@@ -2204,11 +2303,11 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
                     }
                 }
                 else if(multiPVCount > 1 && mpvAnchor > -INF){
-                    // MultiPV fail-low: the whole line came back at or below the
-                    // seeded lower anchor, so the anchor was too high and every
-                    // score is a clamped bound. Drop the anchor fully open and
-                    // re-run so the true ranking/score are found. (beta was INF
-                    // throughout, so there is never a fail-high to handle here.)
+                    // MultiPV fail-low: the whole line came back at or below
+                    // the seeded lower anchor, so the anchor was too high and
+                    // every score is a clamped bound. Drop it fully open and
+                    // re-run so the true ranking/score are found. (beta was
+                    // INF throughout, so there's never a fail-high to handle.)
                     if(depthBestScore <= mpvAnchor){
                         alpha     = -INF;
                         mpvAnchor = -INF;   // don't retrigger
@@ -2223,8 +2322,6 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
                 excluded.push_back(depthBest);
 
                 // Record this line's result in multipv order (pvIdx 0,1,2...)
-                // so exposed lines match exactly what the search reports here,
-                // regardless of how rootMoves gets re-sorted next depth.
                 if(pvIdx < MAX_EXPOSED_ROOT_MOVES){
                     thisDepthMoves[pvIdx]  = depthBest;
                     thisDepthScores[pvIdx] = depthBestScore;
@@ -2237,54 +2334,51 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
                         searchTimeMs = baseTime;  // no instability extension in WASM
                     } else {
 #endif
-                    if(depth > 4 && bestMove != NULL_MOVE){
+                    // Instability extension: if score drops significantly from
+                    // previous depth, spend more time searching, capped tightly
+                    // relative to base time only.
+                    if(depth > 4 && bestMove != NULL_MOVE) {
                         int scoreDrop = bestScore - depthBestScore;
                         int extCap1 = isBullet ? baseTime + 1500 : baseTime + 5000;
                         int extCap2 = isBullet ? baseTime + 800  : baseTime + 3000;
-                        if(scoreDrop > 30)      searchTimeMs = min(baseTime*3, extCap1);
-                        else if(scoreDrop > 15) searchTimeMs = min(baseTime*2, extCap2);
-                        else                    searchTimeMs = baseTime;
+                        if(scoreDrop > 30)       searchTimeMs = min(baseTime*3, extCap1);
+                        else if(scoreDrop > 15)  searchTimeMs = min(baseTime*2, extCap2);
+                        else                     searchTimeMs = baseTime;
                     }
 #ifdef __EMSCRIPTEN__
                     }
 #endif
                     bestMove  = depthBest;
                     bestScore = depthBestScore;
-                    // Ponder move
+                    // Record ponder move: make bestMove, take first reply
                     {
-                        UndoInfo pu; Board pb = b;
-                        if(makeMove(pb, bestMove, pu)){
-                            MoveList pml; genMoves(pb, pml);
-                            ponderMove = NULL_MOVE;
-                            for(int pi = 0; pi < pml.n; pi++){
-                                UndoInfo pu2;
-                                if(makeMove(pb,pml.m[pi],pu2)){ ponderMove=pml.m[pi]; unmakeMove(pb,pml.m[pi],pu2); break; }
+                        UndoInfo pu; Board pb=b;
+                        if(makeMove(pb,bestMove,pu)){
+                            MoveList pml; genMoves(pb,pml);
+                            ponderMove=NULL_MOVE;
+                            for(int pi=0;pi<pml.n;pi++){
+                                UndoInfo pu2; if(makeMove(pb,pml.m[pi],pu2)){ponderMove=pml.m[pi];unmakeMove(pb,pml.m[pi],pu2);break;}
                             }
-                            unmakeMove(pb, bestMove, pu);
+                            unmakeMove(pb,bestMove,pu);
                         }
                     }
                 }
 
                 int elapsed=(int)chrono::duration_cast<chrono::milliseconds>(
                     chrono::steady_clock::now()-searchStart).count();
-                cerr<<"info depth "<<depth
-                    <<" multipv "<<(pvIdx+1);
+                cerr<<"info depth "<<depth<<" multipv "<<(pvIdx+1);
                 if (isMateScore(depthBestScore)) {
                     cerr << " score mate " << mateMovesFromScore(depthBestScore);
                 } else {
                     cerr << " score cp " << depthBestScore;
                 }
-                cerr << " time "<<elapsed
-                    <<" pv "<<moveStr(depthBest)<<"\n";
+                cerr << " time "<<elapsed<<" pv "<<moveStr(depthBest)<<"\n";
             }
         } // end pvIdx loop
 
         // Commit this depth's per-line results to the exposed arrays, but
         // ONLY if the depth completed all its lines without being cut off by
-        // time — a fully completed later depth supersedes an earlier one,
-        // while an interrupted depth leaves the last good depth's results
-        // intact. Order here is the true multipv ranking (line 0 = best),
-        // so exposedRootMoves[0] always equals the reported best move.
+        // time — a fully completed later depth supersedes an earlier one.
         if(!stopNow && thisDepthCount > 0){
             exposedRootMoveCount = min(thisDepthCount, MAX_EXPOSED_ROOT_MOVES);
             for(int i = 0; i < exposedRootMoveCount; i++){
@@ -2300,31 +2394,11 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
 
     // Safety net
     if(bestMove==NULL_MOVE){
-        for(auto& rm : rootMoves){
-            UndoInfo u;
-            if(makeMove(b, rm.m, u)){ unmakeMove(b, rm.m, u); bestMove = rm.m; break; }
+        MoveList ml; genMoves(b,ml);
+        for(int i=0;i<ml.n;i++){
+            UndoInfo u; if(makeMove(b,ml.m[i],u)){unmakeMove(b,ml.m[i],u);bestMove=ml.m[i];break;}
         }
     }
-
-    // exposedRootMoves / exposedRootScores were already populated per-depth,
-    // in true multipv order, by the commit block at the end of each completed
-    // depth above — the caller (engine_analyse) reads them directly. They're
-    // walked for PV extraction using the caller's OWN clean board copy, never
-    // search()'s internal board, which is confirmed to sometimes carry
-    // corrupted continuation state (root cause still open); a freshly
-    // re-parsed board sidesteps that entirely.
-    //
-    // Defensive fallback: if for some reason nothing was committed (e.g. the
-    // very first depth was cut off before completing), at least expose the
-    // final bestMove as line 0 so the analysis path still shows something.
-#ifdef __EMSCRIPTEN__
-    if (wasmTimerPreset && bestMove != NULL_MOVE && exposedRootMoveCount == 0) {
-        exposedRootMoves[0]  = bestMove;
-        exposedRootScores[0] = bestScore;
-        exposedRootMoveCount = 1;
-    }
-#endif
-
     return bestMove;
 }
 
@@ -2408,10 +2482,151 @@ Move parseMove(const Board& b, const string& s){
 #pragma comment(linker, "/STACK:8388608")
 #endif
 
-int main(){
+
+// ======================= WAVE 1+2 TEXEL TUNER (compile with /DTUNE) ==========
+#ifdef TUNE
+#include <cstdlib>
+
+static double sigmoidT(double x, double K){ return 1.0/(1.0+pow(10.0,-K*x/400.0)); }
+
+struct TuneSample { Board b; double result; double scp; double target; };
+static std::vector<TuneSample> gData;
+static std::vector<int*>       gParams;
+
+static double whiteEval(Board& b){ int e=evaluate(b); return (b.turn==WHITE)?(double)e:(double)(-e); }
+
+static void buildParams(){
+    gParams.clear();
+    for(int p=0;p<5;p++) gParams.push_back(&MAT_MG[p]);
+    for(int p=0;p<5;p++) gParams.push_back(&MAT_EG[p]);
+    for(int p=0;p<6;p++) for(int sq=0;sq<64;sq++){
+        if(p==PAWN && (sq<8||sq>=56)) continue;
+        gParams.push_back(&PST_MG[p][sq]);
+    }
+    for(int p=0;p<6;p++) for(int sq=0;sq<64;sq++){
+        if(p==PAWN && (sq<8||sq>=56)) continue;
+        gParams.push_back(&PST_EG[p][sq]);
+    }
+    int* w2[] = {
+        &MOB_N_MG,&MOB_N_EG,&MOB_B_MG,&MOB_B_EG,&MOB_R_MG,&MOB_R_EG,&MOB_Q_MG,&MOB_Q_EG,
+        &BISHOP_PAIR_MG,&BISHOP_PAIR_EG,&ROOK_OPEN_MG,&ROOK_OPEN_EG,
+        &ROOK_SEMI_MG,&ROOK_SEMI_EG,&DOUBLED_MG,&DOUBLED_EG,
+        &ISOLATED_MG,&ISOLATED_EG,&TEMPO
+    };
+    for(int* p : w2) gParams.push_back(p);
+}
+
+static void loadData(const std::string& path){
+    std::ifstream f(path);
+    if(!f){ std::cerr<<"cannot open "<<path<<"\n"; exit(1); }
+    std::string line; std::getline(f,line);
+    int kept=0,skipped=0;
+    while(std::getline(f,line)){
+        if(line.empty()) continue;
+        size_t c1=line.find(',');
+        if(c1==std::string::npos) continue;
+        std::string fen=line.substr(0,c1), rest=line.substr(c1+1);
+        size_t a=rest.find(','), b2=rest.find(',',a+1);
+        if(a==std::string::npos||b2==std::string::npos) continue;
+        std::string whitecp=rest.substr(a+1,b2-(a+1)), result=rest.substr(b2+1);
+        if(result.empty()){ skipped++; continue; }
+        double scp=atof(whitecp.c_str());
+        if(fabs(scp)>=3000.0){ skipped++; continue; }
+        TuneSample ts; ts.b=parseFEN(fen); ts.result=atof(result.c_str()); ts.scp=scp; ts.target=0.0;
+        gData.push_back(ts); kept++;
+    }
+    std::cerr<<"loaded "<<kept<<" positions ("<<skipped<<" skipped)\n";
+}
+
+static double solveK(){
+    double best=1.0,bestE=1e18;
+    for(double K=0.20;K<=2.0;K+=0.02){
+        double sum=0; for(auto&s:gData){ double e=sigmoidT(whiteEval(s.b),K)-s.result; sum+=e*e; }
+        double err=sum/gData.size(); if(err<bestE){bestE=err;best=K;}
+    }
+    return best;
+}
+
+static void fillTargets(double K,double blend){
+    for(auto&s:gData) s.target=(1.0-blend)*s.result+blend*sigmoidT(s.scp,K);
+}
+static double avgError(double K){
+    double sum=0; for(auto&s:gData){ double e=sigmoidT(whiteEval(s.b),K)-s.target; sum+=e*e; }
+    return sum/gData.size();
+}
+
+static void dumpWeights(const std::string& path){
+    std::ofstream o(path);
+    auto arr=[&](const char* nm,int* a,int n){
+        o<<"WCONST int "<<nm<<"["<<n<<"]= {";
+        for(int i=0;i<n;i++){ o<<a[i]; if(i<n-1)o<<", "; } o<<"};\n";
+    };
+    arr("MAT_MG",MAT_MG,6); arr("MAT_EG",MAT_EG,6);
+    auto pst=[&](const char* nm,int a[][64]){
+        o<<"WCONST int "<<nm<<"[6][64] = {\n";
+        for(int p=0;p<6;p++){ o<<"{"; for(int sq=0;sq<64;sq++){o<<a[p][sq]; if(sq<63)o<<",";} o<<"}"; if(p<5)o<<","; o<<"\n"; }
+        o<<"};\n";
+    };
+    pst("PST_MG",PST_MG); pst("PST_EG",PST_EG);
+    o<<"// --- Wave 2 scalars ---\n";
+    o<<"WCONST int MOB_N_MG = "<<MOB_N_MG<<",  MOB_N_EG = "<<MOB_N_EG<<";\n";
+    o<<"WCONST int MOB_B_MG = "<<MOB_B_MG<<",  MOB_B_EG = "<<MOB_B_EG<<";\n";
+    o<<"WCONST int MOB_R_MG = "<<MOB_R_MG<<",  MOB_R_EG = "<<MOB_R_EG<<";\n";
+    o<<"WCONST int MOB_Q_MG = "<<MOB_Q_MG<<",  MOB_Q_EG = "<<MOB_Q_EG<<";\n";
+    o<<"WCONST int BISHOP_PAIR_MG = "<<BISHOP_PAIR_MG<<", BISHOP_PAIR_EG = "<<BISHOP_PAIR_EG<<";\n";
+    o<<"WCONST int ROOK_OPEN_MG = "<<ROOK_OPEN_MG<<", ROOK_OPEN_EG = "<<ROOK_OPEN_EG<<";\n";
+    o<<"WCONST int ROOK_SEMI_MG = "<<ROOK_SEMI_MG<<", ROOK_SEMI_EG = "<<ROOK_SEMI_EG<<";\n";
+    o<<"WCONST int DOUBLED_MG  = "<<DOUBLED_MG<<", DOUBLED_EG  = "<<DOUBLED_EG<<";\n";
+    o<<"WCONST int ISOLATED_MG = "<<ISOLATED_MG<<", ISOLATED_EG = "<<ISOLATED_EG<<";\n";
+    o<<"WCONST int TEMPO = "<<TEMPO<<";\n";
+}
+
+static void runTune(const std::string& csv,double blend){
+    loadData(csv);
+    if(gData.empty()){ std::cerr<<"no data\n"; return; }
+    buildParams();
+    double K=solveK(); fillTargets(K,blend);
+    std::cerr<<"K="<<K<<"  params="<<gParams.size()<<"  blend="<<blend<<"\n";
+    double best=avgError(K);
+    std::cerr<<"start error="<<best<<"\n";
+    bool improved=true; int pass=0;
+    while(improved){
+        improved=false; pass++;
+        for(size_t i=0;i<gParams.size();i++){
+            int* w=gParams[i]; int orig=*w;
+            *w=orig+1; double e=avgError(K);
+            if(e<best){ best=e; improved=true; }
+            else { *w=orig-1; e=avgError(K); if(e<best){ best=e; improved=true; } else *w=orig; }
+        }
+        std::cerr<<"pass "<<pass<<"  error="<<best<<"\n";
+        dumpWeights("tuned_weights.txt");
+    }
+    std::cerr<<"done after "<<pass<<" passes. tuned weights in tuned_weights.txt\n";
+}
+#endif
+// ===================== END TUNER BLOCK ======================================
+
+// Output-layer safety: never emit 0000 or an illegal move. If the search
+// result is null/illegal, substitute the first legal move. Structurally
+// guarantees a legal bestmove on every code path.
+Move ensureLegal(Board& b, Move m){
+    MoveList ml; genMoves(b,ml);
+    for(int i=0;i<ml.n;i++) if(ml.m[i]==m){
+        UndoInfo u; if(makeMove(b,ml.m[i],u)){ unmakeMove(b,ml.m[i],u); return m; }
+    }
+    for(int i=0;i<ml.n;i++){
+        UndoInfo u; if(makeMove(b,ml.m[i],u)){ unmakeMove(b,ml.m[i],u); return ml.m[i]; }
+    }
+    return m; // no legal moves (mate/stalemate): caller shouldn't be moving
+}
+
+int main(int argc, char** argv){
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
-    tt = new TTEntry[TT_SIZE]();
+    tt  = new TTEntry[TT_SIZE]();
+    tt2 = new TTEntry[TT_SIZE_MPV]();
+    activeTT     = tt;          // default: main table (single-PV / pvIdx==0)
+    activeTTMask = TT_SIZE - 1;
 
 #ifdef USE_NNUE
     // Auto-load nn.nnue if present in working directory
@@ -2419,12 +2634,25 @@ int main(){
     if (!nnueEnabled) cerr<<"NNUE: nn.nnue not found, using classical eval\n";
 #endif
     initAttacks();
+    initSliders();
     initMasks();
     initZobrist();
     initLMR();
     ttClear();
+#ifdef VERIFY_SLIDERS
+    { bool ok=verifySliders(); std::cerr<<"slider verify: "<<(ok?"PASS":"FAIL")<<"\n"; return ok?0:1; }
+#endif
+
+#ifdef TUNE
+    if (argc >= 3 && std::string(argv[1]) == "tune") {
+        double blend = (argc >= 4) ? atof(argv[3]) : 0.5;
+        runTune(argv[2], blend);
+        return 0;
+    }
+#endif
 
     int lastWt=60000, lastBt=60000, lastMtg=0, lastWi=0, lastBi=0; // saved from last go
+    bool lastNativeMovetimeRequest = false;
     Board board = parseFEN("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     string line;
 
@@ -2437,9 +2665,9 @@ int main(){
             searchThread.join();  // guaranteed to return quickly now
             stopNow = false;
             if (ponderMove != NULL_MOVE)
-                cout << "bestmove " << moveStr(searchResult) << " ponder " << moveStr(ponderMove) << "\n";
+                cout << "bestmove " << moveStr(ensureLegal(board, searchResult)) << " ponder " << moveStr(ponderMove) << "\n";
             else
-                cout << "bestmove " << moveStr(searchResult) << "\n";
+                cout << "bestmove " << moveStr(ensureLegal(board, searchResult)) << "\n";
             cout.flush();
         }
     };
@@ -2450,7 +2678,7 @@ int main(){
 
         if(cmd=="uci"){
             cout<<"id name SenkabalaIII v20\n"
-                <<"id author Isa Ssenkabala\n"
+                <<"id author Senkabala\n"
                 <<"option name SyzygyPath type string default\n"
                 <<"option name Hash type spin default 128 min 1 max 1024\n"
                 <<"option name MultiPV type spin default 1 min 1 max 5\n"
@@ -2491,8 +2719,9 @@ int main(){
             else if(name=="Hash"){
                 // Could resize TT here — for now ignore
             }
-            else if(name=="MultiPV"){
-                if(!value.empty()) multiPVCount = max(1, min(5, stoi(value)));
+            else if(name=="MultiPV" && !value.empty()){
+                int mpv = atoi(value.c_str());
+                multiPVCount = max(1, min(5, mpv));
             }
         }
         else if(cmd=="ucinewgame"){
@@ -2541,6 +2770,7 @@ int main(){
 
             int wt=60000,bt=60000,mtg=0,wi=0,bi=0;
             bool doPonder=false;
+            nativeMovetimeRequest = false;  // reset every go — must not leak from a previous request
             string tok;
             while(ss>>tok){
                 if(tok=="wtime")      ss>>wt;
@@ -2550,10 +2780,12 @@ int main(){
                 else if(tok=="binc")  ss>>bi;
                 else if(tok=="ponder")   doPonder=true;
                 else if(tok=="infinite") doPonder=true;
-                else if(tok=="movetime"){ int mt; ss>>mt; wt=bt=mt+200; mtg=1; }
+                else if(tok=="movetime"){ int mt; ss>>mt; wt=bt=mt+200; mtg=1; nativeMovetimeRequest=true; }
             }
-            // Save time params so ponderhit can re-launch with the same budget
+            // Save time params (and whether this was a movetime request) so
+            // ponderhit can re-launch with the same budget and behaviour.
             lastWt=wt; lastBt=bt; lastMtg=mtg; lastWi=wi; lastBi=bi;
+            lastNativeMovetimeRequest = nativeMovetimeRequest;
 
             pondering = doPonder;
             searchResult = NULL_MOVE;
@@ -2565,13 +2797,19 @@ int main(){
 
             if (searchThread.joinable()) { stopNow=true; searchThread.join(); stopNow=false; }
             searchThread = thread([boardCopy,wt_,bt_,mtg_,wi_,bi_]() mutable {
-                #ifndef __EMSCRIPTEN__
-                try {
-                #endif
-                    searchResult = search(boardCopy, wt_, bt_, mtg_, wi_, bi_);
-                #ifndef __EMSCRIPTEN__
-                } catch (...) {}
-                #endif
+                // try/catch here is a native-only safety net (a real
+                // std::thread swallowing an exception rather than crashing
+                // the whole process) — incompatible with -fno-exceptions,
+                // and moot for WASM anyway: this whole go/ponderhit code
+                // path lives in main(), which a WASM/MODULARIZE build never
+                // actually calls (JS drives engine_best_move/engine_analyse
+                // directly), so the code just needs to compile, never run.
+#ifndef __EMSCRIPTEN__
+                try { searchResult = search(boardCopy, wt_, bt_, mtg_, wi_, bi_); }
+                catch (...) {}
+#else
+                searchResult = search(boardCopy, wt_, bt_, mtg_, wi_, bi_);
+#endif
                 searchDone = true;
             });
 
@@ -2580,9 +2818,9 @@ int main(){
                 searchThread.join();
                 pondering = false;
                 if(ponderMove!=NULL_MOVE)
-                    cout<<"bestmove "<<moveStr(searchResult)<<" ponder "<<moveStr(ponderMove)<<"\n";
+                    cout<<"bestmove "<<moveStr(ensureLegal(board, searchResult))<<" ponder "<<moveStr(ponderMove)<<"\n";
                 else
-                    cout<<"bestmove "<<moveStr(searchResult)<<"\n";
+                    cout<<"bestmove "<<moveStr(ensureLegal(board, searchResult))<<"\n";
                 cout.flush();
             }
             // If pondering: thread runs in background, UCI loop stays live
@@ -2604,23 +2842,23 @@ int main(){
             searchDone = false;
             Board boardCopy = board;
             int wt_=lastWt, bt_=lastBt, mtg_=lastMtg, wi_=lastWi, bi_=lastBi;
+            nativeMovetimeRequest = lastNativeMovetimeRequest;  // match the original go's behaviour
 
             searchThread = thread([boardCopy,wt_,bt_,mtg_,wi_,bi_]() mutable {
-                #ifndef __EMSCRIPTEN__
-                try {
-                #endif
-                    searchResult = search(boardCopy, wt_, bt_, mtg_, wi_, bi_);
-                #ifndef __EMSCRIPTEN__
-                } catch (...) {}
-                #endif
+#ifndef __EMSCRIPTEN__
+                try { searchResult = search(boardCopy, wt_, bt_, mtg_, wi_, bi_); }
+                catch (...) {}
+#else
+                searchResult = search(boardCopy, wt_, bt_, mtg_, wi_, bi_);
+#endif
                 searchDone = true;
             });
             // Block until done, then output bestmove (same as normal go)
             searchThread.join();
             if(ponderMove!=NULL_MOVE)
-                cout<<"bestmove "<<moveStr(searchResult)<<" ponder "<<moveStr(ponderMove)<<"\n";
+                cout<<"bestmove "<<moveStr(ensureLegal(board, searchResult))<<" ponder "<<moveStr(ponderMove)<<"\n";
             else
-                cout<<"bestmove "<<moveStr(searchResult)<<"\n";
+                cout<<"bestmove "<<moveStr(ensureLegal(board, searchResult))<<"\n";
             cout.flush();
         }
         else if(cmd=="stop"){
@@ -2639,26 +2877,9 @@ int main(){
     return 0;
 }
 
+
 // ============================================================
-// WASM / EMSCRIPTEN PORT
-// ============================================================
-// This block compiles ONLY when building with Emscripten.
-// The native UCI build is completely unaffected.
-//
-// Build command:
-//   emcc engine_wasm.cpp -O3 -std=c++17 -fno-exceptions \
-//        -s WASM=1 \
-//        -s "EXPORTED_FUNCTIONS=['_engine_init','_engine_best_move','_engine_analyse']" \
-//        -s "EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString']" \
-//        -s ALLOW_MEMORY_GROWTH=1 \
-//        -s INITIAL_MEMORY=134217728 \
-//        -s MAXIMUM_MEMORY=536870912 \
-//        -s STACK_SIZE=4194304 \
-//        -s ENVIRONMENT=web \
-//        -s MODULARIZE=1 \
-//        -s EXPORT_NAME=SenkabalaModule \
-//        -s NO_EXIT_RUNTIME=1 \
-//        -o senkabala.js
+// WASM DEPLOYMENT LAYER
 // ============================================================
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
@@ -2671,9 +2892,13 @@ EMSCRIPTEN_KEEPALIVE
 void engine_init() {
     if (wasmInitDone) return;
     cerr << "[engine] build " << ENGINE_BUILD_ID << "\n";  // confirms which binary is actually running
-    tt = new TTEntry[TT_SIZE]();
+    tt  = new TTEntry[TT_SIZE]();
+    tt2 = new TTEntry[TT_SIZE_MPV]();
+    activeTT     = tt;          // default: main table
+    activeTTMask = TT_SIZE - 1;
     initAttacks();
-    initMasks();   // required for pawn structure eval, rook open-file bonuses
+    initMasks();
+    initSliders();   // builds the PEXT rook/bishop attack tables
     initZobrist();
     initLMR();
     ttClear();
@@ -2693,6 +2918,8 @@ const char* engine_best_move(const char* fen_str,
     // from leaking across separate games or calls
     memset(posHistory, 0, sizeof(posHistory));
     memset(history,    0, sizeof(history));
+    activeTT     = tt;          // always the main table for bot play — never tt2
+    activeTTMask = TT_SIZE - 1;
 
     Board board = parseFEN(std::string(fen_str));
     if (moves_str && moves_str[0] != '\0') {
@@ -2707,11 +2934,18 @@ const char* engine_best_move(const char* fen_str,
     }
 
     stopNow         = false;
+    nativeMovetimeRequest = false;  // this is the WASM path — wasmTimerPreset is the equivalent flag
     ponderMove      = NULL_MOVE;
     searchTimeMs    = std::max(10, movetime_ms);
     wasmTimerPreset = true;
     Move best = search(board, 9999999, 9999999, 1, 0, 0);
     wasmTimerPreset = false;
+
+    // ensureLegal: a final safety net confirming the returned move is
+    // actually legal in the real position before it's ever sent back to
+    // the site — independent of (and in addition to) everything else in
+    // this file, including the native UCI path's own use of it.
+    best = ensureLegal(board, best);
 
     if (best != NULL_MOVE) {
         std::string ms = moveStr(best);
@@ -2740,13 +2974,10 @@ const char* engine_analyse(const char* fen_str,
     // in this function, and persists across every call for the life of the
     // worker. Without this, a second Load press on the EXACT SAME position
     // would silently benefit from cached entries the first press never had,
-    // making the result non-deterministic for identical input: the first
-    // (genuinely cold) search could miss a deep tactic the second (now
-    // partially warm) search finds, purely from cache reuse, not from any
-    // real difference in search quality or engine readiness. Confirmed live:
-    // same FEN, same time budget, first press missed a mate the second
-    // press found at a SHALLOWER reported depth on the winning line.
+    // making the result non-deterministic for identical input.
     ttClear();
+    activeTT     = tt;          // start every analysis call on the main table
+    activeTTMask = TT_SIZE - 1;
 
     Board board = parseFEN(std::string(fen_str));
     if (moves_str && moves_str[0] != '\0') {
@@ -2761,12 +2992,6 @@ const char* engine_analyse(const char* fen_str,
     }
 
     // Keep a genuinely untouched copy of the position BEFORE search() runs.
-    // search() takes its board by reference and mutates it through its own
-    // recursive calls — even if every makeMove/unmakeMove pair inside it is
-    // symmetric, that symmetry is exactly the thing not yet fully verified
-    // (a real board-state corruption was traced into search()'s recursion,
-    // root cause still open). This copy is never touched by any of that, so
-    // it's the one board PV extraction can actually trust.
     Board cleanBoardForPV = board;
 
     // Set MultiPV for this search only — restore after so game searches are unaffected
@@ -2774,63 +2999,28 @@ const char* engine_analyse(const char* fen_str,
     multiPVCount     = std::max(1, std::min(multipv, 5));
 
     stopNow         = false;
+    nativeMovetimeRequest = false;
     ponderMove      = NULL_MOVE;
     searchTimeMs    = std::max(10, movetime_ms);
     wasmTimerPreset = true;
     Move best = search(board, 9999999, 9999999, 1, 0, 0);
     wasmTimerPreset = false;
 
+    best = ensureLegal(board, best);
+
     multiPVCount = savedMultiPV;  // restore — never affects game searches
 
-    // Print the real, full multi-move PV for every exposed line, using the
-    // untouched pre-search board copy — not search()'s own board, which may
-    // carry forward state from its own recursive exploration. Each line is
-    // tagged with its multipv index so the JS side updates the right
-    // candidate row instead of only ever extending the top one.
-    //
-    // Secondary lines (i >= 1) get a small, dedicated extra search before
-    // extracting their PV — NOT to fix their score (the main search's
-    // multiPV loop already gives every exposed line a real, aspiration-
-    // windowed score; exposedRootScores[i] is trustworthy), but purely to
-    // leave a deeper continuation behind in the shared TT so extractPV has
-    // a full line to walk. During the main search the top line's
-    // continuation gets the most TT reinforcement; a lower line's deeper
-    // continuation can be thin enough that its walked PV was just the one
-    // root move. Confirmed live: a genuine forced mate sitting behind a
-    // 2nd/3rd-ranked candidate produced a PV of just that one move, the
-    // mate itself invisible even though the score correctly reported it.
-    // This extra pass searches a SEPARATE, disposable board copy — never
-    // cleanBoardForPV itself, never search()'s own board — so it can't
-    // interact with the still-open board-corruption question at all.
-    // Small, bounded, run only after the user's real wait is already over.
-    const int SECONDARY_PV_DEPTH    = 12;  // covers mate-in-6 (12 ply) directly, not just shallower lines
+    // Extract each line's PV into a string IMMEDIATELY after that line's own
+    // search, while the shared global TT still reflects that exact line —
+    // then print them all afterwards. Line 1 (i==0) is captured FIRST,
+    // before any mini-search runs, because it's the one line whose real,
+    // full-depth continuation the main search just left in the TT.
+    const int SECONDARY_PV_DEPTH    = 12;
     const int SECONDARY_PV_TIME_MS  = 600;
     bool savedStopNow      = stopNow;
     auto savedSearchStart  = searchStart;
     int  savedSearchTimeMs = searchTimeMs;
 
-    // Extract each line's PV into a string IMMEDIATELY after that line's own
-    // search, while the shared global TT still reflects that exact line —
-    // then print them all afterwards. The TT is one global table shared by
-    // the main search and every secondary mini-search below; extractPV
-    // walks it hop-by-hop from the root, so it only returns a coherent line
-    // if the TT entries along the way were all written by the SAME search.
-    //
-    // The previous structure searched line i then printed line i in one
-    // loop, but that still let line i's deep mini-search overwrite TT
-    // entries that a *neighbouring* line's walk depended on, and could even
-    // clobber the root entry a later extract needed — producing PVs that
-    // were legal move-by-move (each move passes extractPV's own legality
-    // check) yet globally incoherent: a sequence stitched together from
-    // different searches that led nowhere real, including phantom mates
-    // that had no actual forcing path. Capturing each line's PV the instant
-    // its own search finishes, before the next one runs, is the only order
-    // that stays correct under a single shared TT.
-    //
-    // Line 1 (i == 0) is captured FIRST, before any mini-search runs at
-    // all, because it's the one line whose real, full-depth continuation
-    // the main search just left in the TT — any secondary mini-search would
-    // start overwriting exactly those entries.
     std::string pvStrings[MAX_EXPOSED_ROOT_MOVES];
     for (int i = 0; i < exposedRootMoveCount; i++) {
         if (i >= 1) {
@@ -2840,11 +3030,23 @@ const char* engine_analyse(const char* fen_str,
                 stopNow      = false;
                 searchStart  = chrono::steady_clock::now();
                 searchTimeMs = SECONDARY_PV_TIME_MS;
+                // Explicitly use the MAIN table here, not whatever search()'s
+                // own multipv loop last left activeTT pointing to (it could
+                // be tt2, if the last completed pvIdx before returning was an
+                // excluded-move line). This mini-search's whole purpose is to
+                // leave a deeper continuation behind for extractPV to walk
+                // via the shared main-table context, same as line 1's — using
+                // the wrong table here would either pollute the isolation the
+                // multipv fix depends on, or silently fail to find anything.
+                activeTT     = tt;
+                activeTTMask = TT_SIZE - 1;
                 negamax(pvScratch, SECONDARY_PV_DEPTH, -INF, INF, 1);  // return value intentionally discarded — only its TT side effect is used
-                // no unmake needed — pvScratch is discarded after this block
             }
         }
-        // Capture NOW, before the next line's mini-search perturbs the TT.
+        // Always read extractPV through the main table explicitly — same
+        // reasoning as above.
+        activeTT     = tt;
+        activeTTMask = TT_SIZE - 1;
         pvStrings[i] = extractPV(cleanBoardForPV, exposedRootMoves[i]);
     }
 
@@ -2852,9 +3054,8 @@ const char* engine_analyse(const char* fen_str,
     searchStart  = savedSearchStart;
     searchTimeMs = savedSearchTimeMs;
 
-    // Now print — scores come straight from the main search's already-vetted
-    // per-move scores (never a mini-search return value; see the "+0.00"
-    // fix), PVs from the strings captured above.
+    // Scores come straight from the main search's already-vetted per-move
+    // scores, PVs from the strings captured above.
     for (int i = 0; i < exposedRootMoveCount; i++) {
         int lineScore = exposedRootScores[i];
         cerr << "pvfinal " << (i+1) << " ";
@@ -2876,4 +3077,3 @@ const char* engine_analyse(const char* fen_str,
 
 } // extern "C"
 #endif // __EMSCRIPTEN__
-

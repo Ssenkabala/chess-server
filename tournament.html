@@ -216,9 +216,9 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     .hamburger.open span:nth-child(1) { transform:translateY(7px) rotate(45deg); }
     .hamburger.open span:nth-child(2) { opacity:0; }
     .hamburger.open span:nth-child(3) { transform:translateY(-7px) rotate(-45deg); }
-    .mobile-drawer { position:fixed; top:0; right:-260px; width:240px; height:100vh; background:#0d0d0d; border-left:1px solid #1a1a1a; display:flex; flex-direction:column; padding:72px 24px 32px; gap:4px; z-index:500; transition:right 0.28s ease; }
+    .mobile-drawer { position:fixed; top:0; right:-260px; width:240px; height:100vh; background:#0d0d0d; border-left:1px solid #1a1a1a; display:flex; flex-direction:column; padding:72px 24px 32px; gap:20px; z-index:500; transition:right 0.28s ease; }
     .mobile-drawer.open { right:0; }
-    .mobile-drawer a { color:var(--muted); text-decoration:none; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; padding:11px 4px; border-bottom:1px solid #1a1a1a; transition:color 0.2s; }
+    .mobile-drawer a { color:var(--muted); text-decoration:none; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; padding:8px 0; border-bottom:1px solid #1a1a1a; transition:color 0.2s; }
     .mobile-drawer a:hover, .mobile-drawer a.active { color:var(--green); }
     .drawer-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:499; }
     .drawer-overlay.open { display:block; }
@@ -955,10 +955,7 @@ async function init() {
         { headers: { 'x-user-id': currentUser.id } });
       if (pr.ok) {
         const pd = await pr.json();
-        currentProfile = {
-          username: pd.username, elo: pd.elo, country: pd.country,
-          created_at: pd.created_at, games_played: pd.games_played
-        };
+        currentProfile = { username: pd.username, elo: pd.elo, country: pd.country };
       }
     } catch(e) { console.warn('Profile load failed', e); }
   } else {
@@ -1107,8 +1104,6 @@ function stopListPoll() {
 }
 
 async function viewTournament(id) {
-  console.log('[DBG client] viewTournament CALLED id=', id, 'currentDetailId=', currentDetailId,
-              'wsState=', tournamentWs ? tournamentWs.readyState : 'null', '@', new Date().toISOString().slice(11,23));
   // Stop any existing poll + timer if switching to a different tournament
   if (currentDetailId && currentDetailId !== id) {
     stopDetailPoll();
@@ -1216,29 +1211,6 @@ async function viewTournament(id) {
 
   let actionBtn = '';
 
-  // Prize-tournament eligibility (account age, rated games) — mirrors the
-  // server's check_prize_eligibility() exactly, so a player sees the SAME
-  // requirement on the page that the server will enforce, instead of only
-  // finding out via a 403 alert() after clicking Join. If currentProfile
-  // or created_at isn't available yet, don't block — same as the server's
-  // own "can't parse date, don't block" fallback; the server is still the
-  // real gate either way, this is purely an informational pre-check.
-  function prizeEligibilityStatus() {
-    if (!currentProfile) return { eligible: true };
-    const gamesPlayed = currentProfile.games_played || 0;
-    const gamesOk = gamesPlayed >= 10;
-    let ageOk = true, ageDays = null;
-    if (currentProfile.created_at) {
-      ageDays = Math.floor((Date.now() - new Date(currentProfile.created_at).getTime()) / 86400000);
-      if (!isNaN(ageDays)) ageOk = ageDays >= 7;
-    }
-    if (ageOk && gamesOk) return { eligible: true };
-    const parts = [];
-    if (!ageOk)   parts.push(`account ${ageDays}/7 days old`);
-    if (!gamesOk) parts.push(`${gamesPlayed}/10 rated games`);
-    return { eligible: false, reason: 'Prize tournament — needs ' + parts.join(', ') };
-  }
-
   // Shared eligibility check — used both for pre-start joining and
   // late-joining an active arena tournament.
   function eligibilityCheckedJoinButton() {
@@ -1252,19 +1224,13 @@ async function viewTournament(id) {
       central_africa: ['CD','CG','CF','GA','GQ','TD'],
     };
     const allowedRegion = !t.region || (userCountry && (REGION_COUNTRIES[t.region]||[]).includes(userCountry));
-    if (!allowedCountry) {
+    if (allowedCountry && allowedRegion) {
+      return `<button class="btn btn-sm" id="btn-join-${id}" onclick="joinTournament('${id}')">Join</button>`;
+    } else if (!allowedCountry) {
       return `<span style="font-size:11px;color:var(--muted)">Restricted to ${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country}</span>`;
-    }
-    if (!allowedRegion) {
+    } else {
       return `<span style="font-size:11px;color:var(--muted)">Restricted to ${REGION_LABELS_JS[t.region] || t.region} players</span>`;
     }
-    if (t.prize_pool > 0) {
-      const elig = prizeEligibilityStatus();
-      if (!elig.eligible) {
-        return `<span style="font-size:11px;color:var(--muted)" title="${elig.reason}">🔒 ${elig.reason}</span>`;
-      }
-    }
-    return `<button class="btn btn-sm" id="btn-join-${id}" onclick="joinTournament('${id}')">Join</button>`;
   }
 
   if (currentUser) {
@@ -1658,25 +1624,17 @@ function connectTournamentWs(tid, tournament) {
   // Already connected to this tournament — don't reconnect
   if (tournamentWs && currentTournamentId === tid &&
       (tournamentWs.readyState === WebSocket.OPEN || tournamentWs.readyState === WebSocket.CONNECTING)) {
-    console.log('[DBG client] connectTournamentWs: already connected to', tid, '— skipping');
     return;
   }
   if (tournamentWs) { tournamentWs.close(); tournamentWs = null; }
   currentTournamentId = tid;
-  if (!currentUser || tournament.format !== 'arena') {
-    console.log('[DBG client] connectTournamentWs: EARLY RETURN — currentUser=', !!currentUser,
-                'format=', tournament && tournament.format, '(need arena)');
-    return;
-  }
+  if (!currentUser || tournament.format !== 'arena') return;
   _myArenaScore = 0;  // reset on fresh connect — server will update via game_over
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const wsUrl = `${proto}://${location.host}/ws/tournament/${tid}`;
-  console.log('[DBG client] connectTournamentWs: OPENING', wsUrl, 'user=', currentUser.id);
-  tournamentWs = new WebSocket(wsUrl);
+  tournamentWs = new WebSocket(`${proto}://${location.host}/ws/tournament/${tid}`);
 
   tournamentWs.onopen = () => {
-    console.log('[DBG client] tournamentWs OPEN — sending identity');
     tournamentWs.send(JSON.stringify({
       user_id:    currentUser.id,
       username:   currentProfile ? currentProfile.username : (currentUser.email || 'player'),
@@ -1696,7 +1654,6 @@ function connectTournamentWs(tid, tournament) {
   tournamentWs.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
-      console.log('[DBG client] tournamentWs recv:', msg.type, '|', JSON.stringify(msg).slice(0, 200));
       if (msg.type === 'game_ready') {
         showArenaGameReady(msg);
       } else if (msg.type === 'game_over') {
@@ -1789,9 +1746,7 @@ function connectTournamentWs(tid, tournament) {
     } catch(err) {}
   };
 
-  tournamentWs.onclose = (ev) => {
-    console.log('[DBG client] tournamentWs CLOSED code=', ev.code, 'reason=', ev.reason,
-                'wasClean=', ev.wasClean, '— reconnect scheduled in 3s @', new Date().toISOString().slice(11,23));
+  tournamentWs.onclose = () => {
     if (tournamentWs && tournamentWs._ping) clearInterval(tournamentWs._ping);
     // Attempt reconnect after 3s if we're still on this detail view
     setTimeout(() => {
@@ -1800,7 +1755,6 @@ function connectTournamentWs(tid, tournament) {
           // Fetch fresh tournament data for reconnect
           fetch(`/api/tournaments/${tid}`).then(r => r.json()).then(data => {
             if (data && data.tournament && data.tournament.status === 'active') {
-              console.log('[DBG client] onclose reconnect firing for', tid);
               connectTournamentWs(tid, data.tournament);
             }
           }).catch(() => {});
@@ -1809,7 +1763,7 @@ function connectTournamentWs(tid, tournament) {
     }, 3000);
   };
 
-  tournamentWs.onerror = (ev) => { console.log('[DBG client] tournamentWs ERROR', ev && ev.type); };
+  tournamentWs.onerror = () => {};
 }
 
 let _notifyBarTarget = null;
@@ -1837,8 +1791,6 @@ function showArenaGameReady(msg) {
   hideArenaCountdown();
   const tc   = encodeURIComponent(msg.time_control || '');
   const href = `/multiplayer?game_id=${msg.game_id}&color=${msg.color}&tournament_id=${currentTournamentId}&tournament_db_id=${msg.tournament_db_id || ''}&time_control=${tc}&my_rank=${msg.my_rank||0}&opponent_rank=${msg.opponent_rank||0}`;
-  console.log('[DBG client] game_ready received:', JSON.stringify(msg));
-  console.log('[DBG client] redirect href:', href, '| tournament_db_id present?', !!msg.tournament_db_id);
 
   // Show bottom notification bar
   showNotifyBar(`♟ Game ready! ${msg.color} vs ${msg.opponent} (${msg.opponent_elo}) — Tap to play`, href);
@@ -2021,5 +1973,261 @@ document.getElementById('t-auth-overlay').addEventListener('click', function(e){
   setInterval(ping, 30000);
 })();
 </script>
+<!-- ═══════════════════════════════════════════════════════════════
+     CONTINENTAL CHAT — bubble + panel. Self-contained: doesn't depend on
+     anything from the rest of the page except `sb` (Supabase client) and
+     `currentUser`, both of which every page already has except watch.html
+     (which gets a two-line addition alongside this).
+     Deliberately excluded from play_multiplayer.html — no chat clutter
+     during a live game.
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="cc-bubble" onclick="ccToggle()">
+  <span id="cc-bubble-icon">💬</span>
+  <span id="cc-badge" class="cc-badge"></span>
+</div>
+
+<div id="cc-panel">
+  <div class="cc-header">
+    <span>🌍 Continental Chat</span>
+    <span class="cc-close" onclick="ccToggle()">✕</span>
+  </div>
+  <div id="cc-messages" class="cc-messages"></div>
+  <div id="cc-gate" class="cc-gate" style="display:none;"></div>
+  <div id="cc-composer" class="cc-composer" style="display:none;">
+    <input id="cc-input" maxlength="50" placeholder="Say something…"
+           oninput="ccUpdateCount()" onkeydown="if(event.key==='Enter')ccSend()">
+    <button id="cc-send-btn" onclick="ccSend()">Send</button>
+  </div>
+  <div id="cc-meta" class="cc-meta"></div>
+</div>
+
+<style>
+  #cc-bubble {
+    position: fixed; right: 18px; bottom: 18px; width: 52px; height: 52px;
+    border-radius: 50%; background: #0d0d0d; border: 1px solid #1a1a1a;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; cursor: pointer; z-index: 400;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+    transition: transform 0.15s ease;
+  }
+  #cc-bubble:hover { transform: scale(1.06); }
+  .cc-badge {
+    position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
+    border-radius: 9px; background: var(--green, #00ff9d); color: #000;
+    font-size: 11px; font-weight: bold; display: none;
+    align-items: center; justify-content: center; padding: 0 4px;
+  }
+  #cc-panel {
+    position: fixed; right: 18px; bottom: 82px; width: min(320px, calc(100vw - 36px));
+    height: min(420px, calc(100vh - 160px)); background: #0d0d0d;
+    border: 1px solid #1a1a1a; border-radius: 12px; z-index: 401;
+    display: none; flex-direction: column; overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+  }
+  #cc-panel.open { display: flex; }
+  .cc-header {
+    padding: 12px 14px; border-bottom: 1px solid #1a1a1a;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px; letter-spacing: 0.04em; color: #eee; flex-shrink: 0;
+  }
+  .cc-close { cursor: pointer; color: var(--muted, #888); font-size: 14px; }
+  .cc-messages {
+    flex: 1; overflow-y: auto; padding: 10px 12px; display: flex;
+    flex-direction: column; gap: 8px;
+  }
+  .cc-msg { font-size: 12.5px; line-height: 1.4; }
+  .cc-msg-head { display: flex; align-items: baseline; gap: 5px; margin-bottom: 1px; }
+  .cc-msg-name { font-weight: bold; color: #ddd; }
+  .cc-msg-admin {
+    font-size: 9px; font-weight: bold; color: #000; background: var(--green, #00ff9d);
+    padding: 1px 5px; border-radius: 4px; letter-spacing: 0.05em;
+  }
+  .cc-msg-time { font-size: 10px; color: var(--muted, #666); margin-left: auto; }
+  .cc-msg-text { color: #ccc; word-break: break-word; }
+  .cc-gate {
+    padding: 12px 14px; border-top: 1px solid #1a1a1a; font-size: 12px;
+    color: var(--muted, #888); text-align: center; flex-shrink: 0;
+  }
+  .cc-gate a { color: var(--green, #00ff9d); cursor: pointer; text-decoration: underline; }
+  .cc-composer {
+    padding: 10px 12px; border-top: 1px solid #1a1a1a; display: flex; gap: 8px; flex-shrink: 0;
+  }
+  .cc-composer input {
+    flex: 1; background: #161616; border: 1px solid #1a1a1a; border-radius: 6px;
+    color: #eee; padding: 8px 10px; font-size: 12.5px; outline: none;
+  }
+  .cc-composer button {
+    background: var(--green, #00ff9d); color: #000; border: none; border-radius: 6px;
+    padding: 8px 14px; font-size: 12px; font-weight: bold; cursor: pointer;
+  }
+  .cc-meta {
+    padding: 3px 14px 8px; font-size: 10px; color: var(--muted, #555);
+    text-align: right; flex-shrink: 0;
+  }
+  @media (max-width: 480px) {
+    #cc-panel { right: 10px; bottom: 76px; }
+    #cc-bubble { right: 12px; bottom: 12px; }
+  }
+</style>
+
+<script>
+(function() {
+  const CC_MAX_CHARS = 50;
+  let ccOpen = false;
+  let ccPollTimer = null;
+  let ccLastSeenAt = localStorage.getItem('cc.lastSeenAt') || '';
+  let ccLatestMessages = [];
+
+  const CC_FLAG = code => code ? ({
+    DZ:'🇩🇿',AO:'🇦🇴',BJ:'🇧🇯',BW:'🇧🇼',BF:'🇧🇫',BI:'🇧🇮',CM:'🇨🇲',CV:'🇨🇻',CF:'🇨🇫',
+    TD:'🇹🇩',KM:'🇰🇲',CG:'🇨🇬',CD:'🇨🇩',DJ:'🇩🇯',EG:'🇪🇬',GQ:'🇬🇶',ER:'🇪🇷',SZ:'🇸🇿',
+    ET:'🇪🇹',GA:'🇬🇦',GM:'🇬🇲',GH:'🇬🇭',GN:'🇬🇳',GW:'🇬🇼',CI:'🇨🇮',KE:'🇰🇪',LS:'🇱🇸',
+    LR:'🇱🇷',LY:'🇱🇾',MG:'🇲🇬',MW:'🇲🇼',ML:'🇲🇱',MR:'🇲🇷',MU:'🇲🇺',MA:'🇲🇦',MZ:'🇲🇿',
+    NA:'🇳🇦',NE:'🇳🇪',NG:'🇳🇬',RW:'🇷🇼',ST:'🇸🇹',SN:'🇸🇳',SC:'🇸🇨',SL:'🇸🇱',SO:'🇸🇴',
+    ZA:'🇿🇦',SS:'🇸🇸',SD:'🇸🇩',TZ:'🇹🇿',TG:'🇹🇬',TN:'🇹🇳',UG:'🇺🇬',ZM:'🇿🇲',ZW:'🇿🇼'
+  }[code] || '🌍') : '🌍';
+
+  function ccTimeAgo(iso) {
+    const diff = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (diff < 60) return 'now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h';
+    return Math.floor(diff / 86400) + 'd';
+  }
+
+  function ccEscape(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  window.ccToggle = function() {
+    ccOpen = !ccOpen;
+    document.getElementById('cc-panel').classList.toggle('open', ccOpen);
+    if (ccOpen) {
+      ccFetch();
+      if (ccPollTimer) clearInterval(ccPollTimer);
+      ccPollTimer = setInterval(ccFetch, 4000);
+      if (ccLatestMessages.length) {
+        ccLastSeenAt = ccLatestMessages[ccLatestMessages.length - 1].created_at;
+        localStorage.setItem('cc.lastSeenAt', ccLastSeenAt);
+        ccUpdateBadge();
+      }
+    } else {
+      if (ccPollTimer) clearInterval(ccPollTimer);
+      ccPollTimer = setInterval(ccFetch, 25000);
+    }
+  };
+
+  function ccUpdateBadge() {
+    const unread = ccLatestMessages.filter(m => !ccLastSeenAt || m.created_at > ccLastSeenAt).length;
+    const badge = document.getElementById('cc-badge');
+    if (unread > 0 && !ccOpen) {
+      badge.textContent = unread > 9 ? '9+' : unread;
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  async function ccFetch() {
+    try {
+      const r = await fetch('/api/chat/messages');
+      const data = await r.json();
+      ccLatestMessages = data.messages || [];
+      ccRender();
+      ccUpdateBadge();
+    } catch (e) { /* transient — next poll will retry */ }
+  }
+
+  function ccRender() {
+    const box = document.getElementById('cc-messages');
+    const wasAtBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+    box.innerHTML = ccLatestMessages.map(m => `
+      <div class="cc-msg">
+        <div class="cc-msg-head">
+          <span class="cc-msg-name">${ccEscape(m.username)}</span>
+          ${m.is_admin ? '<span class="cc-msg-admin">ADMIN</span>' : `<span>${CC_FLAG(m.country)}</span>`}
+          <span class="cc-msg-time">${ccTimeAgo(m.created_at)}</span>
+        </div>
+        <div class="cc-msg-text">${ccEscape(m.message)}</div>
+      </div>
+    `).join('') || '<div style="color:var(--muted,#666);font-size:12px;text-align:center;padding:20px 0;">No messages yet — say hello 👋</div>';
+    if (wasAtBottom || ccOpen) box.scrollTop = box.scrollHeight;
+  }
+
+  window.ccUpdateCount = function() {
+    const input = document.getElementById('cc-input');
+    const meta = document.getElementById('cc-meta');
+    const n = input.value.length;
+    meta.textContent = `${n}/${CC_MAX_CHARS}`;
+    meta.style.color = n > CC_MAX_CHARS ? '#ff5555' : 'var(--muted,#555)';
+  };
+
+  window.ccSend = async function() {
+    const input = document.getElementById('cc-input');
+    const msg = input.value.trim();
+    if (!msg) return;
+    if (typeof sb === 'undefined' || !sb) { ccShowGateMessage('Chat needs a session — please reload the page.'); return; }
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) { if (typeof openAuth === 'function') openAuth(); return; }
+
+    const btn = document.getElementById('cc-send-btn');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/chat/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ message: msg }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) {
+        input.value = '';
+        ccUpdateCount();
+        ccFetch();
+      } else {
+        ccShowGateMessage(data.detail || 'Message could not be sent.');
+      }
+    } catch (e) {
+      ccShowGateMessage('Network error — try again.');
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  let ccGateTimer = null;
+  function ccShowGateMessage(text) {
+    const gate = document.getElementById('cc-gate');
+    gate.textContent = text;
+    gate.style.display = 'block';
+    if (ccGateTimer) clearTimeout(ccGateTimer);
+    ccGateTimer = setTimeout(() => { gate.style.display = 'none'; }, 4000);
+  }
+
+  // Composer visibility depends on login state — re-checked whenever the
+  // panel opens, since currentUser can change (sign in/out) without a
+  // full page reload on most pages here.
+  const _origToggle = window.ccToggle;
+  window.ccToggle = function() {
+    _origToggle();
+    const loggedIn = typeof currentUser !== 'undefined' && currentUser;
+    document.getElementById('cc-composer').style.display = loggedIn ? 'flex' : 'none';
+    document.getElementById('cc-gate').style.display = loggedIn ? 'none' : 'block';
+    if (!loggedIn) {
+      document.getElementById('cc-gate').innerHTML = typeof openAuth === 'function'
+        ? '<a onclick="openAuth()">Sign in</a> to join the conversation'
+        : 'Sign in to join the conversation';
+    }
+    ccUpdateCount();
+  };
+
+  // Light background poll from page load, so the badge can show unread
+  // activity even before the user ever opens the panel.
+  ccFetch();
+  ccPollTimer = setInterval(ccFetch, 25000);
+})();
+</script>
+<!-- END CONTINENTAL CHAT -->
+
 </body>
 </html>

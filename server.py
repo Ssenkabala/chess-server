@@ -43,8 +43,8 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(TimeoutMiddleware)
 
-from routes import static_assets, pages, game, tournament, profile, coach, misc, payments
-for r in (static_assets, pages, game, tournament, profile, coach, misc, payments):
+from routes import static_assets, pages, game, tournament, profile, coach, misc, payments, chat
+for r in (static_assets, pages, game, tournament, profile, coach, misc, payments, chat):
     app.include_router(r.router)
 
 app.mount("/img", StaticFiles(directory="img"), name="img")

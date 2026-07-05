@@ -51,7 +51,7 @@ async def supabase_get_profile(user_id: str) -> dict | None:
             f"{SUPABASE_URL}/rest/v1/profiles",
             params={"user_id": f"eq.{user_id}",
                     "select": "username,elo,elo_bullet,elo_blitz,elo_rapid,"
-                              "banned,ban_reason,created_at,games_played"},
+                              "banned,ban_reason,created_at,games_played,country"},
             headers={
                 "apikey": SUPABASE_SERVICE_KEY,
                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",

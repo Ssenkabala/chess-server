@@ -173,6 +173,20 @@ const PG = (function() {
 })();
 
 // ── Parse and forward UCI info lines ─────────────────────────────────────────
+// parseInt on a missing/malformed token returns NaN, not null or undefined.
+// That matters because `NaN != null` is `true` in JavaScript (NaN is the
+// one value that doesn't loosely-equal null the way undefined does) — so
+// every downstream `if (mate != null)`-style check treats a NaN mate/cp as
+// "yes, a real value is here" and formats it, producing the literal string
+// "NaN" in the UI instead of falling back cleanly. Confirmed live. Fixing
+// it here, at the one place every numeric field gets parsed, means no
+// downstream consumer (formatEval, evalCpApprox, accuracy math, anything
+// future) has to remember to guard against it individually.
+function safeInt(str, fallback) {
+    var n = parseInt(str);
+    return isNaN(n) ? (fallback === undefined ? null : fallback) : n;
+}
+
 function handleInfoLine(text) {
     // One-time final PV, printed exactly once after a search completes
     // (engine_wasm.cpp's engine_analyse, after the per-depth loop is done).
@@ -184,14 +198,14 @@ function handleInfoLine(text) {
     // Format: "pvfinal <multipvIdx> cp <n>|mate <n> <uci moves...>"
     if (text && text.startsWith('pvfinal ')) {
         var rest      = text.slice('pvfinal '.length).trim().split(' ').filter(Boolean);
-        var mpvIdx    = parseInt(rest[0]);
+        var mpvIdx    = safeInt(rest[0], 1);
         var scoreType = rest[1];               // 'cp' or 'mate'
-        var scoreVal  = parseInt(rest[2]);
+        var scoreVal  = safeInt(rest[2]);       // null if the token is missing/malformed — never NaN
         var pvLine    = rest.slice(3);
         var isMate    = scoreType === 'mate';
         self.postMessage({
             type:    'pv_final',
-            multipv: isNaN(mpvIdx) ? 1 : mpvIdx,
+            multipv: mpvIdx,
             pvLine:  pvLine,
             cp:      isMate ? null : scoreVal,
             mate:    isMate ? scoreVal : null
@@ -213,8 +227,8 @@ function handleInfoLine(text) {
     // Lichess's own Score type (separate optional fields, never a single
     // magic-number-encoded value a consumer has to decode).
     var isMate = mti >= 0;
-    var cp     = (!isMate && cpi >= 0) ? parseInt(parts[cpi + 1]) : null;
-    var mate   = isMate ? parseInt(parts[mti + 1]) : null;
+    var cp     = (!isMate && cpi >= 0) ? safeInt(parts[cpi + 1]) : null;
+    var mate   = isMate ? safeInt(parts[mti + 1]) : null;
 
     var pvMoves = [];
     if (pi >= 0) {
@@ -226,13 +240,13 @@ function handleInfoLine(text) {
 
     self.postMessage({
         type:    'info',
-        depth:   di >= 0 ? parseInt(parts[di + 1]) : 0,
+        depth:   di >= 0 ? safeInt(parts[di + 1], 0) : 0,
         cp:      cp,
         mate:    mate,
-        time:    ti >= 0 ? parseInt(parts[ti + 1]) : 0,
+        time:    ti >= 0 ? safeInt(parts[ti + 1], 0) : 0,
         pv:      pvMoves[0] || '',
         pvLine:  pvMoves,
-        multipv: mi >= 0 ? parseInt(parts[mi + 1]) : 1,
+        multipv: mi >= 0 ? safeInt(parts[mi + 1], 1) : 1,
     });
     return true;
 }

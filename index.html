@@ -1203,7 +1203,7 @@ global.Chessground = Nr;
   <!-- Load WASM engine only if browser supports it -->
   <script>
     if (window._wasmSupported) {
-      var _v = '?v=3';   // bump this whenever senkabala.js or senkabala_wasm.js changes
+      var _v = '?v=4';   // bump on every engine rebuild — busts senkabala.js, senkabala_wasm.js AND senkabala.wasm (the .wasm inherits this query, see senkabala_wasm.js)
       var s1 = document.createElement('script');
       s1.src = '/senkabala.js' + _v;
       s1.onload = function() {
@@ -1225,6 +1225,8 @@ global.Chessground = Nr;
   <!-- Opening detection -->
   <script src="/openings.js"></script>
   <script src="/openings_detector.js"></script>
+  <!-- Move accuracy & classification — Lichess-derived, shared with any other page that needs it -->
+  <script src="/analysis_accuracy.js"></script>
 </head>
 <body>
 <!-- Google Tag Manager (noscript) -->
@@ -2258,8 +2260,44 @@ var analysisViewIndex  = -1;
 var analysisCg = null;
 // Cache the most recent analysis result so Coach Me can reuse it without re-running the engine
 var lastAnalysisResult = null;  // { fen, bestMove, evalCp }  — set by analysePosition on completion
-var lastCandidateLines = null;  // { fen, lines: [{pvLine, score, isMate}, ...] } — last completed search's full candidate set, used to detect "the move just played was already a known continuation" so analysis can pick up instantly instead of re-searching from scratch
+var lastCandidateLines = null;  // { fen, lines: [{pvLine, cp, mate}, ...] } — last completed search's full candidate set, used to detect "the move just played was already a known continuation" so analysis can pick up instantly instead of re-searching from scratch
 var _autoAnalyseTimer = null;
+
+// ─── Shared eval formatting ─────────────────────────────────────────────
+// cp and mate are mutually exclusive (mate is only ever non-null for a
+// forced mate), matching what engine_worker.js now forwards directly from
+// the engine — no more re-deriving mate-ness from a raw cp magnitude.
+//
+// isNaN() guards below matter because of a real JS foot-gun: NaN != null
+// evaluates to true (unlike undefined, NaN does NOT loosely-equal null),
+// so a plain `mate != null` check treats a NaN mate value as "yes, a real
+// mate score" and formats it, producing the literal string "NaN" in the
+// UI. engine_worker.js now sanitizes NaN to null at the source, but
+// guarding here too means this specific bug class can't resurface even if
+// some other future caller passes a raw value through.
+function formatEval(cp, mate) {
+  if (mate != null && !isNaN(mate)) return (mate > 0 ? '#' : '-#') + Math.abs(mate);
+  var v = (cp != null && !isNaN(cp)) ? cp : 0;
+  return (v >= 0 ? '+' : '') + (v / 100).toFixed(2);
+}
+
+// Flips a {cp, mate} pair to the other side's perspective — used when a
+// cached line (scored from the mover's POV) needs to be shown from the
+// new side-to-move's POV after that move is played.
+function flipEval(cp, mate) {
+  var cpOk   = cp   != null && !isNaN(cp);
+  var mateOk = mate != null && !isNaN(mate);
+  return { cp: cpOk ? -cp : null, mate: mateOk ? -mate : null };
+}
+
+// A cp-scale stand-in for a mate score, for contexts that need a single
+// number (accuracy math, Coach Me's eval prompt) rather than a real cp
+// value, which a mate doesn't have. Magnitude is deliberately far outside
+// any real eval so drop-based classification still reads it as decisive.
+function evalCpApprox(cp, mate) {
+  if (mate != null && !isNaN(mate)) return mate > 0 ? 9000 : -9000;
+  return (cp != null && !isNaN(cp)) ? cp : 0;
+}
 
 function setAnalysisStatus(msg) {
   document.getElementById('analysis-status').innerHTML = msg;
@@ -2333,17 +2371,11 @@ function initAnalysisBoard() {
                 var newFen = analysisGame.fen();
                 var sanArr = pvLineToSan(newFen, remainingPv);
                 if (sanArr.length > 0) {
-                  var evalStr2;
-                  var sc = -followedLine.score;  // flips from the mover's perspective to the new side-to-move's
-                  if (followedLine.isMate || Math.abs(sc) >= 90000) {
-                    var absSc = Math.abs(sc);
-                    var mN = absSc >= 900000 ? Math.ceil((999000 - absSc + 1) / 2) : Math.abs(Math.round(sc/100000));
-                    evalStr2 = (sc > 0 ? '#' : '-#') + mN;
-                  } else {
-                    evalStr2 = (sc >= 0 ? '+' : '') + (sc/100).toFixed(2);
-                  }
+                  // Flips from the mover's perspective to the new side-to-move's
+                  var flipped = flipEval(followedLine.cp, followedLine.mate);
+                  var evalStr2 = formatEval(flipped.cp, flipped.mate);
                   setAnalysisStatus('Eval: ' + evalStr2 + '  ·  Continuing known line — refining…');
-                  lastAnalysisResult = { fen: newFen, bestMove: remainingPv[0], evalCp: sc, pv: remainingPv };
+                  lastAnalysisResult = { fen: newFen, bestMove: remainingPv[0], evalCp: evalCpApprox(flipped.cp, flipped.mate), pv: remainingPv };
                   document.getElementById('btn-coach').disabled = false;
                 }
               } else {
@@ -2519,35 +2551,25 @@ function scheduleAutoAnalyse() {
 // this is shared logic ported from play_multiplayer.html's working
 // implementation, adapted to work with analysisGame specifically).
 // ═══════════════════════════════════════════════════════════════════════
-// ACCURACY & MOVE CLASSIFICATION — based on Lichess's open-source
-// AccuracyPercent.scala and AccuracyCP.scala. Translated to JS.
+// ACCURACY & MOVE CLASSIFICATION now comes from /analysis_accuracy.js
+// (cpToWinPercent, accuracyFromWinPercents, accuracyFromCp, classifyMove,
+// buildMoveData, gameAccuracy) — the same Lichess-derived module used
+// anywhere else accuracy is needed, instead of a separate local copy that
+// could drift out of sync with it. classifyMove doesn't carry a display
+// color (that's UI, not judgment), so it's looked up here by tag.
 // ═══════════════════════════════════════════════════════════════════════
 
-function cpToWinPercent(cp) {
-  var c = Math.max(-1000, Math.min(1000, cp));
-  return 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * c)) - 1);
-}
+var JUDGMENT_COLOR_BY_TAG = {
+  'missed-mate': '#ff5555',
+  'blunder':     '#ff6644',
+  'mistake':     '#ffaa33',
+  'inaccuracy':  '#aaaaaa'
+};
 
-// Lichess's exact fitted exponential curve for move accuracy.
-// beforeWp/afterWp are win% from the MOVER'S perspective.
-function accuracyFromWinPercents(beforeWp, afterWp) {
-  if (afterWp >= beforeWp) return 100;
-  var diff = beforeWp - afterWp;
-  var raw = 103.1668100711649 * Math.exp(-0.04354415386753951 * diff) - 3.166924740191411;
-  return Math.max(0, Math.min(100, raw + 1));  // +1: uncertainty bonus
-}
-
-function accuracyFromCp(cpBefore, cpAfter) {
-  return accuracyFromWinPercents(cpToWinPercent(cpBefore), cpToWinPercent(cpAfter));
-}
-
-// Lichess thresholds: inaccuracy ≥50cp, mistake ≥120cp, blunder ≥300cp.
-function classifyMoveByDrop(cpDrop, isMate, playedBest) {
-  if (isMate && !playedBest) return { tag: 'missed-mate', label: 'Missed mate',  symbol: '??', color: '#ff5555', severity: 4 };
-  if (cpDrop >= 300)         return { tag: 'blunder',     label: 'Blunder',      symbol: '??', color: '#ff6644', severity: 3 };
-  if (cpDrop >= 120)         return { tag: 'mistake',     label: 'Mistake',      symbol: '?',  color: '#ffaa33', severity: 2 };
-  if (cpDrop >= 50)          return { tag: 'inaccuracy',  label: 'Inaccuracy',   symbol: '!?', color: '#aaaaaa', severity: 1 };
-  return null;
+function classifyMoveWithColor(cpBefore, cpAfter, isMate, playedBestMove) {
+  var j = classifyMove(cpBefore, cpAfter, isMate, playedBestMove);
+  if (j) j.color = JUDGMENT_COLOR_BY_TAG[j.tag] || '#aaaaaa';
+  return j;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -2614,7 +2636,7 @@ function startAnalysisReview() {
         return;
       }
       if ((msg.multipv || 1) === 1) {
-        bestEval = { score: msg.score, isMate: !!msg.isMate, pvMove: msg.pvLine && msg.pvLine[0] };
+        bestEval = { cp: msg.cp, mate: msg.mate, pvMove: msg.pvLine && msg.pvLine[0] };
       }
     };
 
@@ -2623,19 +2645,17 @@ function startAnalysisReview() {
       wasmEng._analysisInfoHandler = null;
 
       if (bestEval && bestUci && playedUci) {
-        var bestCp     = bestEval.isMate ? (bestEval.score > 0 ? 9000 : -9000) : (bestEval.score || 0);
+        var isMate  = bestEval.mate != null && !isNaN(bestEval.mate);   // true regardless of which side is winning — was previously
+                                                // dropped whenever the mate ran against the mover, which
+                                                // silently mis-scored every "you're the one getting mated" case
+        // A mate has no natural cp value — this sentinel is only used
+        // where a cp-scale number is needed (accuracy math, coach eval);
+        // sign matches the mate's sign, magnitude is deliberately far
+        // outside any real eval range so drop-based classification still
+        // reads it as decisive.
+        var bestCp     = isMate ? (bestEval.mate > 0 ? 9000 : -9000) : (bestEval.cp || 0);
         var playedBest = bestUci.slice(0, 4) === playedUci.slice(0, 4);
 
-        // To get the eval AFTER the played move, flip the score of the
-        // position after it — we need a second engine call for accuracy,
-        // but as a practical approximation for non-best moves, we can use
-        // the difference between best and played evaluations from the
-        // perspective of the side to move, where played≠best means
-        // the engine's score for the best move is what we had BEFORE,
-        // and we estimate the played move's score from the next position.
-        // For now: use cpDrop = bestCp - 0 for non-best moves as a
-        // conservative floor (we know played ≠ best, so there IS a drop).
-        // The second-call approach is built in the full version below.
         var fenAfterPlayed = analysisFenHistory[plyIdx + 1] || null;
         var cpAfter = null;
 
@@ -2652,7 +2672,8 @@ function startAnalysisReview() {
           bestSan:      pvLineToSan(fenBefore, [bestUci])[0] || null,
           variation:    bestFinalPv || [bestUci],
           variationSan: pvLineToSan(fenBefore, bestFinalPv || [bestUci]),
-          isMate:       bestEval.isMate && bestEval.score > 0,
+          isMate:       isMate,
+          mateIn:       isMate ? bestEval.mate : null,
           playedBest:   playedBest,
           cpBefore:     bestCp,
           cpAfter:      cpAfter,
@@ -2668,16 +2689,20 @@ function startAnalysisReview() {
             var captureHandler2 = function(msg) {
               if ((msg.multipv || 1) === 1 && msg.type !== 'pv_final') {
                 // Score is from the OPPONENT'S perspective — negate to get
-                // score from the original mover's perspective
-                annotation.cpAfter = -(msg.score || 0);
+                // score from the original mover's perspective. Same
+                // cp-sentinel treatment as bestCp above when it's a mate.
+                var afterIsMate = msg.mate != null && !isNaN(msg.mate);
+                annotation.cpAfter = -(afterIsMate ? (msg.mate > 0 ? 9000 : -9000) : (msg.cp || 0));
               }
             };
             wasmEng._analysisInfoHandler = captureHandler2;
             wasmEng.analyse(fenAfterPlayed, [], Math.min(REVIEW_MS_PER_MOVE, 1500), 1).then(function() {
               wasmEng._analysisInfoHandler = null;
               annotation.pending = false;
-              var cpDrop = annotation.cpBefore - (annotation.cpAfter || 0);
-              annotation.judgment = classifyMoveByDrop(cpDrop, annotation.isMate, playedBest);
+              annotation.judgment = classifyMoveWithColor(annotation.cpBefore, annotation.cpAfter || 0, annotation.isMate, playedBest);
+              if (annotation.judgment && annotation.judgment.tag === 'missed-mate' && annotation.mateIn) {
+                annotation.judgment.label = 'Missed forced mate in ' + Math.abs(annotation.mateIn);
+              }
               annotation.accuracy = annotation.isMate ? null : Math.round(accuracyFromCp(annotation.cpBefore, annotation.cpAfter || 0));
               if (annotation.judgment) {
                 analysisAnnotations[plyIdx] = annotation;
@@ -2860,25 +2885,34 @@ function analysePosition() {
       // rows with each one's complete continuation, matching the original
       // design where the candidate list updates as the engine finds more,
       // rather than popping up a separate display once the search is done.
+      // For every line, the cp/mate here is the SAME score the main
+      // search already vetted during its own multiPV pass (not a
+      // recomputed one) — the scratch mini-search that extends secondary
+      // lines' continuations shares a global board-history array with the
+      // main search that just ran, and its own return value turned out
+      // not to be trustworthy standalone (confirmed live: it was
+      // producing "+0.00" on a position that was nowhere near equal). So
+      // it's used only for its side effect of extending the PV; the
+      // engine always reports the already-vetted score alongside it.
       var mpv = msg.multipv || 1;
       var pv  = msg.pvLine || [];
       if (mpv === 1) finalRealPv = pv;  // line 1 specifically feeds the cached result / Coach Me
       if (pv.length && infoLines[mpv]) {
         infoLines[mpv].pvLine = pv;
+        infoLines[mpv].cp     = msg.cp;
+        infoLines[mpv].mate   = msg.mate;
         renderCandidateRows(fen);
       }
       return;
     }
 
     var depth  = msg.depth;
-    var score  = msg.score;       // centipawns (or mate sentinel)
     var pvMove = msg.pv;
     var pvLine = msg.pvLine || (pvMove ? [pvMove] : []);
     var mpv    = msg.multipv || 1;
-    var isMate = msg.isMate;
 
     if (mpv === 1 && pvMove) bestMoveInfo = pvMove;
-    infoLines[mpv] = { depth: depth, score: score, pvLine: pvLine, pvMove: pvMove, isMate: isMate };
+    infoLines[mpv] = { depth: depth, cp: msg.cp, mate: msg.mate, pvLine: pvLine, pvMove: pvMove };
 
     // Live depth feedback in the main status line — with a 30s budget now
     // in play (up from the old flat 5s), it matters more that progress is
@@ -2895,15 +2929,7 @@ function analysePosition() {
     // Update status bar — just depth, quietly
     if (Object.keys(infoLines).length > 0) {
       var topLine = infoLines[1] || {};
-      var absTop = Math.abs(topLine.score || 0);
-      var evTop;
-      if (topLine.isMate || absTop >= 90000) {
-        var mN = absTop >= 900000 ? Math.ceil((999000 - absTop + 1) / 2) : Math.abs(Math.round((topLine.score||0)/100000));
-        evTop = (topLine.score > 0 ? '#' : '-#') + mN;
-      } else {
-        evTop = (topLine.score >= 0 ? '+' : '') + ((topLine.score||0) / 100).toFixed(2);
-      }
-      setAnalysisStatus('Depth ' + depth + '  ·  ' + evTop);
+      setAnalysisStatus('Depth ' + depth + '  ·  ' + formatEval(topLine.cp, topLine.mate));
     }
   }
 
@@ -2920,20 +2946,8 @@ function analysePosition() {
       wrap.classList.add('visible');
       list.innerHTML = '';
       keys.forEach(function(k) {
-        var ln  = infoLines[k];
-        var absScore = Math.abs(ln.score);
-        var ev;
-        // Mate detection: engine uses 999000 - ply for mate scores
-        // isMate flag uses 100000 sentinel — also catch large raw cp scores
-        if (ln.isMate || absScore >= 90000) {
-          // Real mate: score is 999000 - ply, so mate in N = ceil((999000 - absScore + 1) / 2)
-          var mateN = absScore >= 900000
-            ? Math.ceil((999000 - absScore + 1) / 2)
-            : Math.abs(Math.round(ln.score / 100000));
-          ev = ln.score > 0 ? '#' + mateN : '-#' + mateN;
-        } else {
-          ev = (ln.score >= 0 ? '+' : '') + (ln.score / 100).toFixed(2);
-        }
+        var ln = infoLines[k];
+        var ev = formatEval(ln.cp, ln.mate);
 
         // Translate full PV to SAN
         var sanArr = pvLineToSan(fen, ln.pvLine || (ln.pvMove ? [ln.pvMove] : []));
@@ -2963,17 +2977,10 @@ function analysePosition() {
     highlightBestMove(finalMove.slice(0,2), finalMove.slice(2,4));
 
     var lastLine  = infoLines[1] || {};
-    var evalPawns = lastLine.score != null ? lastLine.score / 100 : null;
+    var evalPawns = (lastLine.cp != null && !isNaN(lastLine.cp)) ? lastLine.cp / 100 : null;
     updateEvalBar(evalPawns || 0);
-    var absLast = Math.abs(lastLine.score || 0);
-    var evalStr;
-    if (lastLine.isMate || absLast >= 90000) {
-      var mateN = absLast >= 900000 ? Math.ceil((999000 - absLast + 1) / 2) : Math.abs(Math.round((lastLine.score||0)/100000));
-      evalStr = (lastLine.score > 0 ? '#' : '-#') + mateN;
-      updateEvalBar(lastLine.score > 0 ? 100 : -100);
-    } else {
-      evalStr = evalPawns != null ? (evalPawns >= 0 ? '+' : '') + evalPawns.toFixed(2) : '?';
-    }
+    var evalStr = formatEval(lastLine.cp, lastLine.mate);
+    if (lastLine.mate != null && !isNaN(lastLine.mate)) updateEvalBar(lastLine.mate > 0 ? 100 : -100);
 
     // Cache result so Coach Me can reuse it without re-running engine.
     // Includes the full PV (continuation line), not just the single best
@@ -2984,7 +2991,7 @@ function analysePosition() {
     // finalRealPv comes from the one-time pv_final message — falls back to
     // the cheap single-move PV only if that message somehow never arrived.
     var realPvUci = finalRealPv.length ? finalRealPv : (lastLine.pvLine || (finalMove ? [finalMove] : []));
-    lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: lastLine.score || 0, pv: realPvUci };
+    lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: evalCpApprox(lastLine.cp, lastLine.mate), pv: realPvUci };
 
     // Snapshot every candidate line's real PV (not just the top one — each
     // line index gets its own real continuation from the pv_final handler)
@@ -2994,7 +3001,7 @@ function analysePosition() {
     Object.keys(infoLines).forEach(function(k) {
       var ln = infoLines[k];
       if (ln && ln.pvLine && ln.pvLine.length) {
-        snapshotLines.push({ pvLine: ln.pvLine, score: ln.score, isMate: ln.isMate });
+        snapshotLines.push({ pvLine: ln.pvLine, cp: ln.cp, mate: ln.mate });
       }
     });
     lastCandidateLines = { fen: fen, lines: snapshotLines };
@@ -3678,262 +3685,6 @@ function closeMenuThenAuth() {
   setInterval(ping, 30000);
 })();
 </script>
-<!-- ═══════════════════════════════════════════════════════════════
-     CONTINENTAL CHAT — bubble + panel. Self-contained: doesn't depend on
-     anything from the rest of the page except `sb` (Supabase client) and
-     `currentUser`, both of which every page already has except watch.html
-     (which gets a two-line addition alongside this).
-     Deliberately excluded from play_multiplayer.html — no chat clutter
-     during a live game.
-     ═══════════════════════════════════════════════════════════════ -->
-<div id="cc-bubble" onclick="ccToggle()">
-  <span id="cc-bubble-icon">💬</span>
-  <span id="cc-badge" class="cc-badge"></span>
-</div>
-
-<div id="cc-panel">
-  <div class="cc-header">
-    <span>🌍 Continental Chat</span>
-    <span class="cc-close" onclick="ccToggle()">✕</span>
-  </div>
-  <div id="cc-messages" class="cc-messages"></div>
-  <div id="cc-gate" class="cc-gate" style="display:none;"></div>
-  <div id="cc-composer" class="cc-composer" style="display:none;">
-    <input id="cc-input" maxlength="50" placeholder="Say something…"
-           oninput="ccUpdateCount()" onkeydown="if(event.key==='Enter')ccSend()">
-    <button id="cc-send-btn" onclick="ccSend()">Send</button>
-  </div>
-  <div id="cc-meta" class="cc-meta"></div>
-</div>
-
-<style>
-  #cc-bubble {
-    position: fixed; right: 18px; bottom: 18px; width: 52px; height: 52px;
-    border-radius: 50%; background: #0d0d0d; border: 1px solid #1a1a1a;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 22px; cursor: pointer; z-index: 400;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
-    transition: transform 0.15s ease;
-  }
-  #cc-bubble:hover { transform: scale(1.06); }
-  .cc-badge {
-    position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
-    border-radius: 9px; background: var(--green, #00ff9d); color: #000;
-    font-size: 11px; font-weight: bold; display: none;
-    align-items: center; justify-content: center; padding: 0 4px;
-  }
-  #cc-panel {
-    position: fixed; right: 18px; bottom: 82px; width: min(320px, calc(100vw - 36px));
-    height: min(420px, calc(100vh - 160px)); background: #0d0d0d;
-    border: 1px solid #1a1a1a; border-radius: 12px; z-index: 401;
-    display: none; flex-direction: column; overflow: hidden;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.6);
-  }
-  #cc-panel.open { display: flex; }
-  .cc-header {
-    padding: 12px 14px; border-bottom: 1px solid #1a1a1a;
-    display: flex; align-items: center; justify-content: space-between;
-    font-size: 13px; letter-spacing: 0.04em; color: #eee; flex-shrink: 0;
-  }
-  .cc-close { cursor: pointer; color: var(--muted, #888); font-size: 14px; }
-  .cc-messages {
-    flex: 1; overflow-y: auto; padding: 10px 12px; display: flex;
-    flex-direction: column; gap: 8px;
-  }
-  .cc-msg { font-size: 12.5px; line-height: 1.4; }
-  .cc-msg-head { display: flex; align-items: baseline; gap: 5px; margin-bottom: 1px; }
-  .cc-msg-name { font-weight: bold; color: #ddd; }
-  .cc-msg-admin {
-    font-size: 9px; font-weight: bold; color: #000; background: var(--green, #00ff9d);
-    padding: 1px 5px; border-radius: 4px; letter-spacing: 0.05em;
-  }
-  .cc-msg-time { font-size: 10px; color: var(--muted, #666); margin-left: auto; }
-  .cc-msg-text { color: #ccc; word-break: break-word; }
-  .cc-gate {
-    padding: 12px 14px; border-top: 1px solid #1a1a1a; font-size: 12px;
-    color: var(--muted, #888); text-align: center; flex-shrink: 0;
-  }
-  .cc-gate a { color: var(--green, #00ff9d); cursor: pointer; text-decoration: underline; }
-  .cc-composer {
-    padding: 10px 12px; border-top: 1px solid #1a1a1a; display: flex; gap: 8px; flex-shrink: 0;
-  }
-  .cc-composer input {
-    flex: 1; background: #161616; border: 1px solid #1a1a1a; border-radius: 6px;
-    color: #eee; padding: 8px 10px; font-size: 12.5px; outline: none;
-  }
-  .cc-composer button {
-    background: var(--green, #00ff9d); color: #000; border: none; border-radius: 6px;
-    padding: 8px 14px; font-size: 12px; font-weight: bold; cursor: pointer;
-  }
-  .cc-meta {
-    padding: 3px 14px 8px; font-size: 10px; color: var(--muted, #555);
-    text-align: right; flex-shrink: 0;
-  }
-  @media (max-width: 480px) {
-    #cc-panel { right: 10px; bottom: 76px; }
-    #cc-bubble { right: 12px; bottom: 12px; }
-  }
-</style>
-
-<script>
-(function() {
-  const CC_MAX_CHARS = 50;
-  let ccOpen = false;
-  let ccPollTimer = null;
-  let ccLastSeenAt = localStorage.getItem('cc.lastSeenAt') || '';
-  let ccLatestMessages = [];
-
-  const CC_FLAG = code => code ? ({
-    DZ:'🇩🇿',AO:'🇦🇴',BJ:'🇧🇯',BW:'🇧🇼',BF:'🇧🇫',BI:'🇧🇮',CM:'🇨🇲',CV:'🇨🇻',CF:'🇨🇫',
-    TD:'🇹🇩',KM:'🇰🇲',CG:'🇨🇬',CD:'🇨🇩',DJ:'🇩🇯',EG:'🇪🇬',GQ:'🇬🇶',ER:'🇪🇷',SZ:'🇸🇿',
-    ET:'🇪🇹',GA:'🇬🇦',GM:'🇬🇲',GH:'🇬🇭',GN:'🇬🇳',GW:'🇬🇼',CI:'🇨🇮',KE:'🇰🇪',LS:'🇱🇸',
-    LR:'🇱🇷',LY:'🇱🇾',MG:'🇲🇬',MW:'🇲🇼',ML:'🇲🇱',MR:'🇲🇷',MU:'🇲🇺',MA:'🇲🇦',MZ:'🇲🇿',
-    NA:'🇳🇦',NE:'🇳🇪',NG:'🇳🇬',RW:'🇷🇼',ST:'🇸🇹',SN:'🇸🇳',SC:'🇸🇨',SL:'🇸🇱',SO:'🇸🇴',
-    ZA:'🇿🇦',SS:'🇸🇸',SD:'🇸🇩',TZ:'🇹🇿',TG:'🇹🇬',TN:'🇹🇳',UG:'🇺🇬',ZM:'🇿🇲',ZW:'🇿🇼'
-  }[code] || '🌍') : '🌍';
-
-  function ccTimeAgo(iso) {
-    const diff = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-    if (diff < 60) return 'now';
-    if (diff < 3600) return Math.floor(diff / 60) + 'm';
-    if (diff < 86400) return Math.floor(diff / 3600) + 'h';
-    return Math.floor(diff / 86400) + 'd';
-  }
-
-  function ccEscape(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
-
-  window.ccToggle = function() {
-    ccOpen = !ccOpen;
-    document.getElementById('cc-panel').classList.toggle('open', ccOpen);
-    if (ccOpen) {
-      ccFetch();
-      if (ccPollTimer) clearInterval(ccPollTimer);
-      ccPollTimer = setInterval(ccFetch, 4000);
-      if (ccLatestMessages.length) {
-        ccLastSeenAt = ccLatestMessages[ccLatestMessages.length - 1].created_at;
-        localStorage.setItem('cc.lastSeenAt', ccLastSeenAt);
-        ccUpdateBadge();
-      }
-    } else {
-      if (ccPollTimer) clearInterval(ccPollTimer);
-      ccPollTimer = setInterval(ccFetch, 25000);
-    }
-  };
-
-  function ccUpdateBadge() {
-    const unread = ccLatestMessages.filter(m => !ccLastSeenAt || m.created_at > ccLastSeenAt).length;
-    const badge = document.getElementById('cc-badge');
-    if (unread > 0 && !ccOpen) {
-      badge.textContent = unread > 9 ? '9+' : unread;
-      badge.style.display = 'flex';
-    } else {
-      badge.style.display = 'none';
-    }
-  }
-
-  async function ccFetch() {
-    try {
-      const r = await fetch('/api/chat/messages');
-      const data = await r.json();
-      ccLatestMessages = data.messages || [];
-      ccRender();
-      ccUpdateBadge();
-    } catch (e) { /* transient — next poll will retry */ }
-  }
-
-  function ccRender() {
-    const box = document.getElementById('cc-messages');
-    const wasAtBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
-    box.innerHTML = ccLatestMessages.map(m => `
-      <div class="cc-msg">
-        <div class="cc-msg-head">
-          <span class="cc-msg-name">${ccEscape(m.username)}</span>
-          ${m.is_admin ? '<span class="cc-msg-admin">ADMIN</span>' : `<span>${CC_FLAG(m.country)}</span>`}
-          <span class="cc-msg-time">${ccTimeAgo(m.created_at)}</span>
-        </div>
-        <div class="cc-msg-text">${ccEscape(m.message)}</div>
-      </div>
-    `).join('') || '<div style="color:var(--muted,#666);font-size:12px;text-align:center;padding:20px 0;">No messages yet — say hello 👋</div>';
-    if (wasAtBottom || ccOpen) box.scrollTop = box.scrollHeight;
-  }
-
-  window.ccUpdateCount = function() {
-    const input = document.getElementById('cc-input');
-    const meta = document.getElementById('cc-meta');
-    const n = input.value.length;
-    meta.textContent = `${n}/${CC_MAX_CHARS}`;
-    meta.style.color = n > CC_MAX_CHARS ? '#ff5555' : 'var(--muted,#555)';
-  };
-
-  window.ccSend = async function() {
-    const input = document.getElementById('cc-input');
-    const msg = input.value.trim();
-    if (!msg) return;
-    if (typeof sb === 'undefined' || !sb) { ccShowGateMessage('Chat needs a session — please reload the page.'); return; }
-    const { data: { session } } = await sb.auth.getSession();
-    if (!session) { if (typeof openAuth === 'function') openAuth(); return; }
-
-    const btn = document.getElementById('cc-send-btn');
-    btn.disabled = true;
-    try {
-      const r = await fetch('/api/chat/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-        body: JSON.stringify({ message: msg }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (r.ok) {
-        input.value = '';
-        ccUpdateCount();
-        ccFetch();
-      } else {
-        ccShowGateMessage(data.detail || 'Message could not be sent.');
-      }
-    } catch (e) {
-      ccShowGateMessage('Network error — try again.');
-    } finally {
-      btn.disabled = false;
-    }
-  };
-
-  let ccGateTimer = null;
-  function ccShowGateMessage(text) {
-    const gate = document.getElementById('cc-gate');
-    gate.textContent = text;
-    gate.style.display = 'block';
-    if (ccGateTimer) clearTimeout(ccGateTimer);
-    ccGateTimer = setTimeout(() => { gate.style.display = 'none'; }, 4000);
-  }
-
-  // Composer visibility depends on login state — re-checked whenever the
-  // panel opens, since currentUser can change (sign in/out) without a
-  // full page reload on most pages here.
-  const _origToggle = window.ccToggle;
-  window.ccToggle = function() {
-    _origToggle();
-    const loggedIn = typeof currentUser !== 'undefined' && currentUser;
-    document.getElementById('cc-composer').style.display = loggedIn ? 'flex' : 'none';
-    document.getElementById('cc-gate').style.display = loggedIn ? 'none' : 'block';
-    if (!loggedIn) {
-      document.getElementById('cc-gate').innerHTML = typeof openAuth === 'function'
-        ? '<a onclick="openAuth()">Sign in</a> to join the conversation'
-        : 'Sign in to join the conversation';
-    }
-    ccUpdateCount();
-  };
-
-  // Light background poll from page load, so the badge can show unread
-  // activity even before the user ever opens the panel.
-  ccFetch();
-  ccPollTimer = setInterval(ccFetch, 25000);
-})();
-</script>
-<!-- END CONTINENTAL CHAT -->
-
 </body>
 </html>
 

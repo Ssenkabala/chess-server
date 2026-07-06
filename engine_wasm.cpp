@@ -2905,7 +2905,7 @@ extern "C" {
 EMSCRIPTEN_KEEPALIVE
 void engine_init() {
     if (wasmInitDone) return;
-    cerr << "[engine] build " << ENGINE_BUILD_ID << "\n";  // confirms which binary is actually running
+    cerr << "build " << ENGINE_BUILD_ID << "\n";  // engine_worker.js already prefixes every engine message with "[engine]" itself
     tt  = new TTEntry[TT_SIZE]();
     tt2 = new TTEntry[TT_SIZE_MPV]();
     activeTT     = tt;          // default: main table

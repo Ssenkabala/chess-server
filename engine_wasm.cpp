@@ -2087,9 +2087,23 @@ Move search(Board& b, int wtime, int btime, int movestogo, int winc, int binc) {
 #endif
 
     if (bypassClockFormula) {
-        searchTimeMs = max(10, totalTime - 200);
-        baseTime     = searchTimeMs;
-        isBullet     = (totalTime <= 60000);
+        if (nativeMovetimeRequest) {
+            // Native UCI encodes movetime as wt=bt=mt+200 (see the go-command
+            // handler) — recover the real value from it.
+            searchTimeMs = max(10, totalTime - 200);
+        }
+        // else: wasmTimerPreset. searchTimeMs was ALREADY set correctly by
+        // the caller (engine_best_move / engine_analyse) to the real
+        // movetime_ms BEFORE calling search() — do NOT touch it here.
+        // Those callers pass wtime=btime=9999999 as a sentinel specifically
+        // meaning "ignore the clock, a preset timer is already active" —
+        // recomputing searchTimeMs from totalTime would derive it from that
+        // sentinel instead (9999999-200 ≈ 10 seconds), silently discarding
+        // the real budget and running far longer than requested. Confirmed
+        // live: engine_best_move given a 2000ms budget ran for 15+ seconds
+        // before an external timeout killed it — this line is why.
+        baseTime = searchTimeMs;
+        isBullet = (totalTime <= 60000);
     } else {
         // ----------------------------------------------------------------
         // TIME MANAGEMENT (v18 revision)

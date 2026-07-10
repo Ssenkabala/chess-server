@@ -216,9 +216,9 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     .hamburger.open span:nth-child(1) { transform:translateY(7px) rotate(45deg); }
     .hamburger.open span:nth-child(2) { opacity:0; }
     .hamburger.open span:nth-child(3) { transform:translateY(-7px) rotate(-45deg); }
-    .mobile-drawer { position:fixed; top:0; right:-260px; width:240px; height:100vh; background:#0d0d0d; border-left:1px solid #1a1a1a; display:flex; flex-direction:column; padding:72px 24px 32px; gap:20px; z-index:500; transition:right 0.28s ease; }
+    .mobile-drawer { position:fixed; top:0; right:-260px; width:240px; height:100vh; background:#0d0d0d; border-left:1px solid #1a1a1a; display:flex; flex-direction:column; padding:72px 24px 32px; gap:4px; z-index:500; transition:right 0.28s ease; }
     .mobile-drawer.open { right:0; }
-    .mobile-drawer a { color:var(--muted); text-decoration:none; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; padding:8px 0; border-bottom:1px solid #1a1a1a; transition:color 0.2s; }
+    .mobile-drawer a { color:var(--muted); text-decoration:none; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; padding:11px 4px; border-bottom:1px solid #1a1a1a; transition:color 0.2s; }
     .mobile-drawer a:hover, .mobile-drawer a.active { color:var(--green); }
     .drawer-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:499; }
     .drawer-overlay.open { display:block; }
@@ -955,7 +955,10 @@ async function init() {
         { headers: { 'x-user-id': currentUser.id } });
       if (pr.ok) {
         const pd = await pr.json();
-        currentProfile = { username: pd.username, elo: pd.elo, country: pd.country };
+        currentProfile = {
+          username: pd.username, elo: pd.elo, country: pd.country,
+          created_at: pd.created_at, games_played: pd.games_played
+        };
       }
     } catch(e) { console.warn('Profile load failed', e); }
   } else {
@@ -1104,6 +1107,8 @@ function stopListPoll() {
 }
 
 async function viewTournament(id) {
+  console.log('[DBG client] viewTournament CALLED id=', id, 'currentDetailId=', currentDetailId,
+              'wsState=', tournamentWs ? tournamentWs.readyState : 'null', '@', new Date().toISOString().slice(11,23));
   // Stop any existing poll + timer if switching to a different tournament
   if (currentDetailId && currentDetailId !== id) {
     stopDetailPoll();
@@ -1211,6 +1216,29 @@ async function viewTournament(id) {
 
   let actionBtn = '';
 
+  // Prize-tournament eligibility (account age, rated games) — mirrors the
+  // server's check_prize_eligibility() exactly, so a player sees the SAME
+  // requirement on the page that the server will enforce, instead of only
+  // finding out via a 403 alert() after clicking Join. If currentProfile
+  // or created_at isn't available yet, don't block — same as the server's
+  // own "can't parse date, don't block" fallback; the server is still the
+  // real gate either way, this is purely an informational pre-check.
+  function prizeEligibilityStatus() {
+    if (!currentProfile) return { eligible: true };
+    const gamesPlayed = currentProfile.games_played || 0;
+    const gamesOk = gamesPlayed >= 10;
+    let ageOk = true, ageDays = null;
+    if (currentProfile.created_at) {
+      ageDays = Math.floor((Date.now() - new Date(currentProfile.created_at).getTime()) / 86400000);
+      if (!isNaN(ageDays)) ageOk = ageDays >= 7;
+    }
+    if (ageOk && gamesOk) return { eligible: true };
+    const parts = [];
+    if (!ageOk)   parts.push(`account ${ageDays}/7 days old`);
+    if (!gamesOk) parts.push(`${gamesPlayed}/10 rated games`);
+    return { eligible: false, reason: 'Prize tournament — needs ' + parts.join(', ') };
+  }
+
   // Shared eligibility check — used both for pre-start joining and
   // late-joining an active arena tournament.
   function eligibilityCheckedJoinButton() {
@@ -1224,13 +1252,19 @@ async function viewTournament(id) {
       central_africa: ['CD','CG','CF','GA','GQ','TD'],
     };
     const allowedRegion = !t.region || (userCountry && (REGION_COUNTRIES[t.region]||[]).includes(userCountry));
-    if (allowedCountry && allowedRegion) {
-      return `<button class="btn btn-sm" id="btn-join-${id}" onclick="joinTournament('${id}')">Join</button>`;
-    } else if (!allowedCountry) {
+    if (!allowedCountry) {
       return `<span style="font-size:11px;color:var(--muted)">Restricted to ${FLAG(t.country)} ${COUNTRY_NAMES[t.country] || t.country}</span>`;
-    } else {
+    }
+    if (!allowedRegion) {
       return `<span style="font-size:11px;color:var(--muted)">Restricted to ${REGION_LABELS_JS[t.region] || t.region} players</span>`;
     }
+    if (t.prize_pool > 0) {
+      const elig = prizeEligibilityStatus();
+      if (!elig.eligible) {
+        return `<span style="font-size:11px;color:var(--muted)" title="${elig.reason}">🔒 ${elig.reason}</span>`;
+      }
+    }
+    return `<button class="btn btn-sm" id="btn-join-${id}" onclick="joinTournament('${id}')">Join</button>`;
   }
 
   if (currentUser) {
@@ -1624,17 +1658,25 @@ function connectTournamentWs(tid, tournament) {
   // Already connected to this tournament — don't reconnect
   if (tournamentWs && currentTournamentId === tid &&
       (tournamentWs.readyState === WebSocket.OPEN || tournamentWs.readyState === WebSocket.CONNECTING)) {
+    console.log('[DBG client] connectTournamentWs: already connected to', tid, '— skipping');
     return;
   }
   if (tournamentWs) { tournamentWs.close(); tournamentWs = null; }
   currentTournamentId = tid;
-  if (!currentUser || tournament.format !== 'arena') return;
+  if (!currentUser || tournament.format !== 'arena') {
+    console.log('[DBG client] connectTournamentWs: EARLY RETURN — currentUser=', !!currentUser,
+                'format=', tournament && tournament.format, '(need arena)');
+    return;
+  }
   _myArenaScore = 0;  // reset on fresh connect — server will update via game_over
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  tournamentWs = new WebSocket(`${proto}://${location.host}/ws/tournament/${tid}`);
+  const wsUrl = `${proto}://${location.host}/ws/tournament/${tid}`;
+  console.log('[DBG client] connectTournamentWs: OPENING', wsUrl, 'user=', currentUser.id);
+  tournamentWs = new WebSocket(wsUrl);
 
   tournamentWs.onopen = () => {
+    console.log('[DBG client] tournamentWs OPEN — sending identity');
     tournamentWs.send(JSON.stringify({
       user_id:    currentUser.id,
       username:   currentProfile ? currentProfile.username : (currentUser.email || 'player'),
@@ -1654,6 +1696,7 @@ function connectTournamentWs(tid, tournament) {
   tournamentWs.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
+      console.log('[DBG client] tournamentWs recv:', msg.type, '|', JSON.stringify(msg).slice(0, 200));
       if (msg.type === 'game_ready') {
         showArenaGameReady(msg);
       } else if (msg.type === 'game_over') {
@@ -1746,7 +1789,9 @@ function connectTournamentWs(tid, tournament) {
     } catch(err) {}
   };
 
-  tournamentWs.onclose = () => {
+  tournamentWs.onclose = (ev) => {
+    console.log('[DBG client] tournamentWs CLOSED code=', ev.code, 'reason=', ev.reason,
+                'wasClean=', ev.wasClean, '— reconnect scheduled in 3s @', new Date().toISOString().slice(11,23));
     if (tournamentWs && tournamentWs._ping) clearInterval(tournamentWs._ping);
     // Attempt reconnect after 3s if we're still on this detail view
     setTimeout(() => {
@@ -1755,6 +1800,7 @@ function connectTournamentWs(tid, tournament) {
           // Fetch fresh tournament data for reconnect
           fetch(`/api/tournaments/${tid}`).then(r => r.json()).then(data => {
             if (data && data.tournament && data.tournament.status === 'active') {
+              console.log('[DBG client] onclose reconnect firing for', tid);
               connectTournamentWs(tid, data.tournament);
             }
           }).catch(() => {});
@@ -1763,7 +1809,7 @@ function connectTournamentWs(tid, tournament) {
     }, 3000);
   };
 
-  tournamentWs.onerror = () => {};
+  tournamentWs.onerror = (ev) => { console.log('[DBG client] tournamentWs ERROR', ev && ev.type); };
 }
 
 let _notifyBarTarget = null;
@@ -1791,6 +1837,8 @@ function showArenaGameReady(msg) {
   hideArenaCountdown();
   const tc   = encodeURIComponent(msg.time_control || '');
   const href = `/multiplayer?game_id=${msg.game_id}&color=${msg.color}&tournament_id=${currentTournamentId}&tournament_db_id=${msg.tournament_db_id || ''}&time_control=${tc}&my_rank=${msg.my_rank||0}&opponent_rank=${msg.opponent_rank||0}`;
+  console.log('[DBG client] game_ready received:', JSON.stringify(msg));
+  console.log('[DBG client] redirect href:', href, '| tournament_db_id present?', !!msg.tournament_db_id);
 
   // Show bottom notification bar
   showNotifyBar(`♟ Game ready! ${msg.color} vs ${msg.opponent} (${msg.opponent_elo}) — Tap to play`, href);
@@ -1991,6 +2039,9 @@ document.getElementById('t-auth-overlay').addEventListener('click', function(e){
     <span>🌍 Continental Chat</span>
     <span class="cc-close" onclick="ccToggle()">✕</span>
   </div>
+  <div id="cc-rules-bar" class="cc-rules-bar" onclick="ccShowRulesModal()">
+    📌 Be respectful · Keep it chess-related · <span class="cc-rules-link">Full rules</span>
+  </div>
   <div id="cc-messages" class="cc-messages"></div>
   <div id="cc-gate" class="cc-gate" style="display:none;"></div>
   <div id="cc-composer" class="cc-composer" style="display:none;">
@@ -1999,6 +2050,20 @@ document.getElementById('t-auth-overlay').addEventListener('click', function(e){
     <button id="cc-send-btn" onclick="ccSend()">Send</button>
   </div>
   <div id="cc-meta" class="cc-meta"></div>
+</div>
+
+<div id="cc-rules-modal" class="cc-rules-modal-overlay" style="display:none;" onclick="if(event.target===this)ccDismissRulesModal()">
+  <div class="cc-rules-modal-box">
+    <div class="cc-rules-modal-title">🌍 Continental Chat — quick guide</div>
+    <ul class="cc-rules-list">
+      <li>Be respectful — no harassment, hate speech, or personal attacks.</li>
+      <li>Keep it chess-related — no spam or unrelated promotion.</li>
+      <li>English helps everyone here follow along.</li>
+      <li>50 characters, 5 messages a day — keep it short.</li>
+      <li>Breaking these rules can get your account banned.</li>
+    </ul>
+    <button class="cc-rules-modal-btn" onclick="ccDismissRulesModal()">Got it</button>
+  </div>
 </div>
 
 <style>
@@ -2019,7 +2084,7 @@ document.getElementById('t-auth-overlay').addEventListener('click', function(e){
   }
   #cc-panel {
     position: fixed; right: 18px; bottom: 82px; width: min(320px, calc(100vw - 36px));
-    height: min(420px, calc(100vh - 160px)); background: #0d0d0d;
+    height: min(460px, calc(100vh - 160px)); background: #0d0d0d;
     border: 1px solid #1a1a1a; border-radius: 12px; z-index: 401;
     display: none; flex-direction: column; overflow: hidden;
     box-shadow: 0 4px 24px rgba(0,0,0,0.6);
@@ -2031,6 +2096,13 @@ document.getElementById('t-auth-overlay').addEventListener('click', function(e){
     font-size: 13px; letter-spacing: 0.04em; color: #eee; flex-shrink: 0;
   }
   .cc-close { cursor: pointer; color: var(--muted, #888); font-size: 14px; }
+  .cc-rules-bar {
+    padding: 6px 14px; font-size: 10.5px; color: var(--muted, #888);
+    background: #111; border-bottom: 1px solid #1a1a1a; cursor: pointer;
+    flex-shrink: 0; line-height: 1.4;
+  }
+  .cc-rules-bar:hover { color: #ccc; }
+  .cc-rules-link { color: var(--green, #00ff9d); text-decoration: underline; }
   .cc-messages {
     flex: 1; overflow-y: auto; padding: 10px 12px; display: flex;
     flex-direction: column; gap: 8px;
@@ -2063,6 +2135,27 @@ document.getElementById('t-auth-overlay').addEventListener('click', function(e){
   .cc-meta {
     padding: 3px 14px 8px; font-size: 10px; color: var(--muted, #555);
     text-align: right; flex-shrink: 0;
+  }
+  #cc-rules-modal.open, .cc-rules-modal-overlay[style*="flex"] {}
+  .cc-rules-modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 500;
+    align-items: center; justify-content: center; padding: 24px;
+  }
+  .cc-rules-modal-box {
+    background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 12px;
+    padding: 20px; max-width: 340px; width: 100%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+  }
+  .cc-rules-modal-title {
+    font-size: 14px; color: #eee; font-weight: bold; margin-bottom: 12px;
+  }
+  .cc-rules-list {
+    margin: 0 0 16px; padding-left: 18px; color: #ccc; font-size: 12.5px; line-height: 1.6;
+  }
+  .cc-rules-list li { margin-bottom: 6px; }
+  .cc-rules-modal-btn {
+    width: 100%; background: var(--green, #00ff9d); color: #000; border: none;
+    border-radius: 6px; padding: 10px; font-size: 13px; font-weight: bold; cursor: pointer;
   }
   @media (max-width: 480px) {
     #cc-panel { right: 10px; bottom: 76px; }
@@ -2101,10 +2194,25 @@ document.getElementById('t-auth-overlay').addEventListener('click', function(e){
     return d.innerHTML;
   }
 
+  window.ccShowRulesModal = function() {
+    document.getElementById('cc-rules-modal').style.display = 'flex';
+  };
+  window.ccDismissRulesModal = function() {
+    document.getElementById('cc-rules-modal').style.display = 'none';
+    localStorage.setItem('cc.rulesSeen', '1');
+  };
+
   window.ccToggle = function() {
     ccOpen = !ccOpen;
     document.getElementById('cc-panel').classList.toggle('open', ccOpen);
     if (ccOpen) {
+      // First-ever open on this browser — show the fuller guide once,
+      // automatically. The short pinned bar stays visible on every
+      // subsequent open as an ongoing, low-friction reminder; tapping it
+      // re-opens this same full guide any time.
+      if (!localStorage.getItem('cc.rulesSeen')) {
+        ccShowRulesModal();
+      }
       ccFetch();
       if (ccPollTimer) clearInterval(ccPollTimer);
       ccPollTimer = setInterval(ccFetch, 4000);
@@ -2117,6 +2225,15 @@ document.getElementById('t-auth-overlay').addEventListener('click', function(e){
       if (ccPollTimer) clearInterval(ccPollTimer);
       ccPollTimer = setInterval(ccFetch, 25000);
     }
+    const loggedIn = typeof currentUser !== 'undefined' && currentUser;
+    document.getElementById('cc-composer').style.display = loggedIn ? 'flex' : 'none';
+    document.getElementById('cc-gate').style.display = loggedIn ? 'none' : 'block';
+    if (!loggedIn) {
+      document.getElementById('cc-gate').innerHTML = typeof openAuth === 'function'
+        ? '<a onclick="openAuth()">Sign in</a> to join the conversation'
+        : 'Sign in to join the conversation';
+    }
+    ccUpdateCount();
   };
 
   function ccUpdateBadge() {
@@ -2203,23 +2320,6 @@ document.getElementById('t-auth-overlay').addEventListener('click', function(e){
     if (ccGateTimer) clearTimeout(ccGateTimer);
     ccGateTimer = setTimeout(() => { gate.style.display = 'none'; }, 4000);
   }
-
-  // Composer visibility depends on login state — re-checked whenever the
-  // panel opens, since currentUser can change (sign in/out) without a
-  // full page reload on most pages here.
-  const _origToggle = window.ccToggle;
-  window.ccToggle = function() {
-    _origToggle();
-    const loggedIn = typeof currentUser !== 'undefined' && currentUser;
-    document.getElementById('cc-composer').style.display = loggedIn ? 'flex' : 'none';
-    document.getElementById('cc-gate').style.display = loggedIn ? 'none' : 'block';
-    if (!loggedIn) {
-      document.getElementById('cc-gate').innerHTML = typeof openAuth === 'function'
-        ? '<a onclick="openAuth()">Sign in</a> to join the conversation'
-        : 'Sign in to join the conversation';
-    }
-    ccUpdateCount();
-  };
 
   // Light background poll from page load, so the badge can show unread
   // activity even before the user ever opens the panel.

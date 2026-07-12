@@ -16,7 +16,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#0a0a0a">
+  <meta name="theme-color" content="#262624">
   <meta name="description" content="Play chess against AfriChess's custom 2050 ELO engine. Choose from 8 difficulty levels, analyse positions, and get AI coaching. Built for African players.">
   <meta property="og:title" content="AfriChess | Play vs Engine">
   <meta property="og:description" content="Play chess against AfriChess's 2050 ELO engine — 8 difficulty levels, AI coaching, and position analysis. Built for African players.">
@@ -386,13 +386,13 @@ global.Chessground = Nr;
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      background: #0d0d0d;
+      background: #262624;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       font-family: 'Georgia', serif;
-      color: #e8e6e0;
+      color: #ece6da;
       gap: 16px;
       padding: 16px;
       overflow-x: hidden;
@@ -431,8 +431,8 @@ global.Chessground = Nr;
       transition: all 0.2s;
     }
     .tab-btn:last-child { border-right: none; }
-    .tab-btn:hover { color: #00ff9d; background: #1a1a1a; }
-    .tab-btn.active { background: #00ff9d22; color: #00ff9d; }
+    .tab-btn:hover { color: #4a9d7e; background: #33312d; }
+    .tab-btn.active { background: #4a9d7e22; color: #4a9d7e; }
 
     /* ── Panels ── */
     .panel { display: none; flex-direction: column; align-items: center; gap: 14px; width: 100%; max-width: 520px; }
@@ -464,15 +464,15 @@ global.Chessground = Nr;
       width: 20px; height: 20px;
       cursor: nwse-resize; z-index: 10; display: block;
       background: radial-gradient(circle at bottom right,
-        #00ff9d55 0%, #00ff9d22 40%, transparent 70%);
-      border-bottom: 2px solid #00ff9d44;
-      border-right:  2px solid #00ff9d44;
+        #4a9d7e55 0%, #4a9d7e22 40%, transparent 70%);
+      border-bottom: 2px solid #4a9d7e44;
+      border-right:  2px solid #4a9d7e44;
       border-radius: 0 0 4px 0;
     }
     cg-resize:hover {
       background: radial-gradient(circle at bottom right,
-        #00ff9d99 0%, #00ff9d44 40%, transparent 70%);
-      border-color: #00ff9daa;
+        #4a9d7e99 0%, #4a9d7e44 40%, transparent 70%);
+      border-color: #4a9d7eaa;
     }
     @media (max-width: 600px) {
       .captured-bar, .user-bar { padding: 0 8px; box-sizing: border-box; }
@@ -488,7 +488,7 @@ global.Chessground = Nr;
     cg-board .selected { background-color: rgba(0,255,157,0.2); }
     cg-board .last-move { background-color: rgba(0,255,157,0.25); }
     cg-board .check { background: radial-gradient(circle, #ff4d4d 25%, transparent 27%); }
-    .highlight-best { box-shadow: inset 0 0 0 3px #00ff9d88; }
+    .highlight-best { box-shadow: inset 0 0 0 3px #4a9d7e88; }
 
     #status, #analysis-status {
       font-size: 16px;
@@ -508,8 +508,8 @@ global.Chessground = Nr;
     button {
       padding: 10px 24px;
       background: transparent;
-      color: #00ff9d;
-      border: 1px solid #00ff9d;
+      color: #4a9d7e;
+      border: 1px solid #4a9d7e;
       font-size: 14px;
       font-family: 'Georgia', serif;
       letter-spacing: 0.1em;
@@ -517,7 +517,7 @@ global.Chessground = Nr;
       border-radius: 2px;
       transition: all 0.2s;
     }
-    button:hover, button.active { background: #00ff9d; color: #111; }
+    button:hover, button.active { background: #4a9d7e; color: #111; }
     button:disabled { opacity: 0.35; cursor: not-allowed; }
 
     /* ── Analysis panel extras ── */
@@ -529,9 +529,9 @@ global.Chessground = Nr;
     }
     #fen-input {
       flex: 1;
-      background: #1a1a1a;
+      background: #33312d;
       border: 1px solid #333;
-      color: #e8e6e0;
+      color: #ece6da;
       padding: 10px 14px;
       font-size: 13px;
       font-family: monospace;
@@ -539,7 +539,7 @@ global.Chessground = Nr;
       outline: none;
       transition: border-color 0.2s;
     }
-    #fen-input:focus { border-color: #00ff9d55; }
+    #fen-input:focus { border-color: #4a9d7e55; }
     #fen-input::placeholder { color: #444; }
 
     /* API key row */
@@ -552,9 +552,9 @@ global.Chessground = Nr;
     }
     #api-key-input {
       flex: 1;
-      background: #1a1a1a;
+      background: #33312d;
       border: 1px solid #333;
-      color: #e8e6e0;
+      color: #ece6da;
       padding: 9px 14px;
       font-size: 13px;
       font-family: monospace;
@@ -562,7 +562,7 @@ global.Chessground = Nr;
       outline: none;
       transition: border-color 0.2s;
     }
-    #api-key-input:focus { border-color: #00ff9d55; }
+    #api-key-input:focus { border-color: #4a9d7e55; }
     #api-key-input::placeholder { color: #444; }
     .api-label {
       font-size: 11px;
@@ -584,7 +584,7 @@ global.Chessground = Nr;
     .eval-bar-fill {
       height: 100%;
       width: 50%;
-      background: #00ff9d;
+      background: #4a9d7e;
       transition: width 0.6s ease;
       border-radius: 3px;
     }
@@ -601,9 +601,9 @@ global.Chessground = Nr;
     #coach-card {
       width: 100%;
       max-width: 480px;
-      background: #161616;
-      border: 1px solid #2a2a2a;
-      border-left: 3px solid #00ff9d44;
+      background: #33312d;
+      border: 1px solid #3d3a35;
+      border-left: 3px solid #4a9d7e44;
       border-radius: 2px;
       padding: 18px 20px;
       display: none;
@@ -617,7 +617,7 @@ global.Chessground = Nr;
       font-size: 10px;
       letter-spacing: 0.18em;
       text-transform: uppercase;
-      color: #00ff9d88;
+      color: #4a9d7e88;
     }
     .coach-text {
       font-size: 14px;
@@ -629,7 +629,7 @@ global.Chessground = Nr;
       display: inline-block;
       width: 14px; height: 14px;
       border: 2px solid #333;
-      border-top-color: #00ff9d;
+      border-top-color: #4a9d7e;
       border-radius: 50%;
       animation: spin 0.7s linear infinite;
       vertical-align: middle;
@@ -639,9 +639,9 @@ global.Chessground = Nr;
 
     .best-move-badge {
       display: inline-block;
-      background: #00ff9d18;
-      border: 1px solid #00ff9d44;
-      color: #00ff9d;
+      background: #4a9d7e18;
+      border: 1px solid #4a9d7e44;
+      color: #4a9d7e;
       font-family: monospace;
       font-size: 13px;
       padding: 2px 10px;
@@ -662,7 +662,7 @@ global.Chessground = Nr;
       align-items: baseline;
       gap: 8px;
       padding: 3px 0;
-      border-bottom: 1px solid #1a1a1a;
+      border-bottom: 1px solid #c9a76c88;
       font-family: monospace;
       font-size: 13px;
       line-height: 1.5;
@@ -670,7 +670,7 @@ global.Chessground = Nr;
     .candidate-row:last-child { border-bottom: none; }
     .candidate-rank { display: none; } /* no rank numbers */
     .candidate-eval {
-      color: #00ff9d;
+      color: #4a9d7e;
       font-size: 13px;
       min-width: 54px;
       flex-shrink: 0;
@@ -693,7 +693,7 @@ global.Chessground = Nr;
     }
     .candidate-bar {
       height: 100%;
-      background: #00ff9d;
+      background: #4a9d7e;
       border-radius: 2px;
       transition: width 0.4s ease;
     }
@@ -724,7 +724,7 @@ global.Chessground = Nr;
       color: #555;
       margin-left: 4px;
     }
-    .material-score.ahead { color: #00ff9d; }
+    .material-score.ahead { color: #4a9d7e; }
     /* ── Promotion picker ── */
     .promo-overlay {
       display: none; position: fixed; inset: 0;
@@ -736,11 +736,11 @@ global.Chessground = Nr;
     .promo-title { font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: #555; margin-bottom: 16px; }
     .promo-pieces { display: flex; gap: 8px; }
     .promo-piece {
-      width: 64px; height: 64px; background: #1a1a1a; border: 1px solid #333;
+      width: 64px; height: 64px; background: #33312d; border: 1px solid #333;
       border-radius: 3px; cursor: pointer; display: flex; align-items: center;
       justify-content: center; transition: border-color 0.15s, background 0.15s;
     }
-    .promo-piece:hover { border-color: #00ff9d; background: #0d1f17; }
+    .promo-piece:hover { border-color: #4a9d7e; background: #0d1f17; }
     .promo-piece img { width: 48px; height: 48px; }
 
     /* ── Game-over overlay ── */
@@ -751,7 +751,7 @@ global.Chessground = Nr;
     }
     .gameover-overlay.active { display: flex; }
     .gameover-box {
-      background: #111; border: 1px solid #2a2a2a; border-radius: 6px;
+      background: #111; border: 1px solid #3d3a35; border-radius: 6px;
       padding: 36px 40px; text-align: center; max-width: 320px; width: 90%;
       position: relative;
     }
@@ -762,7 +762,7 @@ global.Chessground = Nr;
     }
     .gameover-sub { font-size: 13px; color: #666; margin-bottom: 28px; min-height: 18px; }
     .gameover-btn {
-      background: #00ff9d; color: #000; border: none; border-radius: 3px;
+      background: #4a9d7e; color: #000; border: none; border-radius: 3px;
       padding: 12px 24px; font-size: 13px; font-weight: 700; cursor: pointer;
       letter-spacing: 0.05em; margin: 4px;
     }
@@ -788,9 +788,9 @@ global.Chessground = Nr;
     .auth-overlay.active { display: flex !important; }
 
     .auth-card {
-      background: #161616;
-      border: 1px solid #2a2a2a;
-      border-top: 2px solid #00ff9d;
+      background: #33312d;
+      border: 1px solid #3d3a35;
+      border-top: 2px solid #4a9d7e;
       border-radius: 3px;
       padding: 28px 24px;
       width: 100%;
@@ -804,7 +804,7 @@ global.Chessground = Nr;
       font-size: 13px;
       letter-spacing: 0.2em;
       text-transform: uppercase;
-      color: #00ff9d;
+      color: #4a9d7e;
       margin-bottom: 4px;
     }
     .auth-subtitle {
@@ -816,8 +816,8 @@ global.Chessground = Nr;
     .auth-input {
       width: 100%;
       background: #111;
-      border: 1px solid #2a2a2a;
-      color: #e8e6e0;
+      border: 1px solid #3d3a35;
+      color: #ece6da;
       padding: 11px 14px;
       font-size: 13px;
       font-family: monospace;
@@ -825,13 +825,13 @@ global.Chessground = Nr;
       outline: none;
       transition: border-color 0.2s;
     }
-    .auth-input:focus { border-color: #00ff9d55; }
+    .auth-input:focus { border-color: #4a9d7e55; }
     .auth-input::placeholder { color: #444; }
 
     .auth-btn {
       width: 100%;
       padding: 12px;
-      background: #00ff9d;
+      background: #4a9d7e;
       color: #111;
       border: none;
       font-size: 12px;
@@ -842,7 +842,7 @@ global.Chessground = Nr;
       border-radius: 2px;
       transition: background 0.2s;
     }
-    .auth-btn:hover { background: #00cc7a; }
+    .auth-btn:hover { background: #438d70; }
 
     .auth-divider {
       display: flex;
@@ -856,7 +856,7 @@ global.Chessground = Nr;
       content: '';
       flex: 1;
       height: 1px;
-      background: #2a2a2a;
+      background: #3d3a35;
     }
 
     .google-btn {
@@ -864,7 +864,7 @@ global.Chessground = Nr;
       padding: 11px;
       background: transparent;
       color: #aaa;
-      border: 1px solid #2a2a2a;
+      border: 1px solid #3d3a35;
       font-size: 12px;
       font-family: 'Georgia', serif;
       letter-spacing: 0.1em;
@@ -885,7 +885,7 @@ global.Chessground = Nr;
       letter-spacing: 0.05em;
     }
     .auth-toggle span {
-      color: #00ff9d;
+      color: #4a9d7e;
       cursor: pointer;
       text-decoration: underline;
     }
@@ -917,9 +917,9 @@ global.Chessground = Nr;
     }
     .username-overlay.active { display: flex; }
     .username-card {
-      background: #161616;
-      border: 1px solid #2a2a2a;
-      border-top: 3px solid #00ff9d;
+      background: #33312d;
+      border: 1px solid #c9a76c;
+      border-top: 3px solid #c9a76c;
       border-radius: 4px;
       padding: 40px 48px;
       text-align: center;
@@ -928,34 +928,34 @@ global.Chessground = Nr;
     }
     .username-title {
       font-size: 18px; letter-spacing: 0.1em;
-      color: #e8e6e0; text-transform: uppercase;
+      color: #ece6da; text-transform: uppercase;
     }
     .username-sub {
       font-size: 12px; color: #666;
       letter-spacing: 0.06em; line-height: 1.6;
     }
     .username-input {
-      background: #111; border: 1px solid #2a2a2a;
-      color: #e8e6e0; padding: 12px 16px;
+      background: #111; border: 1px solid #3d3a35;
+      color: #ece6da; padding: 12px 16px;
       font-size: 15px; font-family: monospace;
       border-radius: 2px; outline: none; text-align: center;
       letter-spacing: 0.08em; width: 100%;
       transition: border-color 0.2s;
     }
-    .username-input:focus { border-color: #00ff9d55; }
+    .username-input:focus { border-color: #4a9d7e55; }
     .username-error {
       font-size: 12px; color: #ff4d4d;
       letter-spacing: 0.06em; min-height: 16px;
     }
     .username-btn {
-      padding: 12px 28px; background: #00ff9d;
+      padding: 12px 28px; background: #4a9d7e;
       color: #111; border: none; font-size: 14px;
       font-family: Georgia, serif; font-weight: bold;
       letter-spacing: 0.12em; cursor: pointer;
       border-radius: 2px; text-transform: uppercase;
       transition: background 0.2s; width: 100%;
     }
-    .username-btn:hover { background: #00cc7a; }
+    .username-btn:hover { background: #438d70; }
     .username-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 
@@ -974,7 +974,7 @@ global.Chessground = Nr;
       letter-spacing: 0.08em;
       font-family: monospace;
     }
-    .user-info span { color: #00ff9d; }
+    .user-info span { color: #4a9d7e; }
     .user-actions { display: flex; gap: 8px; }
     .user-actions button {
       padding: 5px 14px;
@@ -989,7 +989,9 @@ global.Chessground = Nr;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 4px 0 8px;
+      padding: 8px 0 12px;
+      border-bottom: 2px solid #c9a76c66;
+      margin-bottom: 8px;
     }
     .top-logo {
       display: flex;
@@ -1031,12 +1033,12 @@ global.Chessground = Nr;
       top: 0; right: -260px;
       width: 240px;
       height: 100vh;
-      background: #0d0d0d;
+      background: #262624;
       border-left: 1px solid #222;
       display: flex;
       flex-direction: column;
       padding: 72px 28px 28px;
-      gap: 24px;
+      gap: 4px;
       z-index: 55;
       transition: right 0.3s ease;
     }
@@ -1049,11 +1051,11 @@ global.Chessground = Nr;
       text-transform: uppercase;
       transition: color 0.2s;
       cursor: pointer;
-      padding: 8px 0;
-      border-bottom: 1px solid #1a1a1a;
+      padding: 11px 4px;
+      border-bottom: 1px solid #33312d;
       display: block;
     }
-    .mobile-menu a:hover { color: #00ff9d; }
+    .mobile-menu a:hover { color: #4a9d7e; }
 
     .nav-overlay {
       display: none;
@@ -1236,17 +1238,17 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <div class="top-bar">
     <a href="/" class="top-logo">
       <img src="/logo.png" height="32" alt="AfriChess">
-      <span>Afri<span style="color:#00d98b">Chess</span></span>
+      <span>Afri<span style="color:#00ff9d">Chess</span></span>
     </a>
     <!-- Desktop nav — hidden below 760px where hamburger takes over -->
     <div id="index-desktop-nav" style="display:flex;gap:16px;align-items:center;">
-      <a href="/multiplayer" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Live</a>
-      <a href="/tournaments" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Tournaments</a>
-      <a href="/leaderboard" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Leaderboard</a>
-      <a href="/history"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">History</a>
-      <a href="/watch"       style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Watch</a>
-      <a href="/profile"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00ff9d'" onmouseout="this.style.color='#555'">Profile</a>
-      <a id="nav-signin-idx" onclick="openAuth()" style="display:none;color:#00ff9d;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign In</a>
+      <a href="/multiplayer" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Live</a>
+      <a href="/tournaments" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Tournaments</a>
+      <a href="/leaderboard" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Leaderboard</a>
+      <a href="/history"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">History</a>
+      <a href="/watch"       style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Watch</a>
+      <a href="/profile"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Profile</a>
+      <a id="nav-signin-idx" onclick="openAuth()" style="display:none;color:#4a9d7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign In</a>
       <a id="nav-signout-idx" onclick="signOut()" style="display:none;color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign Out</a>
     </div>
     <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
@@ -1288,10 +1290,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;letter-spacing:0.1em;color:#555;text-transform:uppercase;">
           <span>Difficulty</span>
-          <span id="diff-label" style="color:#00ff9d;font-size:13px;letter-spacing:0.05em;">Beginner</span>
+          <span id="diff-label" style="color:#4a9d7e;font-size:13px;letter-spacing:0.05em;">Beginner</span>
         </div>
         <input type="range" id="diff-slider" min="1" max="8" value="1"
-          style="width:100%;accent-color:#00ff9d;cursor:pointer;"
+          style="width:100%;accent-color:#4a9d7e;cursor:pointer;"
           oninput="setDifficulty(parseInt(this.value))">
         <div style="display:flex;justify-content:space-between;font-size:10px;color:#333;letter-spacing:0.05em;">
           <span>Beginner</span><span>Master</span>
@@ -1379,10 +1381,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
         <span id="ann-symbol" style="font-size:18px;font-weight:bold;"></span>
         <span id="ann-label" style="letter-spacing:0.06em;text-transform:uppercase;font-size:10.5px;color:#aaa;"></span>
-        <span id="ann-accuracy" style="margin-left:auto;font-family:'Courier New',monospace;color:#00ff9d;font-size:13px;"></span>
+        <span id="ann-accuracy" style="margin-left:auto;font-family:'Courier New',monospace;color:#4a9d7e;font-size:13px;"></span>
       </div>
       <div id="ann-played" style="color:#ccc;"></div>
-      <div id="ann-best" style="color:#00ff9d;margin-top:2px;"></div>
+      <div id="ann-best" style="color:#4a9d7e;margin-top:2px;"></div>
       <div id="ann-variation" style="color:#888;margin-top:2px;font-family:'Courier New',monospace;font-size:11px;"></div>
     </div>
 
@@ -2489,7 +2491,7 @@ function renderAnalysisMoveList() {
       badge = '<sup style="color:' + ann.judgment.color + ';font-size:10px;font-weight:bold;margin-left:1px;">' + ann.judgment.symbol + '</sup>';
     }
     html += '<span onclick="analysisGoToIndex(' + (i + 1) + ')" style="cursor:pointer;padding:2px 6px;border-radius:4px;' +
-            (isActive ? 'background:rgba(0,255,157,0.25);color:#00ff9d;' : 'color:#ccc;') + '">' +
+            (isActive ? 'background:rgba(0,255,157,0.25);color:#4a9d7e;' : 'color:#ccc;') + '">' +
             prefix + analysisSanHistory[i] + badge + '</span>';
   }
   el.innerHTML = html;
@@ -3338,7 +3340,7 @@ async function loadProfile(user) {
 
   if (data) {
     document.getElementById('user-info').innerHTML =
-      '<span style="color:#00ff9d">' + data.username + '</span>' +
+      '<span style="color:#4a9d7e">' + data.username + '</span>' +
       ' <span style="color:#444;font-size:11px;">' + data.elo + ' ELO</span>';
   } else {
     // No profile yet — show username modal
@@ -3383,7 +3385,7 @@ async function submitUsername() {
 
   document.getElementById('username-overlay').classList.remove('active');
   document.getElementById('user-info').innerHTML =
-    '<span style="color:#00ff9d">' + val + '</span>' +
+    '<span style="color:#4a9d7e">' + val + '</span>' +
     ' <span style="color:#444;font-size:11px;">1500 ELO</span>';
 }
 
@@ -3455,7 +3457,7 @@ async function handleAuth() {
   if (result.error) {
     errorEl.textContent = result.error.message;
   } else if (authMode === 'signup') {
-    errorEl.style.color = '#00ff9d';
+    errorEl.style.color = '#4a9d7e';
     errorEl.textContent = 'Check your email to confirm your account.';
   }
 }
@@ -3659,9 +3661,9 @@ function closeMenuThenAuth() {
     <div class="gameover-sub" id="gameover-sub"></div>
     <!-- Guest nudge — hidden for signed-in users, shown contextually for guests -->
     <div id="gameover-nudge" style="display:none;margin:0 0 18px;padding:12px 14px;
-         background:#0a1a0f;border:1px solid #00ff9d22;border-radius:4px;text-align:left;">
+         background:#0a1a0f;border:1px solid #4a9d7e22;border-radius:4px;text-align:left;">
       <div id="gameover-nudge-msg" style="font-size:12px;color:#888;margin-bottom:10px;line-height:1.6;"></div>
-      <button onclick="closeGameOver(); openAuth();" style="background:#00ff9d;color:#000;border:none;
+      <button onclick="closeGameOver(); openAuth();" style="background:#4a9d7e;color:#000;border:none;
               padding:8px 18px;border-radius:3px;font-size:12px;font-weight:700;
               cursor:pointer;letter-spacing:0.08em;text-transform:uppercase;width:100%;">
         Create Free Account →
@@ -3732,7 +3734,7 @@ function closeMenuThenAuth() {
 <style>
   #cc-bubble {
     position: fixed; right: 18px; bottom: 18px; width: 52px; height: 52px;
-    border-radius: 50%; background: #0d0d0d; border: 1px solid #1a1a1a;
+    border-radius: 50%; background: #262624; border: 1px solid #33312d;
     display: flex; align-items: center; justify-content: center;
     font-size: 22px; cursor: pointer; z-index: 400;
     box-shadow: 0 2px 10px rgba(0,0,0,0.5);
@@ -3741,31 +3743,31 @@ function closeMenuThenAuth() {
   #cc-bubble:hover { transform: scale(1.06); }
   .cc-badge {
     position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
-    border-radius: 9px; background: var(--green, #00ff9d); color: #000;
+    border-radius: 9px; background: var(--green, #4a9d7e); color: #000;
     font-size: 11px; font-weight: bold; display: none;
     align-items: center; justify-content: center; padding: 0 4px;
   }
   #cc-panel {
     position: fixed; right: 18px; bottom: 82px; width: min(320px, calc(100vw - 36px));
-    height: min(460px, calc(100vh - 160px)); background: #0d0d0d;
-    border: 1px solid #1a1a1a; border-radius: 12px; z-index: 401;
+    height: min(460px, calc(100vh - 160px)); background: #262624;
+    border: 1px solid #33312d; border-radius: 12px; z-index: 401;
     display: none; flex-direction: column; overflow: hidden;
     box-shadow: 0 4px 24px rgba(0,0,0,0.6);
   }
   #cc-panel.open { display: flex; }
   .cc-header {
-    padding: 12px 14px; border-bottom: 1px solid #1a1a1a;
+    padding: 12px 14px; border-bottom: 1px solid #33312d;
     display: flex; align-items: center; justify-content: space-between;
     font-size: 13px; letter-spacing: 0.04em; color: #eee; flex-shrink: 0;
   }
   .cc-close { cursor: pointer; color: var(--muted, #888); font-size: 14px; }
   .cc-rules-bar {
     padding: 6px 14px; font-size: 10.5px; color: var(--muted, #888);
-    background: #111; border-bottom: 1px solid #1a1a1a; cursor: pointer;
+    background: #111; border-bottom: 1px solid #33312d; cursor: pointer;
     flex-shrink: 0; line-height: 1.4;
   }
   .cc-rules-bar:hover { color: #ccc; }
-  .cc-rules-link { color: var(--green, #00ff9d); text-decoration: underline; }
+  .cc-rules-link { color: var(--green, #4a9d7e); text-decoration: underline; }
   .cc-messages {
     flex: 1; overflow-y: auto; padding: 10px 12px; display: flex;
     flex-direction: column; gap: 8px;
@@ -3774,25 +3776,25 @@ function closeMenuThenAuth() {
   .cc-msg-head { display: flex; align-items: baseline; gap: 5px; margin-bottom: 1px; }
   .cc-msg-name { font-weight: bold; color: #ddd; }
   .cc-msg-admin {
-    font-size: 9px; font-weight: bold; color: #000; background: var(--green, #00ff9d);
+    font-size: 9px; font-weight: bold; color: #000; background: var(--green, #4a9d7e);
     padding: 1px 5px; border-radius: 4px; letter-spacing: 0.05em;
   }
   .cc-msg-time { font-size: 10px; color: var(--muted, #666); margin-left: auto; }
   .cc-msg-text { color: #ccc; word-break: break-word; }
   .cc-gate {
-    padding: 12px 14px; border-top: 1px solid #1a1a1a; font-size: 12px;
+    padding: 12px 14px; border-top: 1px solid #33312d; font-size: 12px;
     color: var(--muted, #888); text-align: center; flex-shrink: 0;
   }
-  .cc-gate a { color: var(--green, #00ff9d); cursor: pointer; text-decoration: underline; }
+  .cc-gate a { color: var(--green, #4a9d7e); cursor: pointer; text-decoration: underline; }
   .cc-composer {
-    padding: 10px 12px; border-top: 1px solid #1a1a1a; display: flex; gap: 8px; flex-shrink: 0;
+    padding: 10px 12px; border-top: 1px solid #33312d; display: flex; gap: 8px; flex-shrink: 0;
   }
   .cc-composer input {
-    flex: 1; background: #161616; border: 1px solid #1a1a1a; border-radius: 6px;
+    flex: 1; background: #33312d; border: 1px solid #33312d; border-radius: 6px;
     color: #eee; padding: 8px 10px; font-size: 12.5px; outline: none;
   }
   .cc-composer button {
-    background: var(--green, #00ff9d); color: #000; border: none; border-radius: 6px;
+    background: var(--green, #4a9d7e); color: #000; border: none; border-radius: 6px;
     padding: 8px 14px; font-size: 12px; font-weight: bold; cursor: pointer;
   }
   .cc-meta {
@@ -3805,7 +3807,7 @@ function closeMenuThenAuth() {
     align-items: center; justify-content: center; padding: 24px;
   }
   .cc-rules-modal-box {
-    background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 12px;
+    background: #262624; border: 1px solid #33312d; border-radius: 12px;
     padding: 20px; max-width: 340px; width: 100%;
     box-shadow: 0 8px 32px rgba(0,0,0,0.7);
   }
@@ -3817,7 +3819,7 @@ function closeMenuThenAuth() {
   }
   .cc-rules-list li { margin-bottom: 6px; }
   .cc-rules-modal-btn {
-    width: 100%; background: var(--green, #00ff9d); color: #000; border: none;
+    width: 100%; background: var(--green, #4a9d7e); color: #000; border: none;
     border-radius: 6px; padding: 10px; font-size: 13px; font-weight: bold; cursor: pointer;
   }
   @media (max-width: 480px) {

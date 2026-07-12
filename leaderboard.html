@@ -15,7 +15,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#0a0a0a">
+  <meta name="theme-color" content="#262624">
   <meta name="description" content="AfriChess continental and national ELO rankings — top players by time control.">
   <meta property="og:title" content="AfriChess Leaderboard">
   <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
@@ -23,20 +23,24 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
-      --bg:    #0d0d0d;
+      --bg:    #262624;
       --bg2:   #111;
-      --bg3:   #1a1a1a;
+      --bg3:   #33312d;
       --border:#222;
-      --text:  #e8e6e0;
+      --text:  #ece6da;
       --muted: #555;
-      --green: #00ff9d;
-      --gold:  #d4af37;
+      --green: #4a9d7e;
+      --gold:  #c9a76c;
       --silver:#aaa;
       --bronze:#cd7f32;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       background: var(--bg);
+      background-image: url('/chess_pattern_bg.svg');
+      background-repeat: repeat-y;
+      background-size: 100% auto;
+      background-position: top center;
       color: var(--text);
       font-family: 'Georgia', serif;
       min-height: 100vh;
@@ -46,8 +50,8 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     /* ── Nav ── */
     .top-bar {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 20px; border-bottom: 1px solid var(--border);
-      position: sticky; top: 0; background: var(--bg); z-index: 10;
+      padding: 14px 20px; border-bottom: 2px solid #c9a76c66;
+      position: sticky; top: 0; background: #0a0a0aee; z-index: 10;
     }
     .top-logo {
       display: flex; align-items: center; gap: 10px;
@@ -68,9 +72,9 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     .hamburger.open span:nth-child(1) { transform:translateY(7px) rotate(45deg); }
     .hamburger.open span:nth-child(2) { opacity:0; }
     .hamburger.open span:nth-child(3) { transform:translateY(-7px) rotate(-45deg); }
-    .mobile-drawer { position:fixed; top:0; right:-260px; width:240px; height:100vh; background:#0d0d0d; border-left:1px solid #1a1a1a; display:flex; flex-direction:column; padding:72px 24px 32px; gap:4px; z-index:500; transition:right 0.28s ease; }
+    .mobile-drawer { position:fixed; top:0; right:-260px; width:240px; height:100vh; background:#262624; border-left:1px solid #33312d; display:flex; flex-direction:column; padding:72px 24px 32px; gap:4px; z-index:500; transition:right 0.28s ease; }
     .mobile-drawer.open { right:0; }
-    .mobile-drawer a { color:var(--muted); text-decoration:none; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; padding:11px 4px; border-bottom:1px solid #1a1a1a; transition:color 0.2s; }
+    .mobile-drawer a { color:var(--muted); text-decoration:none; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; padding:11px 4px; border-bottom:1px solid #33312d; transition:color 0.2s; }
     .mobile-drawer a:hover, .mobile-drawer a.active { color:var(--green); }
     .drawer-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:499; }
     .drawer-overlay.open { display:block; }
@@ -110,7 +114,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
       font-family: Georgia, serif; font-size: 12px; padding: 7px 12px;
       border-radius: 3px; cursor: pointer; outline: none;
     }
-    .region-select:focus { border-color: #00ff9d55; }
+    .region-select:focus { border-color: #4a9d7e55; }
 
     .search-wrap { flex: 1; min-width: 160px; max-width: 260px; position: relative; }
     .search-wrap input {
@@ -118,7 +122,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
       color: var(--text); font-family: Georgia, serif; font-size: 12px;
       padding: 7px 12px 7px 32px; border-radius: 3px; outline: none;
     }
-    .search-wrap input:focus { border-color: #00ff9d55; }
+    .search-wrap input:focus { border-color: #4a9d7e55; }
     .search-wrap::before {
       content: '🔍'; position: absolute; left: 9px; top: 50%;
       transform: translateY(-50%); font-size: 13px; pointer-events: none;
@@ -129,18 +133,18 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
       display: flex; align-items: center; justify-content: space-between;
       font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
       color: var(--muted); padding-bottom: 10px;
-      border-bottom: 1px solid var(--border); margin-bottom: 0;
+      border-bottom: 1px solid #c9a76c88; margin-bottom: 0;
     }
 
     .lb-table { width: 100%; border-collapse: collapse; }
     .lb-table thead th {
       font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase;
       color: var(--muted); padding: 10px 8px; text-align: left;
-      border-bottom: 1px solid var(--border); font-weight: normal;
+      border-bottom: 1px solid #c9a76c88; font-weight: normal;
     }
     .lb-table thead th.num { text-align: right; }
     .lb-table tbody tr {
-      border-bottom: 1px solid #161616; transition: background 0.1s;
+      border-bottom: 1px solid #c9a76c55; transition: background 0.1s;
     }
     .lb-table tbody tr:hover { background: #111; }
     .lb-table tbody tr.is-me { background: #0a1a0f; }
@@ -180,7 +184,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     .country-section { margin-bottom: 32px; }
     .country-header {
       display: flex; align-items: center; gap: 10px;
-      padding: 12px 0 10px; border-bottom: 1px solid var(--border);
+      padding: 12px 0 10px; border-bottom: 1px solid #c9a76c88;
       margin-bottom: 2px; cursor: pointer;
     }
     .country-header:hover .country-name { color: var(--green); }
@@ -207,11 +211,11 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 
     /* ── Stats strip ── */
     .stats-strip {
-      display: flex; gap: 0; border: 1px solid var(--border); border-radius: 3px;
+      display: flex; gap: 0; border: 1px solid #c9a76c88; border-radius: 3px;
       overflow: hidden; margin-bottom: 24px;
     }
     .stat-cell {
-      flex: 1; padding: 14px 16px; border-right: 1px solid var(--border);
+      flex: 1; padding: 14px 16px; border-right: 1px solid #c9a76c88;
       text-align: center;
     }
     .stat-cell:last-child { border-right: none; }
@@ -224,7 +228,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
       .search-wrap { max-width: none; }
       .td-games, .td-badge { display: none; }
       .stats-strip { flex-wrap: wrap; }
-      .stat-cell { min-width: 50%; border-right: none; border-bottom: 1px solid var(--border); }
+      .stat-cell { min-width: 50%; border-right: none; border-bottom: 1px solid #c9a76c88; }
     }
     /* All-TC table scrolls horizontally on small screens */
     @media (max-width: 600px) {
@@ -254,7 +258,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   z-index: 9999;
   box-sizing: border-box;
 }
-#afri-banner.info    { background: #0d2b1e; color: #00ff9d; border-bottom: 1px solid #00ff9d33; }
+#afri-banner.info    { background: #1e2b23; color: #4a9d7e; border-bottom: 1px solid #4a9d7e33; }
 #afri-banner.warning { background: #2b2200; color: #ffcc44; border-bottom: 1px solid #ffcc4433; }
 #afri-banner.urgent  { background: #2b0d0d; color: #ff5555; border-bottom: 1px solid #ff555533; }
 #afri-banner-close {
@@ -337,7 +341,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <a href="/leaderboard" class="active">Leaderboard</a>
   <a href="/history">History</a>
   <a href="/watch">Watch</a>
-  <a id="mob-signin-lb" onclick="toggleMobileNav();openAuth();" style="display:none;color:#00ff9d;cursor:pointer;">Sign In</a>
+  <a id="mob-signin-lb" onclick="toggleMobileNav();openAuth();" style="display:none;color:#4a9d7e;cursor:pointer;">Sign In</a>
   <a id="mobile-signout" onclick="signOut()" style="display:none;cursor:pointer;">Sign Out</a>
 </div>
 <div class="drawer-overlay" id="drawer-overlay" onclick="toggleMobileNav()"></div>
@@ -488,7 +492,7 @@ async function loadLeaderboard() {
   } catch(e) {
     console.error('Leaderboard load error:', e);
     document.getElementById('lb-content').innerHTML =
-      `<div class="empty">Could not load rankings: ${e.message}<br><br><button onclick="loadLeaderboard()" style="padding:8px 20px;background:#00ff9d;color:#111;border:none;border-radius:2px;cursor:pointer;font-size:12px;letter-spacing:0.1em;">Retry</button></div>`;
+      `<div class="empty">Could not load rankings: ${e.message}<br><br><button onclick="loadLeaderboard()" style="padding:8px 20px;background:#4a9d7e;color:#111;border:none;border-radius:2px;cursor:pointer;font-size:12px;letter-spacing:0.1em;">Retry</button></div>`;
   }
 }
 
@@ -767,7 +771,7 @@ function renderAllTc(players, eloSumFn) {
     const tcCells = TC_DEFS.map(tc => {
       const v   = p[tc.key] || 0;
       const hi  = v > 0 && v === max;
-      return '<td class="td-elo" style="' + (hi ? 'color:#d4af37;' : 'color:#555;') + '">'
+      return '<td class="td-elo" style="' + (hi ? 'color:#c9a76c;' : 'color:#555;') + '">'
            + (v > 0 ? v : '—') + '</td>';
     }).join('');
 
@@ -795,7 +799,7 @@ function renderAllTc(players, eloSumFn) {
   el.innerHTML =
     '<div class="section-hdr">'
       + '<span>All Time Controls</span>'
-      + '<span>' + players.length + ' players · Sorted by Total ELO · <span style="color:#d4af37;">Gold</span> = best TC per player</span>'
+      + '<span>' + players.length + ' players · Sorted by Total ELO · <span style="color:#c9a76c;">Gold</span> = best TC per player</span>'
     + '</div>'
     + '<div style="overflow-x:auto;">'
     + '<table class="lb-table">'
@@ -846,24 +850,24 @@ init();
 <style>
   .lb-auth-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);display:none;align-items:flex-start;justify-content:center;z-index:300;backdrop-filter:blur(4px);overflow-y:auto;padding:20px 16px 40px;}
   .lb-auth-overlay.active{display:flex !important;}
-  .lb-auth-card{background:#161616;border:1px solid #2a2a2a;border-top:2px solid #00ff9d;border-radius:3px;padding:28px 24px;width:100%;max-width:360px;display:flex;flex-direction:column;gap:14px;margin:auto;position:relative;}
+  .lb-auth-card{background:#33312d;border:1px solid #3d3a35;border-top:2px solid #4a9d7e;border-radius:3px;padding:28px 24px;width:100%;max-width:360px;display:flex;flex-direction:column;gap:14px;margin:auto;position:relative;}
   .lb-auth-close{position:absolute;top:10px;right:12px;background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;}
 </style>
 <div class="lb-auth-overlay" id="lb-auth-overlay">
   <div class="lb-auth-card">
     <button class="lb-auth-close" onclick="closeAuth()">×</button>
-    <div style="font-size:13px;letter-spacing:0.2em;text-transform:uppercase;color:#00ff9d;" id="lb-auth-title">Sign In</div>
+    <div style="font-size:13px;letter-spacing:0.2em;text-transform:uppercase;color:#4a9d7e;" id="lb-auth-title">Sign In</div>
     <div style="font-size:12px;color:#555;">Sign in to see your rank highlighted.</div>
-    <input style="width:100%;background:#111;border:1px solid #2a2a2a;color:#e8e6e0;padding:11px 14px;font-size:13px;font-family:monospace;border-radius:2px;outline:none;" type="email" id="lb-auth-email" placeholder="Email address" />
-    <input style="width:100%;background:#111;border:1px solid #2a2a2a;color:#e8e6e0;padding:11px 14px;font-size:13px;font-family:monospace;border-radius:2px;outline:none;" type="password" id="lb-auth-password" placeholder="Password" onkeydown="if(event.key==='Enter') handleAuthLb()" />
+    <input style="width:100%;background:#111;border:1px solid #3d3a35;color:#ece6da;padding:11px 14px;font-size:13px;font-family:monospace;border-radius:2px;outline:none;" type="email" id="lb-auth-email" placeholder="Email address" />
+    <input style="width:100%;background:#111;border:1px solid #3d3a35;color:#ece6da;padding:11px 14px;font-size:13px;font-family:monospace;border-radius:2px;outline:none;" type="password" id="lb-auth-password" placeholder="Password" onkeydown="if(event.key==='Enter') handleAuthLb()" />
     <div style="font-size:12px;color:#ff6b6b;min-height:16px;" id="lb-auth-error"></div>
-    <button style="width:100%;padding:12px;background:#00ff9d;color:#111;border:none;font-size:12px;font-family:'Georgia',serif;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;border-radius:2px;" id="lb-auth-submit" onclick="handleAuthLb()">Sign In</button>
+    <button style="width:100%;padding:12px;background:#4a9d7e;color:#111;border:none;font-size:12px;font-family:'Georgia',serif;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;border-radius:2px;" id="lb-auth-submit" onclick="handleAuthLb()">Sign In</button>
     <div style="display:flex;align-items:center;gap:12px;color:#333;font-size:11px;"><span style="flex:1;height:1px;background:#222;display:block;"></span>or<span style="flex:1;height:1px;background:#222;display:block;"></span></div>
-    <button onclick="signInWithGoogleLb()" style="width:100%;padding:10px 14px;background:#111;border:1px solid #2a2a2a;color:#e8e6e0;font-size:12px;font-family:'Georgia',serif;cursor:pointer;border-radius:2px;display:flex;align-items:center;justify-content:center;gap:10px;">
+    <button onclick="signInWithGoogleLb()" style="width:100%;padding:10px 14px;background:#111;border:1px solid #3d3a35;color:#ece6da;font-size:12px;font-family:'Georgia',serif;cursor:pointer;border-radius:2px;display:flex;align-items:center;justify-content:center;gap:10px;">
       <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
       Continue with Google
     </button>
-    <div style="font-size:11px;color:#444;text-align:center;" id="lb-auth-toggle">No account? <span onclick="toggleAuthModeLb()" style="color:#00ff9d;cursor:pointer;">Create one</span></div>
+    <div style="font-size:11px;color:#444;text-align:center;" id="lb-auth-toggle">No account? <span onclick="toggleAuthModeLb()" style="color:#4a9d7e;cursor:pointer;">Create one</span></div>
   </div>
 </div>
 <script>
@@ -880,8 +884,8 @@ function toggleAuthModeLb() {
   document.getElementById('lb-auth-title').textContent = isSI?'Sign In':'Create Account';
   document.getElementById('lb-auth-submit').textContent = isSI?'Sign In':'Create Account';
   document.getElementById('lb-auth-toggle').innerHTML = isSI
-    ? 'No account? <span onclick="toggleAuthModeLb()" style="color:#00ff9d;cursor:pointer;">Create one</span>'
-    : 'Already have one? <span onclick="toggleAuthModeLb()" style="color:#00ff9d;cursor:pointer;">Sign in</span>';
+    ? 'No account? <span onclick="toggleAuthModeLb()" style="color:#4a9d7e;cursor:pointer;">Create one</span>'
+    : 'Already have one? <span onclick="toggleAuthModeLb()" style="color:#4a9d7e;cursor:pointer;">Sign in</span>';
   document.getElementById('lb-auth-error').textContent='';
 }
 async function handleAuthLb() {
@@ -897,7 +901,7 @@ async function handleAuthLb() {
     :await sb.auth.signUp({email,password:pass});
   btn.disabled=false;btn.textContent=_lbAuthMode==='signin'?'Sign In':'Create Account';
   if(result.error){errEl.textContent=result.error.message;}
-  else if(_lbAuthMode==='signup'){errEl.style.color='#00ff9d';errEl.textContent='Check your email to confirm.';}
+  else if(_lbAuthMode==='signup'){errEl.style.color='#4a9d7e';errEl.textContent='Check your email to confirm.';}
   else{closeAuth();window.location.reload();}
 }
 async function signInWithGoogleLb() {
@@ -965,7 +969,7 @@ document.getElementById('lb-auth-overlay').addEventListener('click',function(e){
 <style>
   #cc-bubble {
     position: fixed; right: 18px; bottom: 18px; width: 52px; height: 52px;
-    border-radius: 50%; background: #0d0d0d; border: 1px solid #1a1a1a;
+    border-radius: 50%; background: #262624; border: 1px solid #33312d;
     display: flex; align-items: center; justify-content: center;
     font-size: 22px; cursor: pointer; z-index: 400;
     box-shadow: 0 2px 10px rgba(0,0,0,0.5);
@@ -974,31 +978,31 @@ document.getElementById('lb-auth-overlay').addEventListener('click',function(e){
   #cc-bubble:hover { transform: scale(1.06); }
   .cc-badge {
     position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
-    border-radius: 9px; background: var(--green, #00ff9d); color: #000;
+    border-radius: 9px; background: var(--green, #4a9d7e); color: #000;
     font-size: 11px; font-weight: bold; display: none;
     align-items: center; justify-content: center; padding: 0 4px;
   }
   #cc-panel {
     position: fixed; right: 18px; bottom: 82px; width: min(320px, calc(100vw - 36px));
-    height: min(460px, calc(100vh - 160px)); background: #0d0d0d;
-    border: 1px solid #1a1a1a; border-radius: 12px; z-index: 401;
+    height: min(460px, calc(100vh - 160px)); background: #262624;
+    border: 1px solid #33312d; border-radius: 12px; z-index: 401;
     display: none; flex-direction: column; overflow: hidden;
     box-shadow: 0 4px 24px rgba(0,0,0,0.6);
   }
   #cc-panel.open { display: flex; }
   .cc-header {
-    padding: 12px 14px; border-bottom: 1px solid #1a1a1a;
+    padding: 12px 14px; border-bottom: 1px solid #33312d;
     display: flex; align-items: center; justify-content: space-between;
     font-size: 13px; letter-spacing: 0.04em; color: #eee; flex-shrink: 0;
   }
   .cc-close { cursor: pointer; color: var(--muted, #888); font-size: 14px; }
   .cc-rules-bar {
     padding: 6px 14px; font-size: 10.5px; color: var(--muted, #888);
-    background: #111; border-bottom: 1px solid #1a1a1a; cursor: pointer;
+    background: #111; border-bottom: 1px solid #33312d; cursor: pointer;
     flex-shrink: 0; line-height: 1.4;
   }
   .cc-rules-bar:hover { color: #ccc; }
-  .cc-rules-link { color: var(--green, #00ff9d); text-decoration: underline; }
+  .cc-rules-link { color: var(--green, #4a9d7e); text-decoration: underline; }
   .cc-messages {
     flex: 1; overflow-y: auto; padding: 10px 12px; display: flex;
     flex-direction: column; gap: 8px;
@@ -1007,25 +1011,25 @@ document.getElementById('lb-auth-overlay').addEventListener('click',function(e){
   .cc-msg-head { display: flex; align-items: baseline; gap: 5px; margin-bottom: 1px; }
   .cc-msg-name { font-weight: bold; color: #ddd; }
   .cc-msg-admin {
-    font-size: 9px; font-weight: bold; color: #000; background: var(--green, #00ff9d);
+    font-size: 9px; font-weight: bold; color: #000; background: var(--green, #4a9d7e);
     padding: 1px 5px; border-radius: 4px; letter-spacing: 0.05em;
   }
   .cc-msg-time { font-size: 10px; color: var(--muted, #666); margin-left: auto; }
   .cc-msg-text { color: #ccc; word-break: break-word; }
   .cc-gate {
-    padding: 12px 14px; border-top: 1px solid #1a1a1a; font-size: 12px;
+    padding: 12px 14px; border-top: 1px solid #33312d; font-size: 12px;
     color: var(--muted, #888); text-align: center; flex-shrink: 0;
   }
-  .cc-gate a { color: var(--green, #00ff9d); cursor: pointer; text-decoration: underline; }
+  .cc-gate a { color: var(--green, #4a9d7e); cursor: pointer; text-decoration: underline; }
   .cc-composer {
-    padding: 10px 12px; border-top: 1px solid #1a1a1a; display: flex; gap: 8px; flex-shrink: 0;
+    padding: 10px 12px; border-top: 1px solid #33312d; display: flex; gap: 8px; flex-shrink: 0;
   }
   .cc-composer input {
-    flex: 1; background: #161616; border: 1px solid #1a1a1a; border-radius: 6px;
+    flex: 1; background: #33312d; border: 1px solid #33312d; border-radius: 6px;
     color: #eee; padding: 8px 10px; font-size: 12.5px; outline: none;
   }
   .cc-composer button {
-    background: var(--green, #00ff9d); color: #000; border: none; border-radius: 6px;
+    background: var(--green, #4a9d7e); color: #000; border: none; border-radius: 6px;
     padding: 8px 14px; font-size: 12px; font-weight: bold; cursor: pointer;
   }
   .cc-meta {
@@ -1038,7 +1042,7 @@ document.getElementById('lb-auth-overlay').addEventListener('click',function(e){
     align-items: center; justify-content: center; padding: 24px;
   }
   .cc-rules-modal-box {
-    background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 12px;
+    background: #262624; border: 1px solid #33312d; border-radius: 12px;
     padding: 20px; max-width: 340px; width: 100%;
     box-shadow: 0 8px 32px rgba(0,0,0,0.7);
   }
@@ -1050,7 +1054,7 @@ document.getElementById('lb-auth-overlay').addEventListener('click',function(e){
   }
   .cc-rules-list li { margin-bottom: 6px; }
   .cc-rules-modal-btn {
-    width: 100%; background: var(--green, #00ff9d); color: #000; border: none;
+    width: 100%; background: var(--green, #4a9d7e); color: #000; border: none;
     border-radius: 6px; padding: 10px; font-size: 13px; font-weight: bold; cursor: pointer;
   }
   @media (max-width: 480px) {

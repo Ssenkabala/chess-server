@@ -55,13 +55,13 @@ def serve_book():
 def serve_openings():
     return FileResponse("openings.js", media_type="application/javascript")
 
+@router.get("/chess_pattern_bg.svg")
+def serve_chess_pattern_bg():
+    return FileResponse("chess_pattern_bg.svg", media_type="image/svg+xml")
+
 @router.get("/openings_detector.js")
 def serve_openings_detector():
     return FileResponse("openings_detector.js", media_type="application/javascript")
-
-@router.get("/analysis_accuracy.js")
-def serve_analysis_accuracy():
-    return FileResponse("analysis_accuracy.js", media_type="application/javascript")
 
 @router.get("/aac_strings.js")
 def serve_aac_strings():

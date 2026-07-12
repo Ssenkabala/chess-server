@@ -29,9 +29,10 @@ async def _warm_stats_cache():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from routes.tournament import arena_auto_start_scheduler
+    from routes.tournament import arena_auto_start_scheduler, recurring_tournament_scheduler
     import asyncio
     asyncio.create_task(arena_auto_start_scheduler())
+    asyncio.create_task(recurring_tournament_scheduler())
     yield
 
 app = FastAPI(lifespan=lifespan)

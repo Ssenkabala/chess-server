@@ -27,6 +27,9 @@ router = APIRouter()
 
 from app_core.auth import check_prize_eligibility, verify_jwt
 from app_core.config import ADMIN_USER_IDS, COUNTRY_NAMES_SERVER, REGIONS, REGION_LABELS, SUPABASE_SERVICE_KEY, SUPABASE_URL
+from app_core.config import (RECURRING_TOURNAMENT_NAME, RECURRING_TOURNAMENT_DESCRIPTION,
+                              RECURRING_TOURNAMENT_TIME_CONTROL, RECURRING_TOURNAMENT_DURATION_MINUTES,
+                              RECURRING_TOURNAMENT_PRIZE_POOL, RECURRING_TOURNAMENT_HOUR_EAT)
 from app_core.medals import _grant_tournament_medals
 from app_core.models import TournamentResultRequest, TournamentStartRequest
 from app_core.rating import elo_col_for_tc, update_elos
@@ -170,6 +173,105 @@ async def arena_auto_start_scheduler():
         except Exception as e:
             print(f"[scheduler] {e}", flush=True)
         await asyncio.sleep(30)
+
+
+def _last_friday_of_month(year: int, month: int) -> datetime:
+    """The calendar date of the last Friday in the given month, as a naive
+    datetime at midnight (date-only — caller sets the actual time)."""
+    if month == 12:
+        first_of_next = datetime(year + 1, 1, 1)
+    else:
+        first_of_next = datetime(year, month + 1, 1)
+    last_day = first_of_next - timedelta(days=1)
+    # weekday(): Monday=0 ... Friday=4 ... Sunday=6
+    offset = (last_day.weekday() - 4) % 7
+    return last_day - timedelta(days=offset)
+
+
+def _next_recurring_occurrence_utc() -> datetime:
+    """The next upcoming 'last Friday of the month, 7PM EAT' occurrence, as
+    a UTC datetime. Checks the current month first; if that date has
+    already passed this month, rolls forward to next month automatically."""
+    eat = timezone(timedelta(hours=3))  # East Africa Time — no DST
+    now_utc = datetime.now(timezone.utc)
+    y, m = now_utc.year, now_utc.month
+    for _ in range(3):  # a handful of tries is always enough to find a future date
+        lf = _last_friday_of_month(y, m)
+        occurrence_eat = lf.replace(hour=RECURRING_TOURNAMENT_HOUR_EAT, minute=0, second=0, tzinfo=eat)
+        occurrence_utc = occurrence_eat.astimezone(timezone.utc)
+        if occurrence_utc > now_utc:
+            return occurrence_utc
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    raise RuntimeError("could not compute next recurring tournament occurrence")  # should be unreachable
+
+
+async def recurring_tournament_scheduler():
+    """Auto-creates the next AfriChess Grand Prix — last Friday of every
+    month, 7PM EAT — so this recurring tournament never has to be created
+    by hand. Checks once a day; as soon as the currently-scheduled
+    occurrence's date has passed, the next month's gets created
+    automatically. This naturally keeps roughly a month of advance notice
+    live at all times, matching the ~2-week+ lead time that turned out to
+    matter for signups.
+
+    Idempotent by design: checks for an existing tournament at the exact
+    same name + starts_at before inserting, so it's always safe to run —
+    whether this is genuinely the first time creating an occurrence, or a
+    restart re-checking a date it already handled. A tournament for this
+    same date created or edited by hand (e.g. rescheduling, matching the
+    earlier July 10 -> July 17 move) is left alone; this only ever fills
+    in a date that doesn't already have one.
+    """
+    await asyncio.sleep(20)
+    while True:
+        try:
+            occurrence_utc = _next_recurring_occurrence_utc()
+            starts_at_iso = occurrence_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+            async with httpx.AsyncClient() as client:
+                existing = await client.get(
+                    f"{SUPABASE_URL}/rest/v1/tournaments",
+                    params={"name": f"eq.{RECURRING_TOURNAMENT_NAME}",
+                            "starts_at": f"eq.{starts_at_iso}",
+                            "select": "id"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY,
+                             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                )
+                if existing.status_code == 200 and not existing.json():
+                    admin_id = next(iter(ADMIN_USER_IDS), None)
+                    row = {
+                        "name":             RECURRING_TOURNAMENT_NAME,
+                        "description":      RECURRING_TOURNAMENT_DESCRIPTION,
+                        "format":           "arena",
+                        "time_control":     RECURRING_TOURNAMENT_TIME_CONTROL,
+                        "rounds":           0,
+                        "max_players":      9999,
+                        "country":          None,
+                        "region":           None,
+                        "starts_at":        starts_at_iso,
+                        "created_by":       admin_id,
+                        "status":           "upcoming",
+                        "duration_minutes": RECURRING_TOURNAMENT_DURATION_MINUTES,
+                        "prize_pool":       RECURRING_TOURNAMENT_PRIZE_POOL,
+                    }
+                    r = await client.post(
+                        f"{SUPABASE_URL}/rest/v1/tournaments",
+                        headers={"apikey": SUPABASE_SERVICE_KEY,
+                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                 "Content-Type": "application/json",
+                                 "Prefer": "return=representation"},
+                        json=row
+                    )
+                    if r.status_code in (200, 201):
+                        print(f"[recurring] auto-created next Grand Prix: {starts_at_iso}", flush=True)
+                    else:
+                        print(f"[recurring] auto-create FAILED ({r.status_code}): {r.text}", flush=True)
+        except Exception as e:
+            print(f"[recurring] scheduler error: {e}", flush=True)
+        await asyncio.sleep(86400)  # once a day is plenty for a monthly schedule
+
 
 async def arena_auto_start(tournament_id: str):
     lock_key = f"start_{tournament_id}"

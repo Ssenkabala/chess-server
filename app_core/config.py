@@ -67,6 +67,19 @@ DIFFICULTY_SETTINGS = {
 
 POOL_SIZE = int(os.getenv("ENGINE_POOL_SIZE", "4"))  # tune via Railway env var
 
+# ── Recurring monthly tournament template ──────────────────────────────
+# The AfriChess Grand Prix auto-creates itself on the last Friday of every
+# month — see recurring_tournament_scheduler() in routes/tournament.py.
+# Everything about WHAT gets created lives here; the scheduler only handles
+# WHEN. Change any of these any time — the next auto-created occurrence
+# picks up the new values automatically, nothing else to touch.
+RECURRING_TOURNAMENT_NAME             = "AfriChess Grand Prix"
+RECURRING_TOURNAMENT_DESCRIPTION      = "Launch tournament, representing the first ever African online Tournament"
+RECURRING_TOURNAMENT_TIME_CONTROL     = "3+0"
+RECURRING_TOURNAMENT_DURATION_MINUTES = 60
+RECURRING_TOURNAMENT_PRIZE_POOL       = 55.0
+RECURRING_TOURNAMENT_HOUR_EAT         = 19  # 7PM EAT (EAT is UTC+3, no DST)
+
 CLOCK_SECONDS = 300             # 5 minutes each side
 
 _GLICKO_SCALE = 173.7178

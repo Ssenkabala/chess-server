@@ -29,7 +29,10 @@ from app_core.auth import check_prize_eligibility, verify_jwt
 from app_core.config import ADMIN_USER_IDS, COUNTRY_NAMES_SERVER, REGIONS, REGION_LABELS, SUPABASE_SERVICE_KEY, SUPABASE_URL
 from app_core.config import (RECURRING_TOURNAMENT_NAME, RECURRING_TOURNAMENT_DESCRIPTION,
                               RECURRING_TOURNAMENT_TIME_CONTROL, RECURRING_TOURNAMENT_DURATION_MINUTES,
-                              RECURRING_TOURNAMENT_PRIZE_POOL, RECURRING_TOURNAMENT_HOUR_EAT)
+                              RECURRING_TOURNAMENT_PRIZE_POOL, RECURRING_TOURNAMENT_HOUR_EAT,
+                              RECURRING_WARMUP_NAME, RECURRING_WARMUP_DESCRIPTION,
+                              RECURRING_WARMUP_TIME_CONTROL, RECURRING_WARMUP_DURATION_MINUTES,
+                              RECURRING_WARMUP_PRIZE_POOL, RECURRING_WARMUP_HOUR_EAT)
 from app_core.medals import _grant_tournament_medals
 from app_core.models import TournamentResultRequest, TournamentStartRequest
 from app_core.rating import elo_col_for_tc, update_elos
@@ -271,6 +274,89 @@ async def recurring_tournament_scheduler():
         except Exception as e:
             print(f"[recurring] scheduler error: {e}", flush=True)
         await asyncio.sleep(86400)  # once a day is plenty for a monthly schedule
+
+
+def _is_last_friday_of_month(d: datetime) -> bool:
+    """True if d (assumed to already be a Friday) is the LAST Friday of its
+    month — i.e. the Grand Prix's slot, which the warmup scheduler must
+    never double-book."""
+    lf = _last_friday_of_month(d.year, d.month)
+    return d.year == lf.year and d.month == lf.month and d.day == lf.day
+
+
+async def weekly_warmup_scheduler():
+    """Auto-creates the AfriChess Continental Warmup — every Friday EXCEPT
+    the last one, which is reserved for the Grand Prix
+    (recurring_tournament_scheduler above). Looks about 6 weeks ahead and
+    fills in any missing warmup occurrence, so there's always a healthy
+    runway of upcoming warmups visible, not just the very next one.
+
+    Idempotent by design, same as the Grand Prix scheduler: checks for an
+    existing tournament at the exact same name + starts_at before
+    inserting, so it's always safe to run repeatedly without creating
+    duplicates, and it never touches a date that already has one —
+    whether auto-created earlier or scheduled by hand.
+    """
+    await asyncio.sleep(35)
+    while True:
+        try:
+            eat = timezone(timedelta(hours=3))
+            now_utc = datetime.now(timezone.utc)
+            now_eat = now_utc.astimezone(eat)
+            days_until_friday = (4 - now_eat.weekday()) % 7
+            candidate = (now_eat + timedelta(days=days_until_friday)).replace(
+                hour=RECURRING_WARMUP_HOUR_EAT, minute=0, second=0, microsecond=0)
+            if candidate <= now_eat:
+                candidate += timedelta(days=7)  # today's slot (if today is Friday) already passed
+
+            async with httpx.AsyncClient() as client:
+                for week in range(6):
+                    friday_eat = candidate + timedelta(weeks=week)
+                    if _is_last_friday_of_month(friday_eat):
+                        continue  # the Grand Prix's slot, not a warmup
+                    occurrence_utc = friday_eat.astimezone(timezone.utc)
+                    starts_at_iso = occurrence_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+                    existing = await client.get(
+                        f"{SUPABASE_URL}/rest/v1/tournaments",
+                        params={"name": f"eq.{RECURRING_WARMUP_NAME}",
+                                "starts_at": f"eq.{starts_at_iso}",
+                                "select": "id"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY,
+                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    )
+                    if existing.status_code == 200 and not existing.json():
+                        admin_id = next(iter(ADMIN_USER_IDS), None)
+                        row = {
+                            "name":             RECURRING_WARMUP_NAME,
+                            "description":      RECURRING_WARMUP_DESCRIPTION,
+                            "format":           "arena",
+                            "time_control":     RECURRING_WARMUP_TIME_CONTROL,
+                            "rounds":           0,
+                            "max_players":      9999,
+                            "country":          None,
+                            "region":           None,
+                            "starts_at":        starts_at_iso,
+                            "created_by":       admin_id,
+                            "status":           "upcoming",
+                            "duration_minutes": RECURRING_WARMUP_DURATION_MINUTES,
+                            "prize_pool":       RECURRING_WARMUP_PRIZE_POOL,
+                        }
+                        r = await client.post(
+                            f"{SUPABASE_URL}/rest/v1/tournaments",
+                            headers={"apikey": SUPABASE_SERVICE_KEY,
+                                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                     "Content-Type": "application/json",
+                                     "Prefer": "return=representation"},
+                            json=row
+                        )
+                        if r.status_code in (200, 201):
+                            print(f"[warmup] auto-created: {starts_at_iso}", flush=True)
+                        else:
+                            print(f"[warmup] auto-create FAILED ({r.status_code}): {r.text}", flush=True)
+        except Exception as e:
+            print(f"[warmup] scheduler error: {e}", flush=True)
+        await asyncio.sleep(86400)
 
 
 async def arena_auto_start(tournament_id: str):

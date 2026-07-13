@@ -80,6 +80,19 @@ RECURRING_TOURNAMENT_DURATION_MINUTES = 60
 RECURRING_TOURNAMENT_PRIZE_POOL       = 55.0
 RECURRING_TOURNAMENT_HOUR_EAT         = 19  # 7PM EAT (EAT is UTC+3, no DST)
 
+# ── Weekly continental warmup ───────────────────────────────────────────
+# Every Friday EXCEPT the last one (that's the Grand Prix's slot above) —
+# a lighter, free-entry practice arena. Same time as the Grand Prix for
+# consistency; shorter and with no prize pool, matching "warmup" framing.
+# Adjust freely — nothing here affects which Fridays get skipped, that
+# logic lives in the scheduler and always defers to the Grand Prix.
+RECURRING_WARMUP_NAME             = "AfriChess Continental Warmup"
+RECURRING_WARMUP_DESCRIPTION      = "Weekly continental warmup — free practice arena with the same format as the Grand Prix, every Friday (except Grand Prix week)"
+RECURRING_WARMUP_TIME_CONTROL     = "3+0"
+RECURRING_WARMUP_DURATION_MINUTES = 60
+RECURRING_WARMUP_PRIZE_POOL       = 0.0
+RECURRING_WARMUP_HOUR_EAT         = 19  # matches the Grand Prix's time
+
 CLOCK_SECONDS = 300             # 5 minutes each side
 
 _GLICKO_SCALE = 173.7178

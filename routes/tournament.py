@@ -287,9 +287,11 @@ def _is_last_friday_of_month(d: datetime) -> bool:
 async def weekly_warmup_scheduler():
     """Auto-creates the AfriChess Continental Warmup — every Friday EXCEPT
     the last one, which is reserved for the Grand Prix
-    (recurring_tournament_scheduler above). Looks about 6 weeks ahead and
-    fills in any missing warmup occurrence, so there's always a healthy
-    runway of upcoming warmups visible, not just the very next one.
+    (recurring_tournament_scheduler above). Looks only at the next 2
+    upcoming Fridays (skipping ahead to fill in a warmup if one of those
+    2 happens to be the Grand Prix's own slot) — kept deliberately short
+    so the tournament listing doesn't fill up with entries stretching
+    a month or more out.
 
     Idempotent by design, same as the Grand Prix scheduler: checks for an
     existing tournament at the exact same name + starts_at before
@@ -310,7 +312,7 @@ async def weekly_warmup_scheduler():
                 candidate += timedelta(days=7)  # today's slot (if today is Friday) already passed
 
             async with httpx.AsyncClient() as client:
-                for week in range(6):
+                for week in range(2):
                     friday_eat = candidate + timedelta(weeks=week)
                     if _is_last_friday_of_month(friday_eat):
                         continue  # the Grand Prix's slot, not a warmup

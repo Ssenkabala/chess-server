@@ -1165,8 +1165,13 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
           return new Date(a.starts_at) - new Date(b.starts_at);
         });
         var html = mainCardHtml(list[0]);
-        for (var i = 1; i < list.length; i++) {
+        var secondaryShown = Math.min(list.length - 1, 2);  // main card + at most 2 more — this is a landing page, not the full listing
+        for (var i = 1; i <= secondaryShown; i++) {
           html += secondaryCardHtml(list[i]);
+        }
+        if (list.length - 1 > secondaryShown) {
+          html += '<p style="font-size:12px;color:var(--muted);text-align:center;margin-top:12px;">' +
+            '<a href="/tournaments" style="color:var(--green);">See all upcoming tournaments \u2192</a></p>';
         }
         container.innerHTML = html;
       })

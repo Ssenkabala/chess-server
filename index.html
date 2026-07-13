@@ -405,7 +405,7 @@ global.Chessground = Nr;
       font-size: 22px;
       font-weight: 400;
       letter-spacing: 0.15em;
-      color: #888;
+      color: #9d9d9d;
       text-transform: uppercase;
     }
 
@@ -420,7 +420,7 @@ global.Chessground = Nr;
     .tab-btn {
       padding: 9px 28px;
       background: transparent;
-      color: #666;
+      color: #8d8d8d;
       border: none;
       border-right: 1px solid #333;
       font-size: 13px;
@@ -566,7 +566,7 @@ global.Chessground = Nr;
     #api-key-input::placeholder { color: #444; }
     .api-label {
       font-size: 11px;
-      color: #555;
+      color: #8d8d8d;
       letter-spacing: 0.08em;
       text-transform: uppercase;
       white-space: nowrap;
@@ -590,7 +590,7 @@ global.Chessground = Nr;
     }
     .eval-label {
       font-size: 12px;
-      color: #555;
+      color: #8d8d8d;
       letter-spacing: 0.08em;
       width: 100%;
       max-width: 480px;
@@ -700,7 +700,7 @@ global.Chessground = Nr;
     .candidate-eval {
       font-family: monospace;
       font-size: 12px;
-      color: #666;
+      color: #8d8d8d;
       width: 48px;
       text-align: right;
       flex-shrink: 0;
@@ -721,7 +721,7 @@ global.Chessground = Nr;
     .material-score {
       font-size: 12px;
       font-family: monospace;
-      color: #555;
+      color: #8d8d8d;
       margin-left: 4px;
     }
     .material-score.ahead { color: #4a9d7e; }
@@ -733,7 +733,7 @@ global.Chessground = Nr;
     }
     .promo-overlay.active { display: flex; }
     .promo-box { background: #111; border: 1px solid #333; border-radius: 4px; padding: 20px 24px; text-align: center; }
-    .promo-title { font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: #555; margin-bottom: 16px; }
+    .promo-title { font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: #8d8d8d; margin-bottom: 16px; }
     .promo-pieces { display: flex; gap: 8px; }
     .promo-piece {
       width: 64px; height: 64px; background: #33312d; border: 1px solid #333;
@@ -760,7 +760,7 @@ global.Chessground = Nr;
       font-size: 20px; font-weight: 700; color: #fff;
       margin-bottom: 8px; letter-spacing: 0.02em;
     }
-    .gameover-sub { font-size: 13px; color: #666; margin-bottom: 28px; min-height: 18px; }
+    .gameover-sub { font-size: 13px; color: #8d8d8d; margin-bottom: 28px; min-height: 18px; }
     .gameover-btn {
       background: #4a9d7e; color: #000; border: none; border-radius: 3px;
       padding: 12px 24px; font-size: 13px; font-weight: 700; cursor: pointer;
@@ -768,9 +768,9 @@ global.Chessground = Nr;
     }
     .gameover-btn:hover { background: #00e08a; }
     .gameover-btn.secondary {
-      background: transparent; color: #555; border: 1px solid #333;
+      background: transparent; color: #8d8d8d; border: 1px solid #333;
     }
-    .gameover-btn.secondary:hover { color: #aaa; border-color: #555; }
+    .gameover-btn.secondary:hover { color: #aaa; border-color: #8d8d8d; }
 
     /* ── Auth modal ── */
     .auth-overlay {
@@ -809,7 +809,7 @@ global.Chessground = Nr;
     }
     .auth-subtitle {
       font-size: 12px;
-      color: #555;
+      color: #8d8d8d;
       letter-spacing: 0.05em;
       margin-bottom: 8px;
     }
@@ -876,11 +876,11 @@ global.Chessground = Nr;
       justify-content: center;
       gap: 10px;
     }
-    .google-btn:hover { border-color: #555; color: #fff; }
+    .google-btn:hover { border-color: #8d8d8d; color: #fff; }
 
     .auth-toggle {
       font-size: 11px;
-      color: #555;
+      color: #8d8d8d;
       text-align: center;
       letter-spacing: 0.05em;
     }
@@ -931,7 +931,7 @@ global.Chessground = Nr;
       color: #ece6da; text-transform: uppercase;
     }
     .username-sub {
-      font-size: 12px; color: #666;
+      font-size: 12px; color: #8d8d8d;
       letter-spacing: 0.06em; line-height: 1.6;
     }
     .username-input {
@@ -970,7 +970,7 @@ global.Chessground = Nr;
     }
     .user-info {
       font-size: 11px;
-      color: #555;
+      color: #8d8d8d;
       letter-spacing: 0.08em;
       font-family: monospace;
     }
@@ -989,9 +989,12 @@ global.Chessground = Nr;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 8px 0 12px;
+      padding: 8px 16px 12px;
       border-bottom: 2px solid #c9a76c66;
-      margin-bottom: 8px;
+      background: #0a0a0aee;
+      margin: -16px -16px 8px;
+      width: calc(100% + 32px);
+      max-width: calc(520px + 32px);
     }
     .top-logo {
       display: flex;
@@ -1001,7 +1004,7 @@ global.Chessground = Nr;
       font-size: 16px;
       font-weight: 400;
       letter-spacing: 0.15em;
-      color: #888;
+      color: #9d9d9d;
       text-transform: uppercase;
     }
 
@@ -1044,7 +1047,7 @@ global.Chessground = Nr;
     }
     .mobile-menu.open { right: 0; }
     .mobile-menu a {
-      color: #888;
+      color: #9d9d9d;
       text-decoration: none;
       font-size: 13px;
       letter-spacing: 0.15em;
@@ -1242,14 +1245,14 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     </a>
     <!-- Desktop nav — hidden below 760px where hamburger takes over -->
     <div id="index-desktop-nav" style="display:flex;gap:16px;align-items:center;">
-      <a href="/multiplayer" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Live</a>
-      <a href="/tournaments" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Tournaments</a>
-      <a href="/leaderboard" style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Leaderboard</a>
-      <a href="/history"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">History</a>
-      <a href="/watch"       style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Watch</a>
-      <a href="/profile"     style="color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Profile</a>
+      <a href="/multiplayer" style="color:#8d8d8d;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Live</a>
+      <a href="/tournaments" style="color:#8d8d8d;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Tournaments</a>
+      <a href="/leaderboard" style="color:#8d8d8d;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Leaderboard</a>
+      <a href="/history"     style="color:#8d8d8d;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">History</a>
+      <a href="/watch"       style="color:#8d8d8d;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Watch</a>
+      <a href="/profile"     style="color:#8d8d8d;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#4a9d7e'" onmouseout="this.style.color='#555'">Profile</a>
       <a id="nav-signin-idx" onclick="openAuth()" style="display:none;color:#4a9d7e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign In</a>
-      <a id="nav-signout-idx" onclick="signOut()" style="display:none;color:#555;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign Out</a>
+      <a id="nav-signout-idx" onclick="signOut()" style="display:none;color:#8d8d8d;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;text-decoration:none;cursor:pointer;">Sign Out</a>
     </div>
     <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
       <span></span><span></span><span></span>
@@ -1288,7 +1291,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <!-- Pre-game setup — hidden once game starts -->
     <div id="pregame-setup" style="width:100%;display:flex;flex-direction:column;gap:14px;align-items:center;">
       <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;letter-spacing:0.1em;color:#555;text-transform:uppercase;">
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;letter-spacing:0.1em;color:#8d8d8d;text-transform:uppercase;">
           <span>Difficulty</span>
           <span id="diff-label" style="color:#4a9d7e;font-size:13px;letter-spacing:0.05em;">Beginner</span>
         </div>
@@ -1350,7 +1353,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <!-- API key input -->
     <div class="api-row">
       <span class="api-label">API Key</span>
-      <div id="coach-usage-label" style="font-size:11px;color:#555;letter-spacing:0.1em;text-transform:uppercase;text-align:right;margin-bottom:4px;">
+      <div id="coach-usage-label" style="font-size:11px;color:#8d8d8d;letter-spacing:0.1em;text-transform:uppercase;text-align:right;margin-bottom:4px;">
         Sign in to use coaching
       </div>
     </div>
@@ -1385,7 +1388,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       </div>
       <div id="ann-played" style="color:#ccc;"></div>
       <div id="ann-best" style="color:#4a9d7e;margin-top:2px;"></div>
-      <div id="ann-variation" style="color:#888;margin-top:2px;font-family:'Courier New',monospace;font-size:11px;"></div>
+      <div id="ann-variation" style="color:#9d9d9d;margin-top:2px;font-family:'Courier New',monospace;font-size:11px;"></div>
     </div>
 
     <!-- Eval bar -->
@@ -1725,7 +1728,7 @@ function showPromotion(source, target, callback) {
     span.style.cssText = 'font-size:42px;line-height:1;display:block;color:#e8e8e8;text-shadow:0 1px 3px rgba(0,0,0,0.8);';
     var lbl = document.createElement('span');
     lbl.textContent = labels[p];
-    lbl.style.cssText = 'font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:#888;display:block;margin-top:2px;';
+    lbl.style.cssText = 'font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:#9d9d9d;display:block;margin-top:2px;';
     div.appendChild(span);
     div.appendChild(lbl);
     div.onclick = function() {
@@ -2224,7 +2227,7 @@ function updateCapturedPieces() {
         html += '<span style="font-size:16px;opacity:0.85">' + symbols[pieceColor][type] + '</span>';
       }
     });
-    if (netDiff > 0) html += '<span style="font-size:11px;color:#888;margin-left:4px;">+' + netDiff + '</span>';
+    if (netDiff > 0) html += '<span style="font-size:11px;color:#9d9d9d;margin-left:4px;">+' + netDiff + '</span>';
     el.innerHTML = html;
   }
 
@@ -2801,7 +2804,7 @@ function showAnalysisPromotion(callback) {
     span.style.cssText = 'font-size:42px;line-height:1;display:block;color:#e8e8e8;text-shadow:0 1px 3px rgba(0,0,0,0.8);';
     var label = document.createElement('span');
     label.textContent = labels[p];
-    label.style.cssText = 'font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:#888;display:block;margin-top:2px;';
+    label.style.cssText = 'font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:#9d9d9d;display:block;margin-top:2px;';
     div.appendChild(span);
     div.appendChild(label);
     div.onclick = function() {
@@ -3655,14 +3658,14 @@ function closeMenuThenAuth() {
 <!-- Game-over overlay -->
 <div class="gameover-overlay" id="gameover-overlay" onclick="closeGameOver()">
   <div class="gameover-box" onclick="event.stopPropagation()">
-    <button onclick="closeGameOver()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:#555;font-size:18px;cursor:pointer;line-height:1;" title="Close">✕</button>
+    <button onclick="closeGameOver()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:#8d8d8d;font-size:18px;cursor:pointer;line-height:1;" title="Close">✕</button>
     <div class="gameover-emoji" id="gameover-emoji">♟</div>
     <div class="gameover-title" id="gameover-title">Game Over</div>
     <div class="gameover-sub" id="gameover-sub"></div>
     <!-- Guest nudge — hidden for signed-in users, shown contextually for guests -->
     <div id="gameover-nudge" style="display:none;margin:0 0 18px;padding:12px 14px;
          background:#0a1a0f;border:1px solid #4a9d7e22;border-radius:4px;text-align:left;">
-      <div id="gameover-nudge-msg" style="font-size:12px;color:#888;margin-bottom:10px;line-height:1.6;"></div>
+      <div id="gameover-nudge-msg" style="font-size:12px;color:#9d9d9d;margin-bottom:10px;line-height:1.6;"></div>
       <button onclick="closeGameOver(); openAuth();" style="background:#4a9d7e;color:#000;border:none;
               padding:8px 18px;border-radius:3px;font-size:12px;font-weight:700;
               cursor:pointer;letter-spacing:0.08em;text-transform:uppercase;width:100%;">

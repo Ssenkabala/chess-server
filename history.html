@@ -35,7 +35,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --bg:#262624; --bg2:#111; --bg3:#33312d;
-      --border:#3d3a35; --text:#ece6da; --muted:#555;
+      --border:#3d3a35; --text:#ece6da; --muted:#8d8d8d;
       --green:#4a9d7e; --red:#ff4d4d; --gold:#c9a76c;
     }
     body { background:var(--bg); background-image:url('/chess_pattern_bg.svg'); background-repeat:repeat-y; background-size:100% auto; background-position:top center; min-height:100vh; font-family:Georgia,serif; color:var(--text); }
@@ -74,7 +74,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     .nav { display:flex; align-items:center; justify-content:space-between;
       padding:14px 24px; border-bottom:2px solid #c9a76c66; background:#0a0a0aee; flex-wrap:wrap; gap:8px; }
     .nav-logo { display:flex; align-items:center; gap:8px; text-decoration:none; }
-    .nav-logo span { font-size:17px; letter-spacing:0.15em; color:#888; text-transform:uppercase; }
+    .nav-logo span { font-size:17px; letter-spacing:0.15em; color:#9d9d9d; text-transform:uppercase; }
     .nav-logo em { color:#00ff9d; font-style:normal; }
     .nav-right { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .nav-user { font-size:11px; color:var(--muted); }
@@ -91,7 +91,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     .summary-stat span { font-size:18px; font-weight:bold; display:block; margin-bottom:2px; }
     .summary-stat.wins span { color:var(--green); }
     .summary-stat.losses span { color:var(--red); }
-    .summary-stat.draws span { color:#888; }
+    .summary-stat.draws span { color:#9d9d9d; }
 
     /* ── Filter bar ── */
     .filter-bar { display:flex; gap:8px; padding:10px 16px;
@@ -124,7 +124,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
       font-size:11px; letter-spacing:0.08em; font-weight:bold; }
     .badge-win  { background:#4a9d7e18; color:var(--green); border:1px solid #4a9d7e33; }
     .badge-loss { background:#ff4d4d18; color:var(--red);   border:1px solid #ff4d4d33; }
-    .badge-draw { background:#44444418; color:#888;          border:1px solid #44444433; }
+    .badge-draw { background:#44444418; color:#9d9d9d;          border:1px solid #44444433; }
 
     .game-info { flex:1; min-width:0; }
     .game-vs { font-size:13px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -192,14 +192,14 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     .move-list-label { font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:#444; margin-bottom:6px; }
     .move-list-grid { display:grid; grid-template-columns:26px 1fr 1fr; gap:2px 4px; font-family:monospace; font-size:12px; }
     .move-num { color:#333; }
-    .move-san { color:#888; cursor:pointer; padding:1px 3px; border-radius:1px; transition:all 0.12s; }
+    .move-san { color:#9d9d9d; cursor:pointer; padding:1px 3px; border-radius:1px; transition:all 0.12s; }
     .move-san:hover { background:#222; color:#ccc; }
     .move-san.current { background:#4a9d7e22; color:var(--green); }
 
     .pgn-wrap { width:100%; max-width:460px; background:var(--bg); border:1px solid #c9a76c88;
       border-left:2px solid #c9a76c; border-radius:2px; padding:10px 12px; }
     .pgn-label { font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:#444; margin-bottom:6px; }
-    .pgn-text { font-family:monospace; font-size:11px; color:#555; line-height:1.8;
+    .pgn-text { font-family:monospace; font-size:11px; color:#8d8d8d; line-height:1.8;
       word-break:break-all; max-height:80px; overflow-y:auto; }
     .pgn-copy-btn { margin-top:8px; }
 
@@ -421,16 +421,16 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 </div>
 <!-- Mobile drawer -->
 <div id="mobile-drawer" style="position:fixed;top:0;right:-260px;width:240px;height:100vh;background:#262624;border-left:1px solid #33312d;display:flex;flex-direction:column;padding:72px 24px 32px;gap:4px;z-index:500;transition:right 0.28s ease;">
-  <a href="/" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Home</a>
-  <a href="/profile" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Profile</a>
-  <a href="/play" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">vs Bot</a>
-  <a href="/multiplayer" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Live</a>
-  <a href="/tournaments" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Tournaments</a>
-  <a href="/leaderboard" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Leaderboard</a>
+  <a href="/" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Home</a>
+  <a href="/profile" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Profile</a>
+  <a href="/play" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">vs Bot</a>
+  <a href="/multiplayer" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Live</a>
+  <a href="/tournaments" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Tournaments</a>
+  <a href="/leaderboard" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Leaderboard</a>
   <a href="/history" style="color:var(--green);text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">History</a>
-  <a href="/watch" style="color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Watch</a>
+  <a href="/watch" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Watch</a>
   <a id="mob-signin-btn" onclick="toggleMobileNav();openAuth();" style="display:none;color:#4a9d7e;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;cursor:pointer;">Sign In</a>
-  <a id="mob-signout-btn" onclick="signOut()" style="display:none;color:#555;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;cursor:pointer;">Sign Out</a>
+  <a id="mob-signout-btn" onclick="signOut()" style="display:none;color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;cursor:pointer;">Sign Out</a>
 </div>
 <div id="drawer-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:499;" onclick="toggleMobileNav()"></div>
 <style>
@@ -469,7 +469,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <div id="signin-prompt" style="display:none;padding:40px 24px;text-align:center;">
       <div style="font-size:28px;margin-bottom:12px;">♟</div>
       <div style="font-size:13px;color:#ece6da;margin-bottom:6px;letter-spacing:0.05em;">Sign in to view your game history</div>
-      <div style="font-size:11px;color:#555;margin-bottom:20px;">Your games are saved automatically when you're signed in.</div>
+      <div style="font-size:11px;color:#8d8d8d;margin-bottom:20px;">Your games are saved automatically when you're signed in.</div>
       <button onclick="openAuth()" style="padding:10px 24px;background:#4a9d7e;color:#111;border:none;font-family:Georgia,serif;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;border-radius:2px;">Sign In</button>
     </div>
     <div id="game-list">
@@ -675,7 +675,7 @@ async function loadGames(userId) {
     console.error('[history] loadGames error:', error);
     document.getElementById('game-list').innerHTML =
       '<div class="empty-state">Error loading games: ' + (error.message || 'Unknown error') +
-      '<br><small style="color:#555">Check console for details.</small></div>';
+      '<br><small style="color:#8d8d8d">Check console for details.</small></div>';
     return;
   }
   if (!data || !data.length) {
@@ -1045,9 +1045,9 @@ document.addEventListener('keydown', e => {
   .auth-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);display:none;align-items:flex-start;justify-content:center;z-index:300;backdrop-filter:blur(4px);overflow-y:auto;padding:20px 16px 40px;}
   .auth-overlay.active{display:flex !important;}
   .auth-card{background:#33312d;border:1px solid #3d3a35;border-top:2px solid #4a9d7e;border-radius:3px;padding:28px 24px;width:100%;max-width:360px;display:flex;flex-direction:column;gap:14px;margin:auto;position:relative;}
-  .auth-close{position:absolute;top:10px;right:12px;background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;}
+  .auth-close{position:absolute;top:10px;right:12px;background:none;border:none;color:#8d8d8d;font-size:20px;cursor:pointer;line-height:1;}
   .auth-title{font-size:13px;letter-spacing:0.2em;text-transform:uppercase;color:#4a9d7e;}
-  .auth-subtitle{font-size:12px;color:#555;}
+  .auth-subtitle{font-size:12px;color:#8d8d8d;}
   .auth-input{width:100%;background:#111;border:1px solid #3d3a35;color:#ece6da;padding:11px 14px;font-size:13px;font-family:monospace;border-radius:2px;outline:none;}
   .auth-input:focus{border-color:#4a9d7e55;}
   .auth-input::placeholder{color:#444;}

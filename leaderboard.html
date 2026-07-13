@@ -28,7 +28,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
       --bg3:   #33312d;
       --border:#222;
       --text:  #ece6da;
-      --muted: #555;
+      --muted: #8d8d8d;
       --green: #4a9d7e;
       --gold:  #c9a76c;
       --silver:#aaa;
@@ -771,7 +771,7 @@ function renderAllTc(players, eloSumFn) {
     const tcCells = TC_DEFS.map(tc => {
       const v   = p[tc.key] || 0;
       const hi  = v > 0 && v === max;
-      return '<td class="td-elo" style="' + (hi ? 'color:#c9a76c;' : 'color:#555;') + '">'
+      return '<td class="td-elo" style="' + (hi ? 'color:#c9a76c;' : 'color:#8d8d8d;') + '">'
            + (v > 0 ? v : '—') + '</td>';
     }).join('');
 
@@ -851,13 +851,13 @@ init();
   .lb-auth-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);display:none;align-items:flex-start;justify-content:center;z-index:300;backdrop-filter:blur(4px);overflow-y:auto;padding:20px 16px 40px;}
   .lb-auth-overlay.active{display:flex !important;}
   .lb-auth-card{background:#33312d;border:1px solid #3d3a35;border-top:2px solid #4a9d7e;border-radius:3px;padding:28px 24px;width:100%;max-width:360px;display:flex;flex-direction:column;gap:14px;margin:auto;position:relative;}
-  .lb-auth-close{position:absolute;top:10px;right:12px;background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;}
+  .lb-auth-close{position:absolute;top:10px;right:12px;background:none;border:none;color:#8d8d8d;font-size:20px;cursor:pointer;line-height:1;}
 </style>
 <div class="lb-auth-overlay" id="lb-auth-overlay">
   <div class="lb-auth-card">
     <button class="lb-auth-close" onclick="closeAuth()">×</button>
     <div style="font-size:13px;letter-spacing:0.2em;text-transform:uppercase;color:#4a9d7e;" id="lb-auth-title">Sign In</div>
-    <div style="font-size:12px;color:#555;">Sign in to see your rank highlighted.</div>
+    <div style="font-size:12px;color:#8d8d8d;">Sign in to see your rank highlighted.</div>
     <input style="width:100%;background:#111;border:1px solid #3d3a35;color:#ece6da;padding:11px 14px;font-size:13px;font-family:monospace;border-radius:2px;outline:none;" type="email" id="lb-auth-email" placeholder="Email address" />
     <input style="width:100%;background:#111;border:1px solid #3d3a35;color:#ece6da;padding:11px 14px;font-size:13px;font-family:monospace;border-radius:2px;outline:none;" type="password" id="lb-auth-password" placeholder="Password" onkeydown="if(event.key==='Enter') handleAuthLb()" />
     <div style="font-size:12px;color:#ff6b6b;min-height:16px;" id="lb-auth-error"></div>

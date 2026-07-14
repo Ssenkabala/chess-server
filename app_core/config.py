@@ -93,6 +93,34 @@ RECURRING_WARMUP_DURATION_MINUTES = 60
 RECURRING_WARMUP_PRIZE_POOL       = 0.0
 RECURRING_WARMUP_HOUR_EAT         = 19  # matches the Grand Prix's time
 
+# ── Weekly regional tournaments ─────────────────────────────────────────
+# Every Saturday, 6PM *local* time for each region — restricted to players
+# from that region only (enforced by the existing player_in_region() check
+# in join_tournament, keyed off this tournament's `region` field). Same
+# format as the warmup (free entry, 60 min, 3+0) — adjust here if these
+# were meant to carry a prize pool instead.
+#
+# Each region spans multiple real timezones, so "6PM local" is inherently
+# an approximation — the UTC offset below is the population-weighted
+# majority timezone for that region (verified against 2026 population
+# data, not just country count: e.g. west_africa is UTC+1 because Nigeria
+# alone outweighs every UTC+0 country in the region combined).
+REGIONAL_TOURNAMENT_NAME_TEMPLATE = "AfriChess {region} Open"
+REGIONAL_TOURNAMENT_DESCRIPTION_TEMPLATE = "Weekly regional arena — open only to players from {region}"
+REGIONAL_TOURNAMENT_TIME_CONTROL     = "3+0"
+REGIONAL_TOURNAMENT_DURATION_MINUTES = 60
+REGIONAL_TOURNAMENT_PRIZE_POOL       = 0.0
+REGIONAL_TOURNAMENT_HOUR_LOCAL       = 18  # 6PM local
+
+# region key -> (display name, UTC offset in hours)
+REGIONAL_TOURNAMENT_UTC_OFFSET = {
+    "east_africa":    ("East Africa",    3),  # UTC+3 — Uganda/Kenya/Tanzania/Ethiopia majority by population
+    "west_africa":    ("West Africa",    1),  # UTC+1 — Nigeria alone outweighs the UTC+0 countries combined
+    "north_africa":   ("North Africa",   2),  # UTC+2 — Egypt/Libya majority by population
+    "south_africa":   ("Southern Africa",2),  # UTC+2 — South Africa + CAT neighbors majority by population
+    "central_africa": ("Central Africa", 1),  # UTC+1 — most of DRC's population + Chad etc.
+}
+
 CLOCK_SECONDS = 300             # 5 minutes each side
 
 _GLICKO_SCALE = 173.7178

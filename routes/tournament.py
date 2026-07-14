@@ -32,7 +32,11 @@ from app_core.config import (RECURRING_TOURNAMENT_NAME, RECURRING_TOURNAMENT_DES
                               RECURRING_TOURNAMENT_PRIZE_POOL, RECURRING_TOURNAMENT_HOUR_EAT,
                               RECURRING_WARMUP_NAME, RECURRING_WARMUP_DESCRIPTION,
                               RECURRING_WARMUP_TIME_CONTROL, RECURRING_WARMUP_DURATION_MINUTES,
-                              RECURRING_WARMUP_PRIZE_POOL, RECURRING_WARMUP_HOUR_EAT)
+                              RECURRING_WARMUP_PRIZE_POOL, RECURRING_WARMUP_HOUR_EAT,
+                              REGIONAL_TOURNAMENT_NAME_TEMPLATE, REGIONAL_TOURNAMENT_DESCRIPTION_TEMPLATE,
+                              REGIONAL_TOURNAMENT_TIME_CONTROL, REGIONAL_TOURNAMENT_DURATION_MINUTES,
+                              REGIONAL_TOURNAMENT_PRIZE_POOL, REGIONAL_TOURNAMENT_HOUR_LOCAL,
+                              REGIONAL_TOURNAMENT_UTC_OFFSET)
 from app_core.medals import _grant_tournament_medals
 from app_core.models import TournamentResultRequest, TournamentStartRequest
 from app_core.rating import elo_col_for_tc, update_elos
@@ -358,6 +362,85 @@ async def weekly_warmup_scheduler():
                             print(f"[warmup] auto-create FAILED ({r.status_code}): {r.text}", flush=True)
         except Exception as e:
             print(f"[warmup] scheduler error: {e}", flush=True)
+        await asyncio.sleep(86400)
+
+
+async def weekly_regional_scheduler():
+    """Auto-creates weekly regional tournaments — one per region, every
+    Saturday at 6PM *local* time for that region (population-weighted
+    timezone per region — see REGIONAL_TOURNAMENT_UTC_OFFSET in config
+    for the reasoning). Restricted to players from that region via the
+    tournament's `region` field — enforced by the existing
+    player_in_region() check inside join_tournament, so no separate
+    access-control logic is needed here.
+
+    Deliberately different scheduling model from the Grand Prix and
+    warmup schedulers above: this does NOT maintain a fixed lookahead
+    window. For each region, the next occurrence is only created once
+    there is no longer an upcoming or active tournament for that region
+    — i.e. this week's regional tournament has to actually finish before
+    next week's gets created. This keeps exactly one regional tournament
+    in flight per region at a time, rather than stacking several weeks
+    ahead the way the warmup scheduler used to before it was scoped down.
+    """
+    await asyncio.sleep(45)
+    while True:
+        try:
+            now_utc = datetime.now(timezone.utc)
+            async with httpx.AsyncClient() as client:
+                for region_key, (region_label, utc_offset) in REGIONAL_TOURNAMENT_UTC_OFFSET.items():
+                    tz = timezone(timedelta(hours=utc_offset))
+                    now_local = now_utc.astimezone(tz)
+                    days_until_saturday = (5 - now_local.weekday()) % 7  # Saturday = weekday() 5
+                    candidate = (now_local + timedelta(days=days_until_saturday)).replace(
+                        hour=REGIONAL_TOURNAMENT_HOUR_LOCAL, minute=0, second=0, microsecond=0)
+                    if candidate <= now_local:
+                        candidate += timedelta(days=7)  # this Saturday's slot already passed
+                    occurrence_utc = candidate.astimezone(timezone.utc)
+                    starts_at_iso = occurrence_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    tournament_name = REGIONAL_TOURNAMENT_NAME_TEMPLATE.format(region=region_label)
+
+                    # "Wait until finished" check — only create the next
+                    # occurrence if this region has no upcoming/active one.
+                    existing = await client.get(
+                        f"{SUPABASE_URL}/rest/v1/tournaments",
+                        params={"region": f"eq.{region_key}",
+                                "status": "in.(upcoming,active)",
+                                "select": "id,status,starts_at"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY,
+                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+                    )
+                    if existing.status_code == 200 and not existing.json():
+                        admin_id = next(iter(ADMIN_USER_IDS), None)
+                        row = {
+                            "name":             tournament_name,
+                            "description":      REGIONAL_TOURNAMENT_DESCRIPTION_TEMPLATE.format(region=region_label),
+                            "format":           "arena",
+                            "time_control":     REGIONAL_TOURNAMENT_TIME_CONTROL,
+                            "rounds":           0,
+                            "max_players":      9999,
+                            "country":          None,
+                            "region":           region_key,
+                            "starts_at":        starts_at_iso,
+                            "created_by":       admin_id,
+                            "status":           "upcoming",
+                            "duration_minutes": REGIONAL_TOURNAMENT_DURATION_MINUTES,
+                            "prize_pool":       REGIONAL_TOURNAMENT_PRIZE_POOL,
+                        }
+                        r = await client.post(
+                            f"{SUPABASE_URL}/rest/v1/tournaments",
+                            headers={"apikey": SUPABASE_SERVICE_KEY,
+                                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                     "Content-Type": "application/json",
+                                     "Prefer": "return=representation"},
+                            json=row
+                        )
+                        if r.status_code in (200, 201):
+                            print(f"[regional] auto-created {region_key}: {starts_at_iso}", flush=True)
+                        else:
+                            print(f"[regional] auto-create FAILED for {region_key} ({r.status_code}): {r.text}", flush=True)
+        except Exception as e:
+            print(f"[regional] scheduler error: {e}", flush=True)
         await asyncio.sleep(86400)
 
 

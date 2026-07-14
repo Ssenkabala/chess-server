@@ -32,6 +32,10 @@ def root():
 def play():
     return FileResponse("index.html")        # vs engine
 
+@router.get("/analysis")
+def analysis():
+    return FileResponse("analysis.html")      # split out from index.html — analysis board + AI coaching
+
 @router.get("/multiplayer")
 def multiplayer():
     return FileResponse("play_multiplayer.html")   # 1v1 live

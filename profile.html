@@ -360,6 +360,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <a href="/">Home</a>
     <a href="/profile" style="color:var(--green)">Profile</a>
     <a href="/play">vs Bot</a>
+    <a href="/analysis">Analysis</a>
     <a href="/multiplayer">Live</a>
     <a href="/tournaments">Tournaments</a>
     <a href="/leaderboard">Leaderboard</a>
@@ -378,6 +379,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <a href="/" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Home</a>
   <a href="/profile" style="color:var(--green);text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Profile</a>
   <a href="/play" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">vs Bot</a>
+  <a href="/analysis" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Analysis</a>
   <a href="/multiplayer" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Live</a>
   <a href="/tournaments" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Tournaments</a>
   <a href="/leaderboard" style="color:#8d8d8d;text-decoration:none;font-size:13px;letter-spacing:0.12em;text-transform:uppercase;padding:11px 4px;border-bottom:1px solid #33312d;">Leaderboard</a>
@@ -760,7 +762,7 @@ function renderProfile(d) {
           Each analysis uses your current position to give you real engine-backed coaching from Senkabala.<br><br>
           ${d.coach_uses_remaining <= 0
             ? '<strong style="color:#ff9d00">You\'ve used all your daily coach analyses.</strong> Upgrade for unlimited access — coming soon.'
-            : `Go to <a href="/play" style="color:var(--green)">Play vs Engine</a> and click <strong>Analyse</strong> after any move.`}
+            : `Go to <a href="/analysis" style="color:var(--green)">Analysis</a> and click <strong>Coach Me</strong> on any position.`}
         </div>
       </div>
     </div>

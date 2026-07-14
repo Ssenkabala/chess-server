@@ -10,28 +10,28 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 <!-- End Google Tag Manager -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>AfriChess | Play vs Engine — 8 Difficulty Levels</title>
+  <title>AfriChess | Analysis Board — AI Coaching & Position Evaluation</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon_16x16.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
   <meta name="theme-color" content="#262624">
-  <meta name="description" content="Play chess against AfriChess's custom 2050 ELO engine. Choose from 8 difficulty levels, white or black. Built for African players.">
-  <meta property="og:title" content="AfriChess | Play vs Engine">
-  <meta property="og:description" content="Play chess against AfriChess's 2050 ELO engine — 8 difficulty levels, white or black. Built for African players.">
+  <meta name="description" content="Analyse any chess position with AfriChess's custom 2050 ELO engine. Get AI coaching, candidate lines, and move-by-move game review. Built for African players.">
+  <meta property="og:title" content="AfriChess | Analysis Board">
+  <meta property="og:description" content="Analyse any position with AfriChess's 2050 ELO engine — AI coaching, candidate lines, and full game review. Built for African players.">
   <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
-  <meta property="og:url" content="https://www.africhess.org/play">
+  <meta property="og:url" content="https://www.africhess.org/analysis">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:site" content="@africhess">
-  <meta name="twitter:title" content="AfriChess | Play vs Engine">
+  <meta name="twitter:title" content="AfriChess | Analysis Board">
   <meta name="twitter:description" content="Play chess against AfriChess's 2050 ELO engine. 8 difficulty levels, AI coaching, built for African players.">
   <meta name="twitter:image" content="https://www.africhess.org/android-chrome-512x512.png">
   <link rel="canonical" href="https://www.africhess.org/play">
-  <meta property="og:title" content="AfriChess — Play vs Engine">
+  <meta property="og:title" content="AfriChess — Analysis Board">
   <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
-  <meta property="og:url" content="https://www.africhess.org/play">
+  <meta property="og:url" content="https://www.africhess.org/analysis">
   <!-- Set zoom CSS variable BEFORE any style renders to avoid flash -->
   <script>
     (function() {
@@ -1280,69 +1280,108 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <div class="nav-overlay" id="nav-overlay" onclick="toggleMobileMenu()"></div>
 
 
-  <!-- ══════════════════ PLAY PANEL ══════════════════ -->
-  <div id="panel-play" class="panel active">
-    <div id="status">Choose your color to begin.</div>
+  <!-- ══════════════════ ANALYSIS PANEL ══════════════════ -->
+  <div id="panel-analysis" class="panel active">
 
-    <!-- Pre-game setup — hidden once game starts -->
-    <div id="pregame-setup" style="width:100%;display:flex;flex-direction:column;gap:14px;align-items:center;">
-      <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;letter-spacing:0.1em;color:#8d8d8d;text-transform:uppercase;">
-          <span>Difficulty</span>
-          <span id="diff-label" style="color:#4a9d7e;font-size:13px;letter-spacing:0.05em;">Beginner</span>
-        </div>
-        <input type="range" id="diff-slider" min="1" max="8" value="1"
-          style="width:100%;accent-color:#4a9d7e;cursor:pointer;"
-          oninput="setDifficulty(parseInt(this.value))">
-        <div style="display:flex;justify-content:space-between;font-size:10px;color:#333;letter-spacing:0.05em;">
-          <span>Beginner</span><span>Master</span>
-        </div>
-      </div>
-      <div class="controls">
-        <button id="btn-white" onclick="startGame('white')">Play as White</button>
-        <button id="btn-black" onclick="startGame('black')">Play as Black</button>
+    <!-- API key input -->
+    <div class="api-row">
+      <span class="api-label">API Key</span>
+      <div id="coach-usage-label" style="font-size:11px;color:#8d8d8d;letter-spacing:0.1em;text-transform:uppercase;text-align:right;margin-bottom:4px;">
+        Sign in to use coaching
       </div>
     </div>
 
-    <!-- Opponent captured pieces (shown above board) -->
-    <div class="captured-bar" id="captured-opponent">
-      <div class="captured-pieces" id="pieces-opponent"></div>
-      <span class="material-score" id="score-opponent"></span>
-    </div>
-    
-
-    <div id="board-wrap">
-      <div id="board" class="cg-wrap"></div>
+    <!-- FEN input -->
+    <div class="analysis-input-row">
+      <input id="fen-input" type="text" placeholder="Paste FEN  —  or leave blank for starting position" />
+      <button onclick="loadFen()">Load</button>
     </div>
 
-    <div class="user-bar">
-      <div class="user-info" id="user-info">Not signed in</div>
-      <div class="user-actions">
-        <!-- Sign In is now in the top nav — keep hidden fallbacks for JS compat -->
-        <button onclick="openAuth()" id="btn-login" style="display:none">Sign In</button>
-        <button onclick="window.location.href='/profile'" id="btn-profile" style="display:none">Profile</button>
-        <button onclick="goToHistory()" id="btn-history" style="display:none">My Games</button>
-        <button onclick="signOut()" id="btn-signout" style="display:none">Sign Out</button>
+    <div id="analysis-status">Paste a FEN and press Load, or click Analyse.</div>
+
+    <div id="analysis-wrap">
+      <div id="analysis-board" class="cg-wrap"></div>
+    </div>
+
+    <!-- Move navigation -->
+    <div id="analysis-nav-bar" style="display:flex;gap:6px;justify-content:center;margin:8px 0;">
+      <button onclick="analysisJumpToStart()" title="Start" style="padding:6px 10px;">⏮</button>
+      <button onclick="analysisStepBack()" title="Previous move" style="padding:6px 10px;">◀</button>
+      <button onclick="analysisStepForward()" title="Next move" style="padding:6px 10px;">▶</button>
+      <button onclick="analysisJumpToEnd()" title="Latest" style="padding:6px 10px;">⏭</button>
+    </div>
+    <div id="analysis-move-list" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-bottom:6px;font-size:13px;"></div>
+
+    <!-- Move annotation panel — shown when navigating to an annotated move -->
+    <div id="analysis-annotation-panel" style="display:none;margin:0 0 8px;padding:10px 14px;background:#0e0e0e;border-left:3px solid #555;border-radius:2px;font-size:12px;line-height:1.6;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+        <span id="ann-symbol" style="font-size:18px;font-weight:bold;"></span>
+        <span id="ann-label" style="letter-spacing:0.06em;text-transform:uppercase;font-size:10.5px;color:#aaa;"></span>
+        <span id="ann-accuracy" style="margin-left:auto;font-family:'Courier New',monospace;color:#4a9d7e;font-size:13px;"></span>
+      </div>
+      <div id="ann-played" style="color:#ccc;"></div>
+      <div id="ann-best" style="color:#4a9d7e;margin-top:2px;"></div>
+      <div id="ann-variation" style="color:#9d9d9d;margin-top:2px;font-family:'Courier New',monospace;font-size:11px;"></div>
+    </div>
+
+    <!-- Eval bar -->
+    <div class="eval-bar-wrap">
+      <div class="eval-bar-fill" id="eval-bar"></div>
+    </div>
+    <div class="eval-label" id="eval-label">—</div>
+
+    <!-- Continuation line — hidden, PV shown inline in candidate rows -->
+    <div id="a-pv-line" style="display:none;"></div>
+
+    <!-- Promotion picker — analysis board specific IDs to avoid any
+         collision with play_multiplayer.html's equivalent overlay -->
+    <div class="promo-overlay" id="analysis-promo-overlay">
+      <div class="promo-box">
+        <div class="promo-title">Promote pawn to</div>
+        <div class="promo-pieces" id="analysis-promo-pieces"></div>
       </div>
     </div>
-    
-    <!-- Player captured pieces (shown below board) -->
-    <div class="captured-bar" id="captured-player">
-      <div class="captured-pieces" id="pieces-player"></div>
-      <span class="material-score" id="score-player"></span>
+
+    <!-- Candidate moves -->
+    <div class="candidates-wrap" id="candidates-wrap">
+      <div class="candidates-label">Candidate Moves</div>
+      <div id="candidates-list"></div>
     </div>
 
+    <!-- Controls -->
     <div class="controls">
-      <button onclick="resetGame()">New Game</button>
-      <button onclick="if(board) board.flip()">Flip Board</button>
-      <button id="btn-takeback-bot" onclick="takebackVsBot()" style="display:none;">↩ Take Back</button>
-      <button id="btn-resign" onclick="resignGame()" style="display:none;background:#1a0000;color:#ff4444;border-color:#ff444433;">Resign</button>
-      <button id="btn-replay" onclick="replayGame()" style="display:none;">Replay</button>
+      <button onclick="analysePosition()">Analyse</button>
+      <button onclick="getCoaching()" id="btn-coach">Coach Me</button>
+      <button onclick="startAnalysisReview()" id="btn-review" style="display:none;">Review</button>
+      <button onclick="resetAnalysis()">Reset</button>
+      <button onclick="if(analysisCg) analysisCg.toggleOrientation()">Flip</button>
     </div>
-    <!-- Opening name display -->
-    <div id="opening-display" style="padding:2px 0 4px;min-height:16px;"></div>
-  </div>
 
+    <!-- Coach card -->
+    <div id="coach-card">
+      <div class="coach-section">
+        <span class="coach-label">Assessment</span>
+        <span class="coach-text" id="c-assessment">—</span>
+      </div>
+      <div class="coach-section">
+        <span class="coach-label">Best Move</span>
+        <span class="coach-text" id="c-bestmove">—</span>
+      </div>
+      <div class="coach-section" id="c-continuation-row" style="display:none;">
+        <span class="coach-label" style="color:#aaa;">Continuation</span>
+        <span class="coach-text" id="c-continuation" style="font-family:monospace;font-size:12px;color:#aaa;">—</span>
+      </div>
+      <div class="coach-section">
+        <span class="coach-label">Plan</span>
+        <span class="coach-text" id="c-plan">—</span>
+      </div>
+      <div class="coach-section">
+        <span class="coach-label">Tip</span>
+        <span class="coach-text" id="c-tip">—</span>
+      </div>
+    </div>
+
+  </div><!-- /panel-analysis -->
 
 
 <!-- ══════════════════ SCRIPTS ══════════════════ -->
@@ -1468,11 +1507,11 @@ function makeBoardResizable(wrapId, cgGetter) {
 // Zoom already initialised by inline <head> script before CSS rendered
 // Redraw chessground on resize/orientation change (board size now driven by CSS)
 window.addEventListener('resize', function() {
-  if (cg) cg.redrawAll();
+  if (analysisCg) analysisCg.redrawAll();
 });
 window.addEventListener('orientationchange', function() {
   setTimeout(function() {
-    if (cg) cg.redrawAll();
+    if (analysisCg) analysisCg.redrawAll();
   }, 200);
 });
 
@@ -1503,126 +1542,9 @@ function renderCandidates(candidates) {
   });
 }  
 
-let currentDifficulty = 1;
-
-const DIFF_LABELS = {
-  1:'Beginner', 2:'Beginner+', 3:'Easy', 4:'Intermediate',
-  5:'Hard', 6:'Hard+', 7:'Expert', 8:'Master'
-};
-
-function setDifficulty(level) {
-  currentDifficulty = level;
-  document.getElementById('diff-label').textContent = DIFF_LABELS[level] || level;
-}
-
 // ─── Tab switching ─────────────────────────────────────────────
 
 // ══════════════════════════════════════════════════════════════
-//  PLAY MODE  (original code, untouched)
-// ══════════════════════════════════════════════════════════════
-var game = new Chess();
-var cg = null;  // chessground instance
-var playerColor = 'w';
-var engineThinking = false;
-var gameStarted = false;
-var moveHistory = [];   // SAN history for display
-var uciHistory  = [];   // UCI history for engine repetition detection
-var gameSessionId = 0;  // incremented on every new game — stale engine callbacks are discarded
-var takebackCount = 0;  // takebacks used this game (max 3)
-
-function setStatus(msg) { document.getElementById('status').textContent = msg; }
-
-function toDests() {
-  if (!gameStarted || engineThinking || game.game_over() || game.turn() !== playerColor) {
-    return new Map(); // no moves available
-  }
-  var dests = new Map();
-  game.moves({ verbose: true }).forEach(function(m) {
-    if (!dests.has(m.from)) dests.set(m.from, []);
-    dests.get(m.from).push(m.to);
-  });
-  return dests;
-}
-
-function refreshDests() {
-  if (!cg) return;
-  if (cg) cg.set({
-    movable: {
-      color: playerColor === 'w' ? 'white' : 'black',
-      dests: toDests(),
-    },
-    turnColor: game.turn() === 'w' ? 'white' : 'black',
-    check: game.in_check(),
-  });
-}
-
-function isPromotion(source, target) {
-  var piece = game.get(source);
-  if (!piece || piece.type !== 'p') return false;
-  var targetRank = target[1];
-  return (piece.color === 'w' && targetRank === '8') ||
-         (piece.color === 'b' && targetRank === '1');
-}
-
-function showPromotion(source, target, callback) {
-  var whiteSymbols = { q:'♛', r:'♜', b:'♝', n:'♞' };
-  var blackSymbols = { q:'♕', r:'♖', b:'♗', n:'♘' };
-  var symbols = game.turn() === 'w' ? whiteSymbols : blackSymbols;
-  var labels  = { q:'Queen', r:'Rook', b:'Bishop', n:'Knight' };
-  var pieces  = ['q', 'r', 'b', 'n'];
-  var container = document.getElementById('promo-pieces');
-  container.innerHTML = '';
-  pieces.forEach(function(p) {
-    var div = document.createElement('div');
-    div.className = 'promo-piece';
-    div.title = labels[p];
-    var span = document.createElement('span');
-    span.textContent = symbols[p];
-    span.style.cssText = 'font-size:42px;line-height:1;display:block;color:#e8e8e8;text-shadow:0 1px 3px rgba(0,0,0,0.8);';
-    var lbl = document.createElement('span');
-    lbl.textContent = labels[p];
-    lbl.style.cssText = 'font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:#9d9d9d;display:block;margin-top:2px;';
-    div.appendChild(span);
-    div.appendChild(lbl);
-    div.onclick = function() {
-      document.getElementById('promo-overlay').classList.remove('active');
-      callback(p);
-    };
-    container.appendChild(div);
-  });
-  document.getElementById('promo-overlay').classList.add('active');
-}
-
-function executePlayerMove(source, target, promotion) {
-  var move = game.move({ from: source, to: target, promotion: promotion });
-  if (move === null) { cg.set({ fen: game.fen() }); return; }
-  moveHistory.push(move.san);
-  var uciMove = source + target + (move.promotion ? move.promotion : '');
-  uciHistory.push(uciMove);
-  if (cg) cg.set({ fen: game.fen(), lastMove: [source, target] });
-  // Update opening display
-  if (typeof OpeningDetector !== 'undefined') {
-    OpeningDetector.render(uciHistory, document.getElementById('opening-display'));
-  }
-  refreshDests();
-  updateCapturedPieces();
-  if (game.game_over()) { showResult(); return; }
-  setStatus('Engine thinking...');
-  engineThinking = true;
-  setTimeout(getEngineMove, 150);
-}
-
-// afterMove: called by chessground after drag or click-move
-function afterMove(source, target) {
-  if (!gameStarted || engineThinking || game.game_over()) {
-    if (cg) cg.set({ fen: game.fen() }); return;
-  }
-  if (isPromotion(source, target)) {
-    showPromotion(source, target, function(promo) { executePlayerMove(source, target, promo); });
-    return;
-  }
-  executePlayerMove(source, target, 'q');
-}
 
 // onSquareClick removed — chessground handles tap-to-move natively
 
@@ -1644,451 +1566,6 @@ function _wasmReady() {
   return _wasmEngine && _wasmEngine._ready;
 }
 
-function getEngineMove() {
-  var fen   = game.fen();
-  var moves = uciHistory.slice();
-  var diff  = currentDifficulty;
-  var wasmEng = _ensureWasmEngine();
-  var sessionAtCall = gameSessionId;
-  function isStale() { return gameSessionId !== sessionAtCall; }
-
-  if (wasmEng) {
-    // ── WASM path: engine runs in browser, no server call ──────────────────
-    var thinkMs = WASM_DIFFICULTY_MS ? (WASM_DIFFICULTY_MS[diff] || 1000) : 1000;
-
-    // If engine is still loading, wait for it (prevents mixing WASM+server in same game)
-    var doSearch = function() {
-      if (thinkMs >= 1000) {
-        var dots = 0;
-        var thinkInterval = setInterval(function() {
-          dots = (dots + 1) % 4;
-          if (!isStale()) setStatus('Engine thinking' + '.'.repeat(dots));
-        }, 400);
-        setTimeout(function() { clearInterval(thinkInterval); }, thinkMs + 2000);
-      }
-
-      wasmGetMove({
-        fen:        fen,
-        moves:      moves,
-        difficulty: diff,
-        engine:     wasmEng,
-        chess:      game
-      }).then(function(uciMove) {
-        if (isStale()) return;
-        if (!uciMove) {
-          engineThinking = false;
-          if (game.game_over()) { showResult(); }
-          return;
-        }
-        _applyEngineMove(uciMove);
-      }).catch(function(err) {
-        if (isStale()) return;
-        console.warn('[bot] WASM error, falling back to server:', err);
-        _getEngineMoveFromServer(fen, moves, diff, sessionAtCall);
-      });
-    };
-
-    if (_wasmReady()) {
-      doSearch();
-    } else {
-      // Engine loading — show brief wait message then search
-      setStatus('Loading engine…');
-      wasmEng.ready().then(function() {
-        if (isStale()) return;
-        doSearch();
-      }).catch(function() {
-        if (isStale()) return;
-        _getEngineMoveFromServer(fen, moves, diff, sessionAtCall);
-      });
-    }
-  } else {
-    // ── Server fallback: original /move API ─────────────────────────────────
-    _getEngineMoveFromServer(fen, moves, diff, sessionAtCall);
-  }
-}
-
-function _applyEngineMove(uciMove) {
-  var from  = uciMove.slice(0, 2);
-  var to    = uciMove.slice(2, 4);
-  var promo = uciMove[4] || 'q';
-  var engineMove = game.move({ from: from, to: to, promotion: promo });
-  if (!engineMove) {
-    console.warn('[bot] illegal engine move:', uciMove, '— resyncing board');
-    if (cg) cg.set({ fen: game.fen() });
-    engineThinking = false;
-    refreshDests();
-    return;
-  }
-  moveHistory.push(engineMove.san);
-  uciHistory.push(uciMove);
-  if (cg) cg.set({ fen: game.fen(), lastMove: [from, to] });
-  // Update opening display + show takeback button
-  if (typeof OpeningDetector !== 'undefined') {
-    OpeningDetector.render(uciHistory, document.getElementById('opening-display'));
-  }
-  var tbBtn = document.getElementById('btn-takeback-bot');
-  if (tbBtn) tbBtn.style.display = takebackCount < 3 && uciHistory.length >= 2 ? '' : 'none';
-  engineThinking = false;
-  refreshDests();
-  updateCapturedPieces();
-  if (game.game_over()) { showResult(); return; }
-  setStatus('Your move.');
-}
-
-function _getEngineMoveFromServer(fen, moves, diff, sessionAtCall) {
-  function isStale() { return gameSessionId !== sessionAtCall; }
-  // Client-side timeout: think_ms[diff] + 22s grace so we never hang forever
-  var thinkMs = {1:200,2:200,3:500,4:1000,5:2000,6:4000,7:8000,8:15000};
-  var clientTimeout = (thinkMs[diff] || 15000) + 22000;
-  var abortCtrl = new AbortController();
-  var abortTimer = setTimeout(function() {
-    abortCtrl.abort();
-    if (isStale()) return;
-    console.warn('[bot] server move request timed out after ' + clientTimeout + 'ms');
-    setStatus('Engine timed out. Please try again.');
-    engineThinking = false;
-  }, clientTimeout);
-
-  fetch(API_BASE + '/move', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fen: fen, difficulty: diff, moves: moves }),
-    signal: abortCtrl.signal
-  })
-  .then(function(r) { clearTimeout(abortTimer); return r.json(); })
-  .then(function(data) {
-    if (isStale()) return;
-    if (data.move) {
-      var engineMove = game.move({
-        from: data.move.slice(0,2), to: data.move.slice(2,4),
-        promotion: data.move[4] || 'q'
-      });
-      if (engineMove) {
-        moveHistory.push(engineMove.san);
-        uciHistory.push(data.move);
-        if (cg) cg.set({ fen: game.fen(), lastMove: [data.move.slice(0,2), data.move.slice(2,4)] });
-      } else if (data.fen) {
-        game.load(data.fen);
-        if (cg) cg.set({ fen: data.fen });
-      }
-    } else if (data.fen) {
-      game.load(data.fen);
-      if (cg) cg.set({ fen: data.fen });
-    }
-    engineThinking = false;
-    refreshDests();
-    updateCapturedPieces();
-    renderCandidates(data.candidates);
-    if (data.is_game_over || game.game_over()) { showResult(); return; }
-    setStatus('Your move.');
-  })
-  .catch(function(err) {
-    clearTimeout(abortTimer);
-    if (isStale()) return;
-    if (err && err.name === 'AbortError') return;
-    engineThinking = false;
-    setStatus('Engine error — please try again.');
-  });
-}
-
-function showResult() {
-  var resultText, resultKey, emoji, sub;
-
-  if (game.in_checkmate()) {
-    if (game.turn() === playerColor) {
-      resultText = 'Engine wins by checkmate.';
-      resultKey  = playerColor === 'w' ? 'black' : 'white';
-      emoji = '🤖'; sub = 'Better luck next time!';
-    } else {
-      resultText = 'You win by checkmate!';
-      resultKey  = playerColor === 'w' ? 'white' : 'black';
-      emoji = '👑'; sub = 'Excellent play!';
-    }
-  } else if (game.in_stalemate()) {
-    resultText = 'Draw by stalemate.';
-    resultKey  = 'draw'; emoji = '🤝'; sub = 'No legal moves — stalemate.';
-  } else if (game.in_threefold_repetition()) {
-    resultText = 'Draw by repetition.';
-    resultKey  = 'draw'; emoji = '🔁'; sub = 'Position repeated three times.';
-  } else if (game.insufficient_material()) {
-    resultText = 'Draw — insufficient material.';
-    resultKey  = 'draw'; emoji = '🤝'; sub = 'Neither side can checkmate.';
-  } else if (game.in_draw()) {
-    resultText = 'Game drawn.';
-    resultKey  = 'draw'; emoji = '🤝'; sub = '';
-  } else {
-    resultText = 'Game over.';
-    resultKey  = 'draw'; emoji = '🏁'; sub = '';
-  }
-
-  setStatus(resultText);
-  document.getElementById('btn-resign').style.display = 'none';
-  document.getElementById('btn-replay').style.display = '';
-
-  // Show overlay
-  document.getElementById('gameover-emoji').textContent = emoji;
-  document.getElementById('gameover-title').textContent = resultText;
-  document.getElementById('gameover-sub').textContent   = sub;
-  document.getElementById('gameover-overlay').classList.add('active');
-
-  // Contextual nudge for guests — different message based on outcome
-  var nudge = document.getElementById('gameover-nudge');
-  var nudgeMsg = document.getElementById('gameover-nudge-msg');
-  if (nudge && nudgeMsg && !currentUser) {
-    var msg;
-    if (resultKey !== 'draw' && resultKey !== playerColor) {
-      // Player won
-      msg = '🏆 Nice game! Create a free account to save this win, build your ELO rating, and compete in live tournaments against players across Africa.';
-    } else if (resultKey === (playerColor === 'w' ? 'black' : 'white')) {
-      // Player lost
-      msg = '📈 Keep playing — every game makes you stronger. Sign up to track your progress, earn a rating, and compete in AfriChess tournaments.';
-    } else {
-      // Draw
-      msg = '♟ Good game! Create a free account to save your games, earn an ELO rating, and join live tournaments across Africa.';
-    }
-    nudgeMsg.textContent = msg;
-    nudge.style.display = '';
-  } else if (nudge) {
-    nudge.style.display = 'none';
-  }
-
-  var pgn = buildPGN(game, resultKey);
-  var colorName = playerColor === 'w' ? 'white' : 'black';
-  saveGame(pgn, resultKey, colorName);
-}
-
-function closeGameOver() {
-  document.getElementById('gameover-overlay').classList.remove('active');
-}
-
-function takebackVsBot() {
-  if (!gameStarted || engineThinking || takebackCount >= 3) return;
-  // Need at least 2 moves — engine response + player move
-  if (uciHistory.length < 2) return;
-
-  takebackCount++;
-
-  // Undo engine move + player move (2 half-moves)
-  game.undo(); game.undo();
-  moveHistory.splice(-2);
-  uciHistory.splice(-2);
-
-  // Update UI
-  if (cg) cg.set({
-    fen: game.fen(),
-    lastMove: uciHistory.length >= 2 ? [uciHistory[uciHistory.length-2].slice(0,2), uciHistory[uciHistory.length-2].slice(2,4)] : undefined,
-    movable: { color: playerColor === 'w' ? 'white' : 'black', dests: toDests() },
-  });
-
-  // Hide takeback button if limit reached or not enough moves
-  var tbBtn = document.getElementById('btn-takeback-bot');
-  if (tbBtn) tbBtn.style.display = takebackCount < 3 && uciHistory.length >= 2 ? '' : 'none';
-
-  // Update opening display
-  if (typeof OpeningDetector !== 'undefined') {
-    OpeningDetector.render(uciHistory, document.getElementById('opening-display'));
-  }
-
-  setStatus('Takeback (' + takebackCount + '/3 used). Your move.');
-}
-
-function resignGame() {
-  if (!gameStarted || game.game_over()) return;
-  var resultKey = playerColor === 'w' ? 'black' : 'white';
-  gameStarted = false;
-  engineThinking = false;
-  gameSessionId++;
-  if (cg) cg.set({ movable: { color: undefined }, selectable: { enabled: false } });
-  document.getElementById('btn-resign').style.display = 'none';
-  document.getElementById('btn-replay').style.display = '';
-
-  // Show overlay (same as checkmate)
-  document.getElementById('gameover-emoji').textContent = '🏳';
-  document.getElementById('gameover-title').textContent = 'You resigned.';
-  document.getElementById('gameover-sub').textContent   = 'Engine wins.';
-  document.getElementById('gameover-overlay').classList.add('active');
-
-  // Guest nudge on resign
-  var nudge = document.getElementById('gameover-nudge');
-  var nudgeMsg = document.getElementById('gameover-nudge-msg');
-  if (nudge && nudgeMsg && !currentUser) {
-    nudgeMsg.textContent = '📈 Sign up to track your games, earn an ELO rating, and challenge real players across Africa in live tournaments.';
-    nudge.style.display = '';
-  } else if (nudge) {
-    nudge.style.display = 'none';
-  }
-  setStatus('You resigned. Engine wins.');
-
-  var pgn = buildPGN(game, resultKey);
-  var colorName = playerColor === 'w' ? 'white' : 'black';
-  saveGame(pgn, resultKey, colorName);
-}
-
-function replayGame() {
-  if (!moveHistory || moveHistory.length === 0) return;
-  var replayMoves = moveHistory.slice();
-  var replayChess = new Chess();
-  if (cg) cg.set({ fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' });
-  var i = 0;
-  document.getElementById('btn-replay').style.display = 'none';
-  function playNext() {
-    if (i >= replayMoves.length) { document.getElementById('btn-replay').style.display = ''; return; }
-    replayChess.move(replayMoves[i]);
-    if (cg) cg.set({ fen: replayChess.fen(), movable: { color: 'none', dests: new Map() } });
-    i++;
-    setTimeout(playNext, 600);
-  }
-  playNext();
-}
-
-function startGame(color) {
-  document.getElementById('pregame-setup').style.display = 'none';
-  document.getElementById('status').style.display = 'none';
-  moveHistory = [];
-  uciHistory  = [];
-  takebackCount = 0;
-  playerColor = (color === 'white') ? 'w' : 'b';
-  gameStarted = true;
-  engineThinking = false;
-  gameSessionId++;
-  game = new Chess();
-  document.getElementById('btn-white').classList.toggle('active', color === 'white');
-  document.getElementById('btn-black').classList.toggle('active', color === 'black');
-  document.getElementById('btn-resign').style.display = '';
-  document.getElementById('btn-replay').style.display = 'none';
-  var tbBtn = document.getElementById('btn-takeback-bot');
-  if (tbBtn) tbBtn.style.display = 'none'; // hidden until engine makes a move
-
-  if (cg) { cg.destroy(); cg = null; }
-  var boardEl = document.getElementById('board');
-  function initWhenReady() {
-    var rect = boardEl.getBoundingClientRect();
-    if (rect.width < 10) { requestAnimationFrame(initWhenReady); return; }
-    cg = Chessground(boardEl, {
-    orientation: color,
-    turnColor: 'white',
-    fen: 'start',
-    movable: {
-      color: color === 'white' ? 'white' : 'black',
-      free: false,
-      dests: toDests(),
-      events: { after: function(orig, dest) {
-        if (isPromotion(orig, dest)) {
-          showPromotion(orig, dest, function(promo) { executePlayerMove(orig, dest, promo); });
-        } else {
-          executePlayerMove(orig, dest, 'q');
-        }
-      }}
-    },
-    draggable: { enabled: true },
-    selectable: { enabled: true },
-    animation: { enabled: true, duration: 120 },
-    highlight: { lastMove: true, check: true },
-    coordinates: true,
-  });
-  makeBoardResizable('board-wrap', function() { return cg; });
-    if (playerColor === 'b') {
-      setStatus('Engine thinking...');
-      engineThinking = true;
-      updateCapturedPieces();
-      setTimeout(getEngineMove, 500);
-    } else {
-      updateCapturedPieces();
-      setStatus('Your move.');
-    }
-  }
-  requestAnimationFrame(function() { requestAnimationFrame(initWhenReady); });
-}
-
-function resetGame() {
-  // Kill any in-flight engine call
-  gameSessionId++;
-  engineThinking = false;
-  gameStarted    = false;
-
-  // Show color picker with board reset to start
-  game = new Chess();
-  if (cg) cg.set({
-    fen:      'start',
-    lastMove: undefined,
-    check:    false,
-    movable:  { color: undefined, dests: new Map() },
-    selectable: { enabled: false }
-  });
-
-  document.getElementById('pregame-setup').style.display = 'flex';
-  document.getElementById('status').style.display = 'block';
-  document.getElementById('status').textContent = 'Choose your color to begin.';
-  document.getElementById('btn-resign').style.display = 'none';
-  document.getElementById('btn-replay').style.display = 'none';
-  document.getElementById('gameover-overlay').classList.remove('active');
-
-  // Pre-highlight the flipped color as a UX hint (user can still override)
-  var flippedColor = playerColor === 'w' ? 'black' : 'white';
-  var wBtn = document.getElementById('btn-white');
-  var bBtn = document.getElementById('btn-black');
-  if (wBtn) wBtn.style.opacity = flippedColor === 'white' ? '1' : '0.5';
-  if (bBtn) bBtn.style.opacity = flippedColor === 'black' ? '1' : '0.5';
-}
-
-function updateCapturedPieces() {
-  var pieces = { w: {p:8,r:2,n:2,b:2,q:1}, b: {p:8,r:2,n:2,b:2,q:1} };
-  var onBoard = { w: {p:0,r:0,n:0,b:0,q:0}, b: {p:0,r:0,n:0,b:0,q:0} };
-  var values  = { p:1, n:3, b:3, r:5, q:9 };
-  var symbols = {
-    w: { p:'♙', n:'♘', b:'♗', r:'♖', q:'♕' },
-    b: { p:'♟', n:'♞', b:'♝', r:'♜', q:'♛' }
-  };
-
-  // Count what's still on board
-  var board_state = game.board();
-  board_state.forEach(function(row) {
-    row.forEach(function(sq) {
-      if (sq && sq.type !== 'k') onBoard[sq.color][sq.type]++;
-    });
-  });
-
-  // Calculate captures
-  var captured = { w: {}, b: {} };
-  var score = { w: 0, b: 0 };
-  ['w','b'].forEach(function(color) {
-    ['p','r','n','b','q'].forEach(function(type) {
-      var count = pieces[color][type] - onBoard[color][type];
-      if (count > 0) {
-        captured[color][type] = count;
-        score[color] += count * values[type];
-      }
-    });
-  });
-
-  // Net advantage
-  var diff = score.b - score.w; // pieces white lost = black captured
-  var diffOpp = score.w - score.b;
-
-  // Render — opponent's captures show above, player's below
-  // "opponent captured white pieces" shows above board
-  // "player captured black pieces" shows below board
-  var topColor    = playerColor === 'w' ? 'b' : 'w'; // opponent's pieces player captured → show above
-  var bottomColor = playerColor === 'w' ? 'w' : 'b'; // player's pieces opponent captured → show below
-
-  function renderBar(elId, capturedPieces, netDiff, pieceColor) {
-    var el = document.getElementById(elId);
-    var html = '';
-    ['q','r','b','n','p'].forEach(function(type) {
-      var count = capturedPieces[type] || 0;
-      for (var i = 0; i < count; i++) {
-        html += '<span style="font-size:16px;opacity:0.85">' + symbols[pieceColor][type] + '</span>';
-      }
-    });
-    if (netDiff > 0) html += '<span style="font-size:11px;color:#9d9d9d;margin-left:4px;">+' + netDiff + '</span>';
-    el.innerHTML = html;
-  }
-
-renderBar('pieces-opponent', captured[topColor],    diff > 0 ? diff : 0,    topColor);
-renderBar('pieces-player',   captured[bottomColor], diffOpp > 0 ? diffOpp : 0, bottomColor);
-
-
-}
 
 // ══════════════════════════════════════════════════════════════
 //  ANALYSIS MODE
@@ -2099,9 +1576,1052 @@ renderBar('pieces-player',   captured[bottomColor], diffOpp > 0 ? diffOpp : 0, b
 // has no natural "I'm done" signal short of a forced mate/stalemate, so
 // SOME ceiling is unavoidable to keep this from hanging indefinitely on a
 // position it can't crack quickly. 8s was the value confirmed working well
+// before the extractPV-per-depth regression made it necessary to raise
+// this to 30s as a stopgap — now that the actual performance bug is fixed
+// (extractPV runs once after search finishes, not once per depth), 8s is
+// genuinely enough again, not just tolerable.
+var ANALYSIS_BUDGET_MS = 8000;
+
+var analysisGame = new Chess();
+// Move-navigation state — mirrors play_multiplayer.html's fenHistory/viewingMove
+// pattern. analysisFenHistory[0] is always the starting position of whatever
+// was loaded (a blank board or a pasted FEN); each subsequent entry is the
+// FEN after one more move. analysisViewIndex of -1 means "viewing the live
+// (latest) position"; any other value means viewing that index in history.
+var analysisFenHistory = [analysisGame.fen()];
+var analysisSanHistory = [];
+var analysisViewIndex  = -1;
+var analysisCg = null;
+// Cache the most recent analysis result so Coach Me can reuse it without re-running the engine
+var lastAnalysisResult = null;  // { fen, bestMove, evalCp }  — set by analysePosition on completion
+var lastCandidateLines = null;  // { fen, lines: [{pvLine, cp, mate}, ...] } — last completed search's full candidate set, used to detect "the move just played was already a known continuation" so analysis can pick up instantly instead of re-searching from scratch
+var _autoAnalyseTimer = null;
+
+// ─── Shared eval formatting ─────────────────────────────────────────────
+// cp and mate are mutually exclusive (mate is only ever non-null for a
+// forced mate), matching what engine_worker.js now forwards directly from
+// the engine — no more re-deriving mate-ness from a raw cp magnitude.
+//
+// isNaN() guards below matter because of a real JS foot-gun: NaN != null
+// evaluates to true (unlike undefined, NaN does NOT loosely-equal null),
+// so a plain `mate != null` check treats a NaN mate value as "yes, a real
+// mate score" and formats it, producing the literal string "NaN" in the
+// UI. engine_worker.js now sanitizes NaN to null at the source, but
+// guarding here too means this specific bug class can't resurface even if
+// some other future caller passes a raw value through.
+function formatEval(cp, mate) {
+  if (mate != null && !isNaN(mate)) return (mate > 0 ? '#' : '-#') + Math.abs(mate);
+  var v = (cp != null && !isNaN(cp)) ? cp : 0;
+  return (v >= 0 ? '+' : '') + (v / 100).toFixed(2);
+}
+
+// Flips a {cp, mate} pair to the other side's perspective — used when a
+// cached line (scored from the mover's POV) needs to be shown from the
+// new side-to-move's POV after that move is played.
+function flipEval(cp, mate) {
+  var cpOk   = cp   != null && !isNaN(cp);
+  var mateOk = mate != null && !isNaN(mate);
+  return { cp: cpOk ? -cp : null, mate: mateOk ? -mate : null };
+}
+
+// A cp-scale stand-in for a mate score, for contexts that need a single
+// number (accuracy math, Coach Me's eval prompt) rather than a real cp
+// value, which a mate doesn't have. Magnitude is deliberately far outside
+// any real eval so drop-based classification still reads it as decisive.
+function evalCpApprox(cp, mate) {
+  if (mate != null && !isNaN(mate)) return mate > 0 ? 9000 : -9000;
+  return (cp != null && !isNaN(cp)) ? cp : 0;
+}
+
+function setAnalysisStatus(msg) {
+  document.getElementById('analysis-status').innerHTML = msg;
+}
+
+function initAnalysisBoard() {
+  if (analysisCg) { analysisCg.destroy(); analysisCg = null; }
+
+  requestAnimationFrame(function() {
+    analysisCg = Chessground(document.getElementById('analysis-board'), {
+      orientation: 'white',
+      fen: 'start',
+      movable: {
+        color: 'both',
+        free: true,
+        events: {
+          after: function(source, target) {
+            // If viewing a past position, jump the underlying game object
+            // back there first so the new move branches off correctly,
+            // discarding any moves that were "in the future" relative to
+            // where we just played from.
+            if (analysisViewIndex !== -1 && analysisViewIndex < analysisFenHistory.length - 1) {
+              analysisGame.load(analysisFenHistory[analysisViewIndex]);
+              analysisFenHistory = analysisFenHistory.slice(0, analysisViewIndex + 1);
+              analysisSanHistory = analysisSanHistory.slice(0, analysisViewIndex);
+            }
+
+            function completeAnalysisMove(promo) {
+              var fenBeforeMove = analysisGame.fen();
+              var move = analysisGame.move({ from: source, to: target, promotion: promo });
+              if (move === null) { analysisCg.set({ fen: analysisGame.fen() }); return; }
+              analysisCg.set({ fen: analysisGame.fen(), lastMove: [source, target] });
+              analysisFenHistory.push(analysisGame.fen());
+              analysisSanHistory.push(move.san);
+              analysisViewIndex = -1;
+              renderAnalysisMoveList();
+              resetCoachCard();
+              clearBestMoveHighlight();
+
+              // Did this move match a continuation the engine already found
+              // and showed? If so, pick up where it left off instead of
+              // re-searching the same ground from scratch — this is what
+              // "the engine keeps re-analysing moves it already suggested"
+              // was actually about. A move qualifies if it's the FIRST move
+              // of any of the (up to 3) candidate lines from the search run
+              // on the position we just moved FROM.
+              var followedLine = null;
+              if (lastCandidateLines && lastCandidateLines.fen === fenBeforeMove) {
+                var playedUci = source + target + (move.promotion || '');
+                for (var li = 0; li < lastCandidateLines.lines.length; li++) {
+                  var ln = lastCandidateLines.lines[li];
+                  var firstMoveUci = ln.pvLine[0];
+                  // Compare ignoring a trailing promotion-piece letter
+                  // mismatch (e.g. engine said e7e8q, move object reports
+                  // 'q' separately) — both forms reduce to the same 4-5
+                  // char square pair plus optional promo letter.
+                  if (firstMoveUci && firstMoveUci.slice(0,4) === (source+target) &&
+                      (firstMoveUci.length <= 4 || firstMoveUci[4] === (move.promotion || firstMoveUci[4]))) {
+                    followedLine = ln;
+                    break;
+                  }
+                }
+              }
+
+              if (followedLine && followedLine.pvLine.length > 1) {
+                // Shift the matched line forward by one move — what was
+                // "moves 2..N" of the old PV is now "moves 1..N-1" of the
+                // new position's known continuation. Show it immediately,
+                // no waiting on a fresh search for the headline result.
+                var remainingPv = followedLine.pvLine.slice(1);
+                var newFen = analysisGame.fen();
+                var sanArr = pvLineToSan(newFen, remainingPv);
+                if (sanArr.length > 0) {
+                  // Flips from the mover's perspective to the new side-to-move's
+                  var flipped = flipEval(followedLine.cp, followedLine.mate);
+                  var evalStr2 = formatEval(flipped.cp, flipped.mate);
+                  setAnalysisStatus('Eval: ' + evalStr2 + '  ·  Continuing known line — refining…');
+                  lastAnalysisResult = { fen: newFen, bestMove: remainingPv[0], evalCp: evalCpApprox(flipped.cp, flipped.mate), pv: remainingPv };
+                  document.getElementById('btn-coach').disabled = false;
+                }
+              } else {
+                lastAnalysisResult = null;  // position changed, no known continuation — invalidate cache
+              }
+              lastCandidateLines = null;  // always cleared — the snapshot was only valid for the position we just left
+
+              // Always still triggers a real search — the cached line gives
+              // an instant, good-enough headline result so there's no
+              // visible gap, but the fresh search at the new position will
+              // genuinely go deeper than the old line's relative depth
+              // allowed, and is what actually keeps the result trustworthy
+              // rather than leaving a shallower cached guess in place
+              // indefinitely.
+              scheduleAutoAnalyse();
+            }
+
+            if (isAnalysisPromotion(analysisGame, source, target)) {
+              // Don't queen automatically — ask which piece, same as a
+              // real game. Chessground has already moved the piece
+              // visually by this point; if the move turns out illegal for
+              // any reason, completeAnalysisMove's own move===null check
+              // resets the visual board back to the true game state.
+              showAnalysisPromotion(function(promo) { completeAnalysisMove(promo); });
+            } else {
+              completeAnalysisMove('q');  // irrelevant for non-promotion moves, chess.js ignores it
+            }
+          }
+        }
+      },
+      draggable: { enabled: true },
+      selectable: { enabled: true },
+      animation: { enabled: true, duration: 120 },
+      highlight: { lastMove: true },
+      coordinates: true,
+    });
+    analysisCg.redrawAll();
+  });
+}
+
+// ── Analysis move navigation ────────────────────────────────────────────
+// Mirrors play_multiplayer.html's jumpToMove/returnToLive pattern. Viewing
+// a past position never triggers a new engine search — analysis only ever
+// runs against the live (latest) position, matching how the engine call
+// site (analysePosition) already reads analysisGame.fen() directly.
+function analysisGoToIndex(idx) {
+  idx = Math.max(0, Math.min(idx, analysisFenHistory.length - 1));
+  analysisViewIndex = (idx === analysisFenHistory.length - 1) ? -1 : idx;
+  var fen = analysisFenHistory[idx];
+  analysisGame.load(fen);
+  if (analysisCg) {
+    analysisCg.set({
+      fen: fen,
+      lastMove: idx > 0 ? lastMoveSquaresFromSan(idx) : undefined,
+      movable: { color: 'both', free: true }
+    });
+  }
+  renderAnalysisMoveList();
+  lastAnalysisResult = null;
+  resetCoachCard();
+  clearBestMoveHighlight();
+
+  // Show annotation panel for the move we just navigated TO (ply = idx - 1,
+  // since analysisFenHistory[idx] is the position AFTER move at index idx-1)
+  var annPlyIdx = idx - 1;
+  if (annPlyIdx >= 0 && analysisAnnotations[annPlyIdx]) {
+    showAnnotationPanel(annPlyIdx);
+  } else {
+    clearAnnotationPanel();
+  }
+
+  scheduleAutoAnalyse();
+}
+
+function analysisJumpToStart()   { analysisGoToIndex(0); }
+function analysisStepBack()      { analysisGoToIndex((analysisViewIndex === -1 ? analysisFenHistory.length - 1 : analysisViewIndex) - 1); }
+function analysisStepForward()   { analysisGoToIndex((analysisViewIndex === -1 ? analysisFenHistory.length - 1 : analysisViewIndex) + 1); }
+function analysisJumpToEnd()     { analysisGoToIndex(analysisFenHistory.length - 1); }
+
+// Reconstructs the [from, to] squares for highlighting the last move at a
+// given history index, since chessground needs explicit squares, not SAN.
+function lastMoveSquaresFromSan(idx) {
+  try {
+    var tmp = new Chess(analysisFenHistory[idx - 1]);
+    var verbose = tmp.moves({ verbose: true });
+    for (var i = 0; i < verbose.length; i++) {
+      tmp.move(verbose[i]);
+      if (tmp.fen() === analysisFenHistory[idx]) return [verbose[i].from, verbose[i].to];
+      tmp.load(analysisFenHistory[idx - 1]);
+    }
+  } catch (e) {}
+  return undefined;
+}
+
+function renderAnalysisMoveList() {
+  var el = document.getElementById('analysis-move-list');
+  if (!el) return;
+
+  // Show/hide Review button based on whether there's a game to review
+  var reviewBtn = document.getElementById('btn-review');
+  if (reviewBtn) reviewBtn.style.display = analysisSanHistory.length >= 2 ? '' : 'none';
+
+  if (analysisSanHistory.length === 0) { el.innerHTML = ''; return; }
+  var html = '';
+  for (var i = 0; i < analysisSanHistory.length; i++) {
+    var moveNum = Math.floor(i / 2) + 1;
+    var prefix  = (i % 2 === 0) ? (moveNum + '. ') : '';
+    var isActive = (analysisViewIndex === -1 ? analysisFenHistory.length - 1 : analysisViewIndex) === i + 1;
+    var ann = analysisAnnotations[i];
+    var badge = '';
+    if (ann && ann.judgment) {
+      badge = '<sup style="color:' + ann.judgment.color + ';font-size:10px;font-weight:bold;margin-left:1px;">' + ann.judgment.symbol + '</sup>';
+    }
+    html += '<span onclick="analysisGoToIndex(' + (i + 1) + ')" style="cursor:pointer;padding:2px 6px;border-radius:4px;' +
+            (isActive ? 'background:rgba(0,255,157,0.25);color:#4a9d7e;' : 'color:#ccc;') + '">' +
+            prefix + analysisSanHistory[i] + badge + '</span>';
+  }
+  el.innerHTML = html;
+  el.scrollLeft = el.scrollWidth;
+}
 
 
 
+function loadFen() {
+  if (!analysisCg) initAnalysisBoard();
+  lastAnalysisResult = null;  // position changed — invalidate cache
+
+  var fen = document.getElementById('fen-input').value.trim();
+  if (!fen) {
+    analysisGame = new Chess();
+    analysisCg && analysisCg.set({ fen: 'start' });
+    setAnalysisStatus('Starting position loaded.');
+    resetCoachCard();
+    updateEvalBar(0);
+    analysisFenHistory = [analysisGame.fen()];
+    analysisSanHistory = []; analysisAnnotations = {}; clearAnnotationPanel();
+    analysisViewIndex  = -1;
+    renderAnalysisMoveList();
+    return;
+  }
+  var test = new Chess();
+  if (!test.load(fen)) {
+    setAnalysisStatus('Invalid FEN — please check and try again.');
+    return;
+  }
+  analysisGame = test;
+  analysisCg && analysisCg.set({ fen: fen });
+  scheduleAutoAnalyse();
+  resetCoachCard();
+  updateEvalBar(0);
+  clearBestMoveHighlight();
+  analysisFenHistory = [analysisGame.fen()];
+  analysisSanHistory = []; analysisAnnotations = {}; clearAnnotationPanel();
+  analysisViewIndex  = -1;
+  renderAnalysisMoveList();
+}
+
+function scheduleAutoAnalyse() {
+  clearTimeout(_autoAnalyseTimer);
+  setAnalysisStatus('<span class="spinner"></span> Engine analysing...');
+  _autoAnalyseTimer = setTimeout(function() {
+    analysePosition();
+  }, 600);
+}
+
+// Converts a UCI move list (e.g. ["e1g3", "a3a2", "g3a3"]) into SAN
+// (e.g. ["Bg3", "Ka2", "Ra3#"]) by playing each move on a scratch board
+// starting from the given FEN. Stops cleanly at the first illegal move
+// rather than throwing, so a malformed or truncated PV degrades to
+// "however far it got" instead of breaking the whole display.
+// Detects whether a move is a pawn promotion, given the actual game object
+// (parameterized rather than depending on a global variable name, since
+// this is shared logic ported from play_multiplayer.html's working
+// implementation, adapted to work with analysisGame specifically).
+// ═══════════════════════════════════════════════════════════════════════
+// ACCURACY & MOVE CLASSIFICATION now comes from /analysis_accuracy.js
+// (cpToWinPercent, accuracyFromWinPercents, accuracyFromCp, classifyMove,
+// buildMoveData, gameAccuracy) — the same Lichess-derived module used
+// anywhere else accuracy is needed, instead of a separate local copy that
+// could drift out of sync with it. classifyMove doesn't carry a display
+// color (that's UI, not judgment), so it's looked up here by tag.
+// ═══════════════════════════════════════════════════════════════════════
+
+var JUDGMENT_COLOR_BY_TAG = {
+  'missed-mate': '#ff5555',
+  'blunder':     '#ff6644',
+  'mistake':     '#ffaa33',
+  'inaccuracy':  '#aaaaaa'
+};
+
+function classifyMoveWithColor(cpBefore, cpAfter, isMate, playedBestMove) {
+  var j = classifyMove(cpBefore, cpAfter, isMate, playedBestMove);
+  if (j) j.color = JUDGMENT_COLOR_BY_TAG[j.tag] || '#aaaaaa';
+  return j;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ANALYSIS BOARD GAME REVIEW
+// The Lichess model: user navigates their game on the analysis board,
+// engine suggests better moves inline. Annotations sit under the move
+// list; navigating to any move shows what the engine preferred there.
+// ═══════════════════════════════════════════════════════════════════════
+
+var analysisAnnotations = {};  // ply index → annotation data
+var reviewRunning = false;
+var reviewCancelled = false;
+var REVIEW_MS_PER_MOVE = 2500;
+
+function startAnalysisReview() {
+  if (analysisSanHistory.length < 2) return;
+  if (reviewRunning) { reviewCancelled = true; return; }
+
+  var wasmEng = _ensureWasmEngine ? _ensureWasmEngine() : null;
+  if (!wasmEng) {
+    alert('Engine not available — try reloading the page.');
+    return;
+  }
+
+  // Preserve exactly where the user was before review started
+  var savedViewIndex = analysisViewIndex;
+  var savedFen       = analysisFenHistory[analysisViewIndex === -1 ? analysisFenHistory.length - 1 : analysisViewIndex];
+
+  reviewRunning     = true;
+  reviewCancelled   = false;
+  analysisAnnotations = {};
+
+  var btn = document.getElementById('btn-review');
+  if (btn) btn.textContent = '⏹ Stop';
+
+  // Run analysis asynchronously over all positions in the history
+  (function runReview(plyIdx) {
+    if (reviewCancelled || plyIdx >= analysisSanHistory.length) {
+      // Done — restore position, update display
+      reviewRunning   = false;
+      reviewCancelled = false;
+      if (btn) btn.textContent = 'Review';
+
+      // Restore the position the user was at before review started
+      var restoreIdx = savedViewIndex === -1 ? analysisFenHistory.length - 1 : savedViewIndex;
+      analysisGoToIndex(restoreIdx);
+      renderAnalysisMoveList();
+      return;
+    }
+
+    // The FEN the user was at BEFORE making move plyIdx
+    var fenBefore   = analysisFenHistory[plyIdx];
+    var playedSan   = analysisSanHistory[plyIdx];
+    // Reconstruct played move as UCI
+    var tmpGame = new Chess(fenBefore);
+    var playedMoveObj = tmpGame.move(playedSan, { sloppy: true });
+    var playedUci = playedMoveObj ? (playedMoveObj.from + playedMoveObj.to + (playedMoveObj.promotion || '')) : null;
+
+    var bestEval = null;
+    var bestFinalPv = null;
+    var captureHandler = function(msg) {
+      if (msg.type === 'pv_final') {
+        if ((msg.multipv || 1) === 1) bestFinalPv = msg.pvLine || null;
+        return;
+      }
+      if ((msg.multipv || 1) === 1) {
+        bestEval = { cp: msg.cp, mate: msg.mate, pvMove: msg.pvLine && msg.pvLine[0] };
+      }
+    };
+
+    wasmEng._analysisInfoHandler = captureHandler;
+    wasmEng.analyse(fenBefore, [], REVIEW_MS_PER_MOVE, 1).then(function(bestUci) {
+      wasmEng._analysisInfoHandler = null;
+
+      if (bestEval && bestUci && playedUci) {
+        var isMate  = bestEval.mate != null && !isNaN(bestEval.mate);   // true regardless of which side is winning — was previously
+                                                // dropped whenever the mate ran against the mover, which
+                                                // silently mis-scored every "you're the one getting mated" case
+        // A mate has no natural cp value — this sentinel is only used
+        // where a cp-scale number is needed (accuracy math, coach eval);
+        // sign matches the mate's sign, magnitude is deliberately far
+        // outside any real eval range so drop-based classification still
+        // reads it as decisive.
+        var bestCp     = isMate ? (bestEval.mate > 0 ? 9000 : -9000) : (bestEval.cp || 0);
+        var playedBest = bestUci.slice(0, 4) === playedUci.slice(0, 4);
+
+        var fenAfterPlayed = analysisFenHistory[plyIdx + 1] || null;
+        var cpAfter = null;
+
+        if (playedBest) {
+          // Played the best move — accuracy is high, no annotation needed
+          cpAfter = bestCp;
+        }
+
+        var annotation = {
+          ply:          plyIdx,
+          san:          playedSan,
+          played:       playedUci,
+          best:         bestUci,
+          bestSan:      pvLineToSan(fenBefore, [bestUci])[0] || null,
+          variation:    bestFinalPv || [bestUci],
+          variationSan: pvLineToSan(fenBefore, bestFinalPv || [bestUci]),
+          isMate:       isMate,
+          mateIn:       isMate ? bestEval.mate : null,
+          playedBest:   playedBest,
+          cpBefore:     bestCp,
+          cpAfter:      cpAfter,
+          fenBefore:    fenBefore,
+          fenAfterPlayed: fenAfterPlayed,
+          pending:      !playedBest && cpAfter === null  // needs second eval pass
+        };
+
+        if (!playedBest) {
+          // Need to evaluate the position after the move played to get
+          // an accurate cp drop. Run a second, shorter engine call.
+          if (fenAfterPlayed) {
+            var captureHandler2 = function(msg) {
+              if ((msg.multipv || 1) === 1 && msg.type !== 'pv_final') {
+                // Score is from the OPPONENT'S perspective — negate to get
+                // score from the original mover's perspective. Same
+                // cp-sentinel treatment as bestCp above when it's a mate.
+                var afterIsMate = msg.mate != null && !isNaN(msg.mate);
+                annotation.cpAfter = -(afterIsMate ? (msg.mate > 0 ? 9000 : -9000) : (msg.cp || 0));
+              }
+            };
+            wasmEng._analysisInfoHandler = captureHandler2;
+            wasmEng.analyse(fenAfterPlayed, [], Math.min(REVIEW_MS_PER_MOVE, 1500), 1).then(function() {
+              wasmEng._analysisInfoHandler = null;
+              annotation.pending = false;
+              annotation.judgment = classifyMoveWithColor(annotation.cpBefore, annotation.cpAfter || 0, annotation.isMate, playedBest);
+              if (annotation.judgment && annotation.judgment.tag === 'missed-mate' && annotation.mateIn) {
+                annotation.judgment.label = 'Missed forced mate in ' + Math.abs(annotation.mateIn);
+              }
+              annotation.accuracy = annotation.isMate ? null : Math.round(accuracyFromCp(annotation.cpBefore, annotation.cpAfter || 0));
+              if (annotation.judgment) {
+                analysisAnnotations[plyIdx] = annotation;
+                renderAnalysisMoveList();
+                showAnnotationPanel(plyIdx);
+              }
+              runReview(plyIdx + 1);
+            }).catch(function() {
+              runReview(plyIdx + 1);
+            });
+            return;  // wait for second call
+          }
+        }
+
+        // Played the best move — no annotation needed, just move on
+        runReview(plyIdx + 1);
+      } else {
+        runReview(plyIdx + 1);
+      }
+    }).catch(function() {
+      runReview(plyIdx + 1);
+    });
+  })(0);
+}
+
+function showAnnotationPanel(plyIdx) {
+  var ann = analysisAnnotations[plyIdx];
+  var panel = document.getElementById('analysis-annotation-panel');
+  if (!panel) return;
+
+  // Only show panel if currently viewing this exact ply
+  var currentIdx = analysisViewIndex === -1 ? analysisFenHistory.length - 1 : analysisViewIndex;
+  if (currentIdx !== plyIdx + 1 && !ann) { panel.style.display = 'none'; return; }
+  if (!ann) { panel.style.display = 'none'; return; }
+
+  var j = ann.judgment;
+  if (!j) { panel.style.display = 'none'; return; }
+
+  panel.style.borderLeftColor = j.color;
+  document.getElementById('ann-symbol').textContent  = j.symbol;
+  document.getElementById('ann-symbol').style.color  = j.color;
+  document.getElementById('ann-label').textContent   = j.label;
+  document.getElementById('ann-accuracy').textContent = ann.accuracy != null ? ann.accuracy + '% accuracy' : '';
+
+  document.getElementById('ann-played').textContent = 'You played: ' + ann.san;
+
+  var bestEl = document.getElementById('ann-best');
+  if (ann.bestSan && !ann.playedBest) {
+    bestEl.textContent = 'Better: ' + ann.bestSan;
+    bestEl.style.display = '';
+  } else {
+    bestEl.style.display = 'none';
+  }
+
+  var varEl = document.getElementById('ann-variation');
+  if (ann.variationSan && ann.variationSan.length > 1) {
+    var fromGame = new Chess(ann.fenBefore);
+    varEl.textContent = sanArrToMoveNotation(ann.variationSan, fromGame).join(' ');
+    varEl.style.display = '';
+  } else {
+    varEl.style.display = 'none';
+  }
+
+  panel.style.display = '';
+}
+
+function clearAnnotationPanel() {
+  var panel = document.getElementById('analysis-annotation-panel');
+  if (panel) panel.style.display = 'none';
+}
+
+function isAnalysisPromotion(game, source, target) {
+  const piece = game.get(source);
+  if (!piece || piece.type !== 'p') return false;
+  return (piece.color === 'w' && target[1] === '8') ||
+         (piece.color === 'b' && target[1] === '1');
+}
+
+// Shows the same promotion-choice overlay used in real multiplayer games —
+// previously the analysis board always silently promoted to queen with no
+// choice at all, which is wrong whenever the actual best/intended
+// continuation needs a rook, bishop, or knight underpromotion instead.
+function showAnalysisPromotion(callback) {
+  var symbols = { q:'♛', r:'♜', b:'♝', n:'♞' };
+  var labels  = { q:'Queen', r:'Rook', b:'Bishop', n:'Knight' };
+  var pieces  = ['q','r','b','n'];
+  var container = document.getElementById('analysis-promo-pieces');
+  container.innerHTML = '';
+  pieces.forEach(function(p) {
+    var div = document.createElement('div');
+    div.className = 'promo-piece';
+    div.title = labels[p];
+    var span = document.createElement('span');
+    span.textContent = symbols[p];
+    span.style.cssText = 'font-size:42px;line-height:1;display:block;color:#e8e8e8;text-shadow:0 1px 3px rgba(0,0,0,0.8);';
+    var label = document.createElement('span');
+    label.textContent = labels[p];
+    label.style.cssText = 'font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:#9d9d9d;display:block;margin-top:2px;';
+    div.appendChild(span);
+    div.appendChild(label);
+    div.onclick = function() {
+      document.getElementById('analysis-promo-overlay').classList.remove('active');
+      callback(p);
+    };
+    container.appendChild(div);
+  });
+  document.getElementById('analysis-promo-overlay').classList.add('active');
+}
+
+function pvLineToSan(fen, pvLine) {
+  var tempG = new Chess(fen);
+  var sanArr = [];
+  for (var i = 0; i < Math.min(pvLine.length, 10); i++) {
+    var m = tempG.move({ from: pvLine[i].slice(0,2), to: pvLine[i].slice(2,4),
+                         promotion: pvLine[i][4] || 'q' });
+    if (!m) break;
+    sanArr.push(m.san);
+  }
+  return sanArr;
+}
+
+// Builds standard move-number notation ("1. e4 e5 2. Nf3...") from a SAN
+// array, given the game object the PV starts FROM (so move numbering and
+// whose turn it is at the start of the line are both correct).
+function sanArrToMoveNotation(sanArr, fromGame) {
+  var mn = fromGame.moveNumber ? fromGame.moveNumber() : 1;
+  var isBlack = fromGame.turn() === 'b';
+  var moveParts = [];
+  if (isBlack && sanArr.length > 0) moveParts.push(mn + '…');
+  for (var j = 0; j < sanArr.length; j++) {
+    var globalMove = j + (isBlack ? 1 : 0);
+    if (globalMove % 2 === 0) moveParts.push((mn + Math.floor(globalMove / 2)) + '.');
+    moveParts.push(sanArr[j]);
+  }
+  return moveParts;
+}
+
+function analysePosition() {
+  if (!analysisCg) initAnalysisBoard();
+
+  // The position has no legal moves at all (checkmate or stalemate) — there
+  // is nothing for the engine to suggest. Dispatching anyway is what exposed
+  // a real bug: the server's native-engine path could return a stale or
+  // malformed move from its UCI output for exactly this edge case, which
+  // then got highlighted on the board as if it were a real suggestion.
+  if (analysisGame.game_over && analysisGame.game_over()) {
+    setAnalysisStatus(analysisGame.in_checkmate() ? '♚ Checkmate — no moves to suggest.' : 'Game over — no moves to suggest.');
+    var wrap0 = document.getElementById('candidates-wrap');
+    if (wrap0) wrap0.classList.remove('visible');
+    document.getElementById('btn-coach').disabled = true;
+    return;
+  }
+
+  var fen = analysisGame.fen();
+  setAnalysisStatus('⏳ Engine analysing...');
+  document.getElementById('btn-coach').disabled = true;
+
+  // Clear previous results
+  var pvEl  = document.getElementById('a-pv-line');
+  var wrap  = document.getElementById('candidates-wrap');
+  var list  = document.getElementById('candidates-list');
+  if (pvEl)  { pvEl.textContent = ''; pvEl.style.display = 'none'; }
+  if (wrap)  wrap.classList.remove('visible');
+  if (list)  list.innerHTML = '';
+
+  var wasmEng = _ensureWasmEngine();
+  var analysisActive = true;
+  var infoLines      = {};        // multipv index → latest line
+  var bestMoveInfo   = null;      // best move from deepest info line
+  var finalRealPv    = [];        // real, full PV from the one-time pv_final message
+
+  // ─── Live info handler — fires on every depth completion ──────────────────
+  function onInfo(msg) {
+    if (!analysisActive) return;
+
+    if (msg.type === 'pv_final') {
+      // The real, full multi-move PV, sent exactly once per multiPV line
+      // after the search genuinely finishes. Updates that line's candidate
+      // row in place and re-renders — extending the SAME live-updating
+      // rows with each one's complete continuation, matching the original
+      // design where the candidate list updates as the engine finds more,
+      // rather than popping up a separate display once the search is done.
+      // For every line, the cp/mate here is the SAME score the main
+      // search already vetted during its own multiPV pass (not a
+      // recomputed one) — the scratch mini-search that extends secondary
+      // lines' continuations shares a global board-history array with the
+      // main search that just ran, and its own return value turned out
+      // not to be trustworthy standalone (confirmed live: it was
+      // producing "+0.00" on a position that was nowhere near equal). So
+      // it's used only for its side effect of extending the PV; the
+      // engine always reports the already-vetted score alongside it.
+      var mpv = msg.multipv || 1;
+      var pv  = msg.pvLine || [];
+      if (mpv === 1) finalRealPv = pv;  // line 1 specifically feeds the cached result / Coach Me
+      if (pv.length && infoLines[mpv]) {
+        infoLines[mpv].pvLine = pv;
+        infoLines[mpv].cp     = msg.cp;
+        infoLines[mpv].mate   = msg.mate;
+        renderCandidateRows(fen);
+      }
+      return;
+    }
+
+    var depth  = msg.depth;
+    var pvMove = msg.pv;
+    var pvLine = msg.pvLine || (pvMove ? [pvMove] : []);
+    var mpv    = msg.multipv || 1;
+
+    if (mpv === 1 && pvMove) bestMoveInfo = pvMove;
+    infoLines[mpv] = { depth: depth, cp: msg.cp, mate: msg.mate, pvLine: pvLine, pvMove: pvMove };
+
+    // Live depth feedback in the main status line — with a 30s budget now
+    // in play (up from the old flat 5s), it matters more that progress is
+    // visibly moving, not just a static "analysing..." message the whole
+    // time. Only updates for the primary line (mpv 1) to avoid the status
+    // line flickering between different lines' depths.
+    if (mpv === 1 && depth) {
+      setAnalysisStatus('<span class="spinner"></span> Analysing... (depth ' + depth + ')');
+    }
+
+    // Candidate moves panel — one row per multipv line, Lichess style
+    renderCandidateRows(fen);
+
+    // Update status bar — just depth, quietly
+    if (Object.keys(infoLines).length > 0) {
+      var topLine = infoLines[1] || {};
+      setAnalysisStatus('Depth ' + depth + '  ·  ' + formatEval(topLine.cp, topLine.mate));
+    }
+  }
+
+  // Renders the candidate-moves panel from the current infoLines state.
+  // Factored out so the final, real PV (from the one-time pv_final
+  // message) can trigger the exact same rendering the live per-depth
+  // updates already use — extending the SAME rows in place with the
+  // complete continuation, rather than showing it in a separate box. This
+  // is what makes "the moves update as the engine finds them" extend
+  // naturally to "...and the final update fills in the real full line."
+  function renderCandidateRows(fen) {
+    var keys = Object.keys(infoLines).map(Number).sort(function(a,b){return a-b;});
+    if (keys.length > 0 && list && wrap) {
+      wrap.classList.add('visible');
+      list.innerHTML = '';
+      keys.forEach(function(k) {
+        var ln = infoLines[k];
+        var ev = formatEval(ln.cp, ln.mate);
+
+        // Translate full PV to SAN
+        var sanArr = pvLineToSan(fen, ln.pvLine || (ln.pvMove ? [ln.pvMove] : []));
+
+        // Build move number notation: "1. e4 e5 2. Nf3..."
+        var moveParts = sanArrToMoveNotation(sanArr, analysisGame);
+
+        var row = document.createElement('div');
+        row.className = 'candidate-row';
+        row.innerHTML =
+          '<span class="candidate-eval">' + ev + '</span>' +
+          '<span class="candidate-move">' + moveParts.join(' ') + '</span>' +
+          '<span class="candidate-depth">d' + ln.depth + '</span>';
+        list.appendChild(row);
+      });
+    }
+  }
+
+  // ─── Final result handler ─────────────────────────────────────────────────
+  function onDone(uciMove) {
+    analysisActive = false;
+    if (wasmEng) wasmEng._analysisInfoHandler = null;
+
+    var finalMove = bestMoveInfo || uciMove;
+    if (!finalMove) { fallbackToServer(); return; }
+
+    highlightBestMove(finalMove.slice(0,2), finalMove.slice(2,4));
+
+    var lastLine  = infoLines[1] || {};
+    var evalPawns = (lastLine.cp != null && !isNaN(lastLine.cp)) ? lastLine.cp / 100 : null;
+    updateEvalBar(evalPawns || 0);
+    var evalStr = formatEval(lastLine.cp, lastLine.mate);
+    if (lastLine.mate != null && !isNaN(lastLine.mate)) updateEvalBar(lastLine.mate > 0 ? 100 : -100);
+
+    // Cache result so Coach Me can reuse it without re-running engine.
+    // Includes the full PV (continuation line), not just the single best
+    // move — without this, Coach Me could only ever describe the opening
+    // move of a forced sequence and had to admit it couldn't confirm the
+    // actual mating line, even when the engine had already found and
+    // displayed the full continuation right there in the candidates list.
+    // finalRealPv comes from the one-time pv_final message — falls back to
+    // the cheap single-move PV only if that message somehow never arrived.
+    var realPvUci = finalRealPv.length ? finalRealPv : (lastLine.pvLine || (finalMove ? [finalMove] : []));
+    lastAnalysisResult = { fen: fen, bestMove: finalMove, evalCp: evalCpApprox(lastLine.cp, lastLine.mate), pv: realPvUci };
+
+    // Snapshot every candidate line's real PV (not just the top one — each
+    // line index gets its own real continuation from the pv_final handler)
+    // so a follow-up move can be checked against ALL of them, not just the
+    // engine's single top choice.
+    var snapshotLines = [];
+    Object.keys(infoLines).forEach(function(k) {
+      var ln = infoLines[k];
+      if (ln && ln.pvLine && ln.pvLine.length) {
+        snapshotLines.push({ pvLine: ln.pvLine, cp: ln.cp, mate: ln.mate });
+      }
+    });
+    lastCandidateLines = { fen: fen, lines: snapshotLines };
+
+    setAnalysisStatus('Eval: ' + evalStr + '  ·  Use Coach Me for explanation.');
+    document.getElementById('btn-coach').disabled = false;
+  }
+
+  // ─── Server fallback ──────────────────────────────────────────────────────
+  function fallbackToServer() {
+    analysisActive = false;
+    fetch(API_BASE + '/analyse-position', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fen: fen })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.detail) { setAnalysisStatus('Engine error: ' + data.detail); document.getElementById('btn-coach').disabled = false; return; }
+      if (data.best_move) highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
+      updateEvalBar(data.eval_pawns || 0);
+      var ev = data.mate_in != null
+        ? (data.mate_in > 0 ? '#' + Math.abs(data.mate_in) : '-#' + Math.abs(data.mate_in))
+        : (data.eval_pawns >= 0 ? '+' : '') + (data.eval_pawns || 0).toFixed(2);
+      setAnalysisStatus('Eval: ' + ev);
+
+      // Render in candidate rows — same style as WASM live output
+      if (data.best_move && data.pv_san) {
+        var wrap2 = document.getElementById('candidates-wrap');
+        var list2 = document.getElementById('candidates-list');
+        if (wrap2 && list2) {
+          wrap2.classList.add('visible');
+          list2.innerHTML = '';
+          var row = document.createElement('div');
+          row.className = 'candidate-row';
+          // Build move number notation
+          var startMn = analysisGame.moveNumber ? analysisGame.moveNumber() : 1;
+          var isBlk   = analysisGame.turn() === 'b';
+          var pp = [];
+          if (isBlk && data.pv_san.length > 0) pp.push(startMn + '...');
+          for (var pi = 0; pi < data.pv_san.length; pi++) {
+            var gm = pi + (isBlk ? 1 : 0);
+            if (gm % 2 === 0) pp.push((startMn + Math.floor(gm/2)) + '.');
+            pp.push(data.pv_san[pi]);
+          }
+          row.innerHTML =
+            '<span class="candidate-eval">' + ev + '</span>' +
+            '<span class="candidate-move">' + pp.join(' ') + '</span>';
+          list2.appendChild(row);
+        }
+      }
+      renderCandidates(data.candidates);
+      document.getElementById('btn-coach').disabled = false;
+    })
+    .catch(function() { setAnalysisStatus('Engine error — is the server running?'); document.getElementById('btn-coach').disabled = false; });
+  }
+
+  // ─── Dispatch ─────────────────────────────────────────────────────────────
+  // Never fall back to the server-side engine just because WASM hasn't
+  // finished loading yet — always wait for the real engine instead. The
+  // analysis tab has no clock and no opponent; there is no time pressure
+  // that justifies settling for a weaker result. This also removes the
+  // server fallback's UCI-output parsing as a code path entirely for this
+  // feature, which was the only confirmed source of the illegal-move bug —
+  // the compiled engine itself was never the problem.
+  if (wasmEng && _wasmReady()) {
+    wasmEng._analysisInfoHandler = onInfo;
+    var analyseCall = typeof wasmEng.analyse === 'function'
+      ? wasmEng.analyse(fen, [], ANALYSIS_BUDGET_MS, 3)
+      : wasmEng.bestMove(fen, [], ANALYSIS_BUDGET_MS);
+    analyseCall
+      .then(function(move) { onDone(move); })
+      .catch(function(e) {
+        console.warn('[analysis] engine call failed, retrying shortly:', e);
+        setAnalysisStatus('⏳ Engine hiccup — retrying...');
+        setTimeout(analysePosition, 1000);
+      });
+  } else if (window._wasmSupported) {
+    // Engine is supported but not ready yet — whether the worker hasn't
+    // finished starting, or the SenkabalaEngine script is still loading,
+    // the answer is the same either way: wait and retry. No fallback.
+    setAnalysisStatus('⏳ Loading engine...');
+    if (!wasmEng) {
+      setTimeout(analysePosition, 250);
+    } else {
+      wasmEng.ready()
+        .then(function() { analysePosition(); })
+        .catch(function(e) {
+          console.warn('[analysis] engine failed to start, retrying:', e);
+          setTimeout(analysePosition, 500);
+        });
+    }
+  } else {
+    // WASM genuinely unsupported on this browser — a real, permanent
+    // limitation, not a loading race. The server fallback is appropriate
+    // here since there is no real engine to ever wait for.
+    fallbackToServer();
+  }
+}
+
+
+function getCoaching() {
+  if (!analysisCg) initAnalysisBoard();
+
+  if (!currentUser) {
+    setAnalysisStatus('Sign in to use coaching.');
+    return;
+  }
+
+  var fen = analysisGame.fen();
+  setAnalysisStatus('<span class="spinner"></span> Coach thinking...');
+  document.getElementById('btn-coach').disabled = true;
+  resetCoachCard();
+
+  var wasmEng = _ensureWasmEngine();
+
+  function requestCoach(bestMove, evalPawns, pv) {
+    // Send to server — if WASM provided best_move + eval_pawns, server skips
+    // the engine pool entirely and goes straight to Claude AI explanation.
+    // pv (the full continuation, not just the first move) lets the coach
+    // actually describe the forcing sequence instead of only confirming
+    // the opening move and admitting it has no visibility into the rest.
+    var body = {
+      fen: fen,
+      user_id: currentUser.id,
+      think_time: 1.0,
+    };
+    if (bestMove) { body.best_move = bestMove; body.eval_pawns = evalPawns; }
+    if (pv && pv.length > 0) { body.pv = pv; }
+
+    fetch(API_BASE + '/coach-free', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.detail) {
+        setAnalysisStatus('⚠ ' + data.detail);
+        document.getElementById('btn-coach').disabled = false;
+        return;
+      }
+      if (data.uses_remaining !== undefined) {
+        var usageEl = document.getElementById('coach-usage-label');
+        if (usageEl) usageEl.textContent = data.uses_remaining + ' coach uses left today';
+      }
+      if (data.best_move) {
+        highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
+      }
+      updateEvalBar(data.eval_pawns || evalPawns || 0);
+      parseAndRenderCoaching(data.coaching, data.best_move || bestMove, data.eval_pawns || evalPawns);
+      setAnalysisStatus('Analysis complete.');
+      document.getElementById('btn-coach').disabled = false;
+    })
+    .catch(function() {
+      setAnalysisStatus('Coach unavailable — try again.');
+      document.getElementById('btn-coach').disabled = false;
+    });
+  }
+
+  if (wasmEng && _wasmReady()) {
+    // If analysis was just run on this exact position, reuse its result —
+    // no point running the engine again for the same FEN
+    if (lastAnalysisResult && lastAnalysisResult.fen === fen) {
+      requestCoach(lastAnalysisResult.bestMove, lastAnalysisResult.evalCp / 100, lastAnalysisResult.pv);
+      return;
+    }
+    // Otherwise run engine at full analysis strength (no random chance, full time).
+    // Use analyse() (multi-PV) rather than bestMove() (single move) so the
+    // coach has the real continuation to describe, not just the first move —
+    // this matters most exactly when it's needed most: a forced mate or a
+    // long forcing sequence, where "what happens after this move" is the
+    // whole point of asking for an explanation.
+    var coachPv = [];
+    var coachInfoHandler = function(msg) {
+      if (msg.type === 'pv_final' && msg.pvLine) { coachPv = msg.pvLine; return; }
+      if (msg.multipv === 1 && msg.pvLine) coachPv = msg.pvLine;
+    };
+    wasmEng._analysisInfoHandler = coachInfoHandler;
+    var coachCall = typeof wasmEng.analyse === 'function'
+      ? wasmEng.analyse(fen, [], ANALYSIS_BUDGET_MS, 1)
+      : wasmEng.bestMove(fen, [], ANALYSIS_BUDGET_MS);
+    coachCall
+      .then(function(uciMove) {
+        if (!uciMove) { requestCoach(null, null, null); return; }
+        requestCoach(uciMove, 0.0, coachPv.length ? coachPv : [uciMove]);
+      })
+      .catch(function() {
+        requestCoach(null, null, null);
+      });
+  } else if (wasmEng) {
+    setAnalysisStatus('<span class="spinner"></span> Loading engine...');
+    wasmEng.ready().then(function() {
+      getCoaching();
+    }).catch(function() {
+      requestCoach(null, null);
+    });
+  } else {
+    // No WASM — full server path
+    requestCoach(null, null);
+  }
+}
+
+function parseAndRenderCoaching(text, bestMove, evalPawns) {
+  // Extract sections from formatted coach response
+  var sections = { assessment: '', bestmove: '', plan: '', tip: '' };
+
+  var assessMatch = text.match(/ASSESSMENT:\s*(.+?)(?=BEST MOVE:|CONTINUATION:|PLAN:|TIP:|$)/si);
+  var bestMatch   = text.match(/BEST MOVE:\s*(.+?)(?=CONTINUATION:|PLAN:|TIP:|$)/si);
+  var contMatch   = text.match(/CONTINUATION:\s*(.+?)(?=PLAN:|TIP:|$)/si);
+  var planMatch   = text.match(/PLAN:\s*(.+?)(?=TIP:|$)/si);
+  var tipMatch    = text.match(/TIP:\s*(.+?)$/si);
+
+  if (assessMatch) sections.assessment    = assessMatch[1].trim();
+  if (bestMatch)   sections.bestmove      = bestMatch[1].trim();
+  if (contMatch)   sections.continuation  = contMatch[1].trim();
+  if (planMatch)   sections.plan          = planMatch[1].trim();
+  if (tipMatch)    sections.tip           = tipMatch[1].trim();
+
+  // Fallback: show raw text if parsing failed
+  if (!sections.assessment && !sections.bestmove) {
+    sections.assessment = text;
+  }
+
+  // Add eval to assessment
+  if (evalPawns !== undefined) {
+    var sign = evalPawns >= 0 ? '+' : '';
+    var evalStr = ' [Eval: ' + sign + evalPawns + ']';
+    sections.assessment = (sections.assessment || '') + evalStr;
+  }
+
+  document.getElementById('c-assessment').textContent = sections.assessment || '—';
+  document.getElementById('c-bestmove').textContent   = sections.bestmove   || (bestMove || '—');
+  // Continuation — show if present
+  var contEl  = document.getElementById('c-continuation');
+  var contRow = document.getElementById('c-continuation-row');
+  if (contEl && sections.continuation) {
+    contEl.textContent  = sections.continuation;
+    if (contRow) contRow.style.display = '';
+  } else if (contRow) {
+    contRow.style.display = 'none';
+  }
+  document.getElementById('c-plan').textContent       = sections.plan       || '—';
+  document.getElementById('c-tip').textContent        = sections.tip        || '—';
+
+  document.getElementById('coach-card').classList.add('visible');
+}
+
+function updateEvalBar(evalPawns) {
+  // Convert eval to 0-100 range. +5 pawns = ~90%, -5 = ~10%
+  var clamped = Math.max(-5, Math.min(5, evalPawns || 0));
+  var pct = 50 + (clamped / 5) * 40;
+  document.getElementById('eval-bar').style.width = pct + '%';
+  var sign = evalPawns >= 0 ? '+' : '';
+  document.getElementById('eval-label').textContent =
+    'Eval: ' + sign + (evalPawns || 0).toFixed(2);
+}
+
+function highlightBestMove(from, to) {
+  clearBestMoveHighlight();
+  if (analysisCg) analysisCg.setShapes([{ orig: from, dest: to, brush: 'green' }]);
+}
+
+function clearBestMoveHighlight() {
+  // chessground handles highlights natively
+}
+
+function resetCoachCard() {
+  document.getElementById('coach-card').classList.remove('visible');
+  ['c-assessment','c-bestmove','c-continuation','c-plan','c-tip'].forEach(function(id) {
+    document.getElementById(id).textContent = '—';
+  });
+  document.getElementById('eval-label').textContent = '—';
+  var pvElR = document.getElementById('a-pv-line');
+  if (pvElR) pvElR.style.display = 'none';
+  document.getElementById('eval-bar').style.width = '50%';
+}
+
+function resetAnalysis() {
+  document.getElementById('fen-input').value = '';
+  analysisGame = new Chess();
+  analysisCg && analysisCg.set({ fen: 'start' });
+  setAnalysisStatus('Paste a FEN and press Load, or click Analyse.');
+  resetCoachCard();
+  clearBestMoveHighlight();
+}
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -2289,38 +2809,6 @@ async function signOut() {
   clearUser();
 }
 
-function goToHistory() {
-  window.location.href = '/history';
-}
-
-// ── Game saving ───────────────────────────────────────────────
-async function saveGame(pgn, result, playerColor) {
-  if (!currentUser || !sb) return; // ← add !sb here
-
-  const { error } = await sb.from('games').insert({
-    user_id:      currentUser.id,
-    pgn:          pgn,
-    result:       result,
-    player_color: playerColor,
-    opponent:     'engine_lvl_' + currentDifficulty,
-      player_elo_before: null,
-      player_elo_after:  null
-  });
-
-  if (error) console.error('Game save failed:', error.message);
-  else console.log('Game saved.');
-}
-
-// ── PGN builder from chess.js game ───────────────────────────
-function buildPGN(chessGame, result) {
-  // Rebuild PGN from tracked move history
-  var pgn = '';
-  moveHistory.forEach(function(san, i) {
-    if (i % 2 === 0) pgn += (Math.floor(i/2) + 1) + '. ';
-    pgn += san + ' ';
-  });
-  return pgn.trim();
-}
 
 // ── Init auth ─────────────────────────────────────────────────
 if (sb) {
@@ -2356,29 +2844,53 @@ function closeMenuThenAuth() {
   setTimeout(openAuth, 50);
 }
 (function checkUrlParams() {
+  // The board used to only initialize when the user clicked the Analysis
+  // tab (inside switchTab()). Now that this page IS the analysis view,
+  // it needs to happen unconditionally on load. Safe to call again below
+  // if a FEN param also needs to apply — initAnalysisBoard() tears down
+  // any existing instance first.
+  initAnalysisBoard();
+
   const params = new URLSearchParams(window.location.search);
 
-  // Auto-start from matchmaking redirect: /play?autostart=white&difficulty=5
+  // Bot play now lives on its own page — forward there instead of
+  // handling it locally.
   const autoColor = params.get('autostart');
-  const autoDiff  = parseInt(params.get('difficulty') || '5', 10);
   if (autoColor === 'white' || autoColor === 'black') {
-    currentDifficulty = autoDiff;
-    // Wait for WASM to be ready then start
-    function tryAutoStart() {
-      var diffSel = document.getElementById('difficulty-select');
-      if (diffSel) diffSel.value = autoDiff;
-      startGame(autoColor);
-    }
-    // Small delay to let page finish rendering
-    setTimeout(tryAutoStart, 300);
+    window.location.href = '/play' + window.location.search;
     return;
   }
 
   const fen = params.get('analyse');
   if (!fen) return;
-  // Analysis now lives on its own page — forward the FEN there instead of
-  // handling it locally.
-  window.location.href = '/analysis?analyse=' + fen;
+
+  const decodedFen = decodeURIComponent(fen);
+  const test = new Chess();
+  if (!test.load(decodedFen)) {
+    console.warn('[analyse] Invalid FEN from URL:', decodedFen);
+    return;
+  }
+
+  // Set the game state now so it's ready when the board renders
+  analysisGame = test;
+  document.getElementById('fen-input').value = decodedFen;
+
+  // initAnalysisBoard sets fen:'start' internally — we need to override after it renders
+  // Use a polling approach identical to history board: keep checking until analysisCg exists
+  initAnalysisBoard();
+
+  function applyFen() {
+    if (!analysisCg) { requestAnimationFrame(applyFen); return; }
+    // Also check board has non-zero dimensions
+    const el = document.getElementById('analysis-board');
+    if (el && el.getBoundingClientRect().width < 10) { requestAnimationFrame(applyFen); return; }
+    analysisCg.set({ fen: decodedFen });
+    analysisCg.redrawAll();
+    document.getElementById('analysis-status').textContent = 'Position loaded. Press Analyse or Coach Me.';
+    scheduleAutoAnalyse();
+  }
+  // Start polling after one frame (gives initAnalysisBoard's rAF a chance to fire first)
+  requestAnimationFrame(() => requestAnimationFrame(applyFen));
 })();
 </script>
 
@@ -2427,35 +2939,6 @@ function closeMenuThenAuth() {
   </div>
 
 <!-- Promotion picker -->
-<div class="promo-overlay" id="promo-overlay">
-  <div class="promo-box">
-    <div class="promo-title">Promote pawn to</div>
-    <div class="promo-pieces" id="promo-pieces"></div>
-  </div>
-</div>
-
-<!-- Game-over overlay -->
-<div class="gameover-overlay" id="gameover-overlay" onclick="closeGameOver()">
-  <div class="gameover-box" onclick="event.stopPropagation()">
-    <button onclick="closeGameOver()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:#8d8d8d;font-size:18px;cursor:pointer;line-height:1;" title="Close">✕</button>
-    <div class="gameover-emoji" id="gameover-emoji">♟</div>
-    <div class="gameover-title" id="gameover-title">Game Over</div>
-    <div class="gameover-sub" id="gameover-sub"></div>
-    <!-- Guest nudge — hidden for signed-in users, shown contextually for guests -->
-    <div id="gameover-nudge" style="display:none;margin:0 0 18px;padding:12px 14px;
-         background:#0a1a0f;border:1px solid #4a9d7e22;border-radius:4px;text-align:left;">
-      <div id="gameover-nudge-msg" style="font-size:12px;color:#9d9d9d;margin-bottom:10px;line-height:1.6;"></div>
-      <button onclick="closeGameOver(); openAuth();" style="background:#4a9d7e;color:#000;border:none;
-              padding:8px 18px;border-radius:3px;font-size:12px;font-weight:700;
-              cursor:pointer;letter-spacing:0.08em;text-transform:uppercase;width:100%;">
-        Create Free Account →
-      </button>
-    </div>
-    <button class="gameover-btn" onclick="closeGameOver(); resetGame()">New Game</button>
-    <button class="gameover-btn secondary" onclick="closeGameOver()">Review</button>
-  </div>
-</div>
-
 <script>
 // ── Presence ping (keeps "players online" counter accurate on landing page) ──
 (function() {

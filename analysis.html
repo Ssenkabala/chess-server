@@ -1582,6 +1582,16 @@ function _wasmReady() {
 // genuinely enough again, not just tolerable.
 var ANALYSIS_BUDGET_MS = 8000;
 
+// Bumped once per analysePosition() call — lets every callback (live info
+// updates, the final result, and the retry-on-failure path) check whether
+// it's still the most recent request before acting on anything. Without
+// this, exploring variations quickly could leave an older, superseded
+// analysis call's results (or its retry loop) still writing to the UI
+// after a newer move had already moved the position on — showing stale
+// candidate moves for a position already left behind, and in the retry
+// case, looping forever on a request nothing still needs.
+var _analysisGen = 0;
+
 var analysisGame = new Chess();
 // Move-navigation state — mirrors play_multiplayer.html's fenHistory/viewingMove
 // pattern. analysisFenHistory[0] is always the starting position of whatever
@@ -2191,6 +2201,7 @@ function analysePosition() {
   }
 
   var fen = analysisGame.fen();
+  var myGen = ++_analysisGen;  // this call's identity — see the comment on _analysisGen above
   setAnalysisStatus('⏳ Engine analysing...');
   document.getElementById('btn-coach').disabled = true;
 
@@ -2210,7 +2221,7 @@ function analysePosition() {
 
   // ─── Live info handler — fires on every depth completion ──────────────────
   function onInfo(msg) {
-    if (!analysisActive) return;
+    if (!analysisActive || myGen !== _analysisGen) return;
 
     if (msg.type === 'pv_final') {
       // The real, full multi-move PV, sent exactly once per multiPV line
@@ -2302,6 +2313,7 @@ function analysePosition() {
 
   // ─── Final result handler ─────────────────────────────────────────────────
   function onDone(uciMove) {
+    if (myGen !== _analysisGen) return;  // superseded — a newer call owns the UI and the handler now
     analysisActive = false;
     if (wasmEng) wasmEng._analysisInfoHandler = null;
 
@@ -2354,6 +2366,7 @@ function analysePosition() {
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
+      if (myGen !== _analysisGen) return;  // superseded — don't render a stale fallback result
       if (data.detail) { setAnalysisStatus('Engine error: ' + data.detail); document.getElementById('btn-coach').disabled = false; return; }
       if (data.best_move) highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
       updateEvalBar(data.eval_pawns || 0);
@@ -2401,39 +2414,72 @@ function analysePosition() {
   // server fallback's UCI-output parsing as a code path entirely for this
   // feature, which was the only confirmed source of the illegal-move bug —
   // the compiled engine itself was never the problem.
-  if (wasmEng && _wasmReady()) {
-    wasmEng._analysisInfoHandler = onInfo;
-    var analyseCall = typeof wasmEng.analyse === 'function'
-      ? wasmEng.analyse(fen, [], ANALYSIS_BUDGET_MS, 3)
-      : wasmEng.bestMove(fen, [], ANALYSIS_BUDGET_MS);
-    analyseCall
-      .then(function(move) { onDone(move); })
-      .catch(function(e) {
-        console.warn('[analysis] engine call failed, retrying shortly:', e);
-        setAnalysisStatus('⏳ Engine hiccup — retrying...');
-        setTimeout(analysePosition, 1000);
-      });
-  } else if (window._wasmSupported) {
-    // Engine is supported but not ready yet — whether the worker hasn't
-    // finished starting, or the SenkabalaEngine script is still loading,
-    // the answer is the same either way: wait and retry. No fallback.
-    setAnalysisStatus('⏳ Loading engine...');
-    if (!wasmEng) {
-      setTimeout(analysePosition, 250);
-    } else {
-      wasmEng.ready()
-        .then(function() { analysePosition(); })
+  //
+  // attemptEngine() is a dedicated retry loop (not a recursive call back
+  // into analysePosition itself) specifically so retryCount survives each
+  // attempt instead of resetting to 0 every time — a plain
+  // setTimeout(analysePosition, ...) retry would re-enter the whole
+  // function fresh and could never count past one attempt. Every retry
+  // also re-checks myGen first: if the user has since moved on to a
+  // different position, this quietly stops instead of retrying (or ever
+  // rendering) something nobody's looking at anymore — this is what was
+  // producing the endless "Engine hiccup" loop and, separately, stale
+  // candidate moves for a position already left behind.
+  var MAX_ENGINE_RETRIES = 4;
+  function attemptEngine(retryCount) {
+    if (myGen !== _analysisGen) return;  // superseded — nothing left to do here
+    if (wasmEng && _wasmReady()) {
+      wasmEng._analysisInfoHandler = onInfo;
+      var analyseCall = typeof wasmEng.analyse === 'function'
+        ? wasmEng.analyse(fen, [], ANALYSIS_BUDGET_MS, 3)
+        : wasmEng.bestMove(fen, [], ANALYSIS_BUDGET_MS);
+      analyseCall
+        .then(function(move) { onDone(move); })
         .catch(function(e) {
-          console.warn('[analysis] engine failed to start, retrying:', e);
-          setTimeout(analysePosition, 500);
+          if (myGen !== _analysisGen) return;  // don't retry a request nothing needs anymore
+          console.warn('[analysis] engine call failed (attempt ' + (retryCount+1) + '/' + MAX_ENGINE_RETRIES + '):', e);
+          if (retryCount + 1 >= MAX_ENGINE_RETRIES) {
+            setAnalysisStatus('⚠ Engine unavailable — try reloading the page.');
+            document.getElementById('btn-coach').disabled = false;
+            return;
+          }
+          setAnalysisStatus('⏳ Engine hiccup — retrying...');
+          setTimeout(function() { attemptEngine(retryCount + 1); }, 1000);
         });
+    } else if (window._wasmSupported) {
+      // Engine is supported but not ready yet — whether the worker hasn't
+      // finished starting, or the SenkabalaEngine script is still loading,
+      // the answer is the same either way: wait and retry. No fallback.
+      setAnalysisStatus('⏳ Loading engine...');
+      if (!wasmEng) {
+        if (retryCount + 1 >= MAX_ENGINE_RETRIES) {
+          setAnalysisStatus('⚠ Engine unavailable — try reloading the page.');
+          document.getElementById('btn-coach').disabled = false;
+          return;
+        }
+        setTimeout(function() { attemptEngine(retryCount + 1); }, 250);
+      } else {
+        wasmEng.ready()
+          .then(function() { if (myGen === _analysisGen) attemptEngine(0); })
+          .catch(function(e) {
+            if (myGen !== _analysisGen) return;
+            console.warn('[analysis] engine failed to start (attempt ' + (retryCount+1) + '/' + MAX_ENGINE_RETRIES + '):', e);
+            if (retryCount + 1 >= MAX_ENGINE_RETRIES) {
+              setAnalysisStatus('⚠ Engine unavailable — try reloading the page.');
+              document.getElementById('btn-coach').disabled = false;
+              return;
+            }
+            setTimeout(function() { attemptEngine(retryCount + 1); }, 500);
+          });
+      }
+    } else {
+      // WASM genuinely unsupported on this browser — a real, permanent
+      // limitation, not a loading race. The server fallback is appropriate
+      // here since there is no real engine to ever wait for.
+      fallbackToServer();
     }
-  } else {
-    // WASM genuinely unsupported on this browser — a real, permanent
-    // limitation, not a loading race. The server fallback is appropriate
-    // here since there is no real engine to ever wait for.
-    fallbackToServer();
   }
+  attemptEngine(0);
 }
 
 
@@ -2644,10 +2690,10 @@ let authMode    = 'signin'; // 'signin' | 'signup'
 // ── User state ────────────────────────────────────────────────
 function setUser(user) {
   currentUser = user;
-  document.getElementById('btn-login').style.display    = 'none';
-  document.getElementById('btn-signout').style.display  = 'inline-block';
-  document.getElementById('btn-history').style.display  = 'inline-block';
-  document.getElementById('btn-profile').style.display  = 'inline-block';
+  ['btn-login','btn-signout','btn-history','btn-profile'].forEach(function(id, i) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = i === 0 ? 'none' : 'inline-block';
+  });
   var siNav = document.getElementById('nav-signin-idx');
   var soNav = document.getElementById('nav-signout-idx');
   var siMob = document.getElementById('mob-signin-idx');
@@ -2671,13 +2717,14 @@ async function loadProfile(user) {
     .eq('user_id', user.id)
     .single();
 
+  var userInfoEl = document.getElementById('user-info');  // doesn't exist on this page — guarded
   if (data) {
-    document.getElementById('user-info').innerHTML =
+    if (userInfoEl) userInfoEl.innerHTML =
       '<span style="color:#4a9d7e">' + data.username + '</span>' +
       ' <span style="color:#444;font-size:11px;">' + data.elo + ' ELO</span>';
   } else {
     // No profile yet — show username modal
-    document.getElementById('user-info').innerHTML = 'Signed in';
+    if (userInfoEl) userInfoEl.innerHTML = 'Signed in';
     document.getElementById('username-overlay').classList.add('active');
     document.getElementById('username-input').focus();
   }
@@ -2717,19 +2764,21 @@ async function submitUsername() {
   }
 
   document.getElementById('username-overlay').classList.remove('active');
-  document.getElementById('user-info').innerHTML =
+  var userInfoEl2 = document.getElementById('user-info');
+  if (userInfoEl2) userInfoEl2.innerHTML =
     '<span style="color:#4a9d7e">' + val + '</span>' +
     ' <span style="color:#444;font-size:11px;">1500 ELO</span>';
 }
 
 function clearUser() {
   currentUser = null;
-  document.getElementById('user-info').innerHTML = 'Not signed in';
+  var userInfoEl3 = document.getElementById('user-info');
+  if (userInfoEl3) userInfoEl3.innerHTML = 'Not signed in';
   // Body buttons stay hidden — sign in is in the top nav now
-  document.getElementById('btn-login').style.display    = 'none';
-  document.getElementById('btn-signout').style.display  = 'none';
-  document.getElementById('btn-history').style.display  = 'none';
-  document.getElementById('btn-profile').style.display  = 'none';
+  ['btn-login','btn-signout','btn-history','btn-profile'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
   var siNav = document.getElementById('nav-signin-idx');
   var soNav = document.getElementById('nav-signout-idx');
   var siMob = document.getElementById('mob-signin-idx');

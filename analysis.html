@@ -542,6 +542,73 @@ global.Chessground = Nr;
     #fen-input:focus { border-color: #4a9d7e55; }
     #fen-input::placeholder { color: #444; }
 
+    /* ── Board Editor ── */
+    .board-editor-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+      z-index: 600; align-items: center; justify-content: center; padding: 16px;
+    }
+    .board-editor-overlay.active { display: flex; }
+    .board-editor-box {
+      background: #262624; border: 1px solid #c9a76c; border-radius: 4px;
+      padding: 20px; width: 100%; max-width: 420px; max-height: 92vh; overflow-y: auto;
+    }
+    .board-editor-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 14px; font-size: 15px; letter-spacing: 0.06em; color: #ece6da;
+    }
+    .board-editor-close { cursor: pointer; color: #8d8d8d; font-size: 18px; line-height: 1; }
+    .board-editor-close:hover { color: #ece6da; }
+
+    .editor-palette {
+      display: flex; justify-content: center; gap: 4px; margin: 6px 0;
+      background: #1a1a18; border: 1px solid #33312d; border-radius: 3px; padding: 6px;
+    }
+    .editor-palette-piece, .editor-palette-trash {
+      width: 13%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+      font-size: 24px; cursor: pointer; border-radius: 3px; background: #262624;
+      border: 1px solid transparent; user-select: none;
+    }
+    .editor-palette-piece.armed, .editor-palette-trash.armed {
+      border-color: #4a9d7e; background: #4a9d7e22;
+    }
+    .editor-palette-piece:active, .editor-palette-trash:active { background: #33312d; }
+    .editor-palette-trash { color: #ff6b6b; font-size: 18px; }
+
+    .editor-board {
+      display: grid; grid-template-columns: repeat(8, 1fr);
+      width: 100%; max-width: 360px; aspect-ratio: 1; margin: 8px auto;
+      border: 2px solid #33312d;
+    }
+    .editor-square {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 26px; cursor: pointer; user-select: none; aspect-ratio: 1;
+    }
+    .editor-square.light { background: #ecdab5; }
+    .editor-square.dark { background: #b58863; }
+    .editor-square .ep { color: #1a1a18; }   /* black pieces need dark glyphs on light square too — handled via color below */
+    .editor-square.piece-w { color: #f5f5f0; text-shadow: 0 0 1px #000, 0 0 2px #000; }
+    .editor-square.piece-b { color: #1a1a18; }
+
+    .editor-controls { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .editor-turn-toggle { display: flex; gap: 0; border: 1px solid #33312d; border-radius: 3px; overflow: hidden; }
+    .editor-turn-btn {
+      flex: 1; padding: 8px; background: #1a1a18; color: #8d8d8d; border: none;
+      font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
+    }
+    .editor-turn-btn.active { background: #4a9d7e22; color: #4a9d7e; }
+    .editor-quick-actions { display: flex; gap: 8px; }
+    .editor-quick-actions button {
+      flex: 1; padding: 8px 6px; background: transparent; border: 1px solid #33312d;
+      color: #8d8d8d; font-size: 11px; letter-spacing: 0.04em; border-radius: 3px; cursor: pointer;
+    }
+    .editor-quick-actions button:hover { border-color: #4a9d7e; color: #4a9d7e; }
+    .editor-load-btn {
+      width: 100%; padding: 11px; background: #4a9d7e; color: #0a0a0a; border: none;
+      border-radius: 3px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; cursor: pointer;
+    }
+    .editor-error { color: #ff6b6b; font-size: 12px; text-align: center; min-height: 16px; }
+
     /* API key row */
     .api-row {
       display: flex;
@@ -1295,6 +1362,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <div class="analysis-input-row">
       <input id="fen-input" type="text" name="chess-fen-notation" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Paste FEN  —  or leave blank for starting position" />
       <button onclick="loadFen()">Load</button>
+      <button onclick="openBoardEditor()" title="Set up a custom position visually">Edit Board</button>
     </div>
 
     <div id="analysis-status">Paste a FEN and press Load, or click Analyse.</div>
@@ -1889,6 +1957,168 @@ function loadFen() {
   analysisSanHistory = []; analysisAnnotations = {}; clearAnnotationPanel();
   analysisViewIndex  = -1;
   renderAnalysisMoveList();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BOARD EDITOR — visual position setup, converts to FEN and hands
+//  off to loadFen() for everything else (no duplicated state logic).
+// ═══════════════════════════════════════════════════════════════
+var editorState = {};   // square -> piece code, e.g. {e1:'wK', e8:'bK'}
+var editorTurn = 'w';
+var editorArmedTool = null;   // piece code like 'wP', or 'trash', or null
+
+var EDITOR_PIECES = ['K','Q','R','B','N','P'];
+var EDITOR_GLYPH = {
+  wK:'♔', wQ:'♕', wR:'♖', wB:'♗', wN:'♘', wP:'♙',
+  bK:'♚', bQ:'♛', bR:'♜', bB:'♝', bN:'♞', bP:'♟'
+};
+
+function editorFenToState(fen) {
+  var state = {};
+  var placement = fen.split(' ')[0];
+  var ranks = placement.split('/');
+  for (var r = 0; r < 8; r++) {
+    var rank = 8 - r;
+    var file = 0;
+    var chars = ranks[r].split('');
+    for (var i = 0; i < chars.length; i++) {
+      var c = chars[i];
+      if (/[1-8]/.test(c)) { file += parseInt(c, 10); continue; }
+      var square = String.fromCharCode(97 + file) + rank;
+      var color = c === c.toUpperCase() ? 'w' : 'b';
+      state[square] = color + c.toUpperCase();
+      file++;
+    }
+  }
+  return state;
+}
+
+function editorStateToFen() {
+  var rows = [];
+  for (var rank = 8; rank >= 1; rank--) {
+    var row = '', empty = 0;
+    for (var f = 0; f < 8; f++) {
+      var square = String.fromCharCode(97 + f) + rank;
+      var piece = editorState[square];
+      if (!piece) { empty++; continue; }
+      if (empty > 0) { row += empty; empty = 0; }
+      var letter = piece[1];
+      row += piece[0] === 'w' ? letter : letter.toLowerCase();
+    }
+    if (empty > 0) row += empty;
+    rows.push(row);
+  }
+  return rows.join('/') + ' ' + editorTurn + ' - - 0 1';
+}
+
+function openBoardEditor() {
+  // Start from whatever's currently loaded, so this is "tweak this
+  // position" by default rather than always starting from scratch.
+  var currentFen = analysisGame ? analysisGame.fen() : 'start';
+  editorState = currentFen === 'start'
+    ? editorFenToState('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR')
+    : editorFenToState(currentFen);
+  editorTurn = (analysisGame && analysisGame.turn) ? analysisGame.turn() : 'w';
+  editorArmedTool = null;
+  document.getElementById('editor-error').textContent = '';
+  editorRenderPalettes();
+  editorRenderBoard();
+  editorUpdateTurnButtons();
+  document.getElementById('board-editor-overlay').classList.add('active');
+}
+
+function closeBoardEditor() {
+  document.getElementById('board-editor-overlay').classList.remove('active');
+}
+
+function editorRenderPalettes() {
+  var black = document.getElementById('editor-palette-black');
+  var white = document.getElementById('editor-palette-white');
+  var blackHtml = '', whiteHtml = '';
+  EDITOR_PIECES.forEach(function(p) {
+    blackHtml += '<div class="editor-palette-piece" onclick="editorArm(\'b' + p + '\')" data-code="b' + p + '">' + EDITOR_GLYPH['b'+p] + '</div>';
+    whiteHtml += '<div class="editor-palette-piece" onclick="editorArm(\'w' + p + '\')" data-code="w' + p + '">' + EDITOR_GLYPH['w'+p] + '</div>';
+  });
+  blackHtml += '<div class="editor-palette-trash" onclick="editorArm(\'trash\')" data-code="trash">🗑</div>';
+  black.innerHTML = blackHtml;
+  white.innerHTML = whiteHtml;
+}
+
+function editorArm(code) {
+  editorArmedTool = code;
+  document.querySelectorAll('.editor-palette-piece, .editor-palette-trash').forEach(function(el) {
+    el.classList.toggle('armed', el.getAttribute('data-code') === editorArmedTool);
+  });
+}
+
+function editorRenderBoard() {
+  var board = document.getElementById('editor-board');
+  var html = '';
+  for (var rank = 8; rank >= 1; rank--) {
+    for (var f = 0; f < 8; f++) {
+      var square = String.fromCharCode(97 + f) + rank;
+      var isLight = (f + rank) % 2 === 1;
+      var piece = editorState[square];
+      var glyph = piece ? EDITOR_GLYPH[piece] : '';
+      var colorClass = piece ? (piece[0] === 'w' ? 'piece-w' : 'piece-b') : '';
+      html += '<div class="editor-square ' + (isLight ? 'light' : 'dark') + ' ' + colorClass +
+              '" onclick="editorSquareClick(\'' + square + '\')">' + glyph + '</div>';
+    }
+  }
+  board.innerHTML = html;
+}
+
+function editorSquareClick(square) {
+  if (editorArmedTool === null) return;
+  if (editorArmedTool === 'trash') {
+    delete editorState[square];
+  } else {
+    editorState[square] = editorArmedTool;
+  }
+  editorRenderBoard();
+}
+
+function editorSetTurn(color) {
+  editorTurn = color;
+  editorUpdateTurnButtons();
+}
+
+function editorUpdateTurnButtons() {
+  document.getElementById('editor-turn-w').classList.toggle('active', editorTurn === 'w');
+  document.getElementById('editor-turn-b').classList.toggle('active', editorTurn === 'b');
+}
+
+function editorClearBoard() {
+  editorState = {};
+  editorRenderBoard();
+}
+
+function editorStartingPosition() {
+  editorState = editorFenToState('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR');
+  editorTurn = 'w';
+  editorUpdateTurnButtons();
+  editorRenderBoard();
+}
+
+function editorLoadIntoAnalysis() {
+  var errEl = document.getElementById('editor-error');
+  var pieces = Object.values(editorState);
+  var whiteKings = pieces.filter(function(p) { return p === 'wK'; }).length;
+  var blackKings = pieces.filter(function(p) { return p === 'bK'; }).length;
+  if (whiteKings !== 1 || blackKings !== 1) {
+    errEl.textContent = 'Each side needs exactly one king.';
+    return;
+  }
+  var fen = editorStateToFen();
+  var test = new Chess();
+  if (!test.load(fen)) {
+    errEl.textContent = 'This position isn\'t legal — please check piece placement.';
+    return;
+  }
+  errEl.textContent = '';
+  document.getElementById('fen-input').value = fen;
+  closeBoardEditor();
+  loadFen();
 }
 
 function scheduleAutoAnalyse() {
@@ -2965,6 +3195,33 @@ function closeMenuThenAuth() {
   requestAnimationFrame(() => requestAnimationFrame(applyFen));
 })();
 </script>
+
+<!-- Board Editor -->
+<div class="board-editor-overlay" id="board-editor-overlay">
+  <div class="board-editor-box">
+    <div class="board-editor-header">
+      <span>Board Editor</span>
+      <span class="board-editor-close" onclick="closeBoardEditor()">✕</span>
+    </div>
+
+    <div class="editor-palette" id="editor-palette-black"></div>
+    <div class="editor-board" id="editor-board"></div>
+    <div class="editor-palette" id="editor-palette-white"></div>
+
+    <div class="editor-controls">
+      <div class="editor-turn-toggle">
+        <button class="editor-turn-btn active" id="editor-turn-w" onclick="editorSetTurn('w')">White to move</button>
+        <button class="editor-turn-btn" id="editor-turn-b" onclick="editorSetTurn('b')">Black to move</button>
+      </div>
+      <div class="editor-quick-actions">
+        <button onclick="editorClearBoard()">Clear board</button>
+        <button onclick="editorStartingPosition()">Starting position</button>
+      </div>
+      <div class="editor-error" id="editor-error"></div>
+      <button class="editor-load-btn" onclick="editorLoadIntoAnalysis()">Load into Analysis</button>
+    </div>
+  </div>
+</div>
 
 <!-- Auth Modal -->
 <div class="auth-overlay" id="auth-overlay">

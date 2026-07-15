@@ -1293,7 +1293,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 
     <!-- FEN input -->
     <div class="analysis-input-row">
-      <input id="fen-input" type="text" placeholder="Paste FEN  —  or leave blank for starting position" />
+      <input id="fen-input" type="text" name="chess-fen-notation" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Paste FEN  —  or leave blank for starting position" />
       <button onclick="loadFen()">Load</button>
     </div>
 
@@ -1591,6 +1591,20 @@ var ANALYSIS_BUDGET_MS = 8000;
 // candidate moves for a position already left behind, and in the retry
 // case, looping forever on a request nothing still needs.
 var _analysisGen = 0;
+
+// A single, shared WASM worker can only run one search at a time — it's a
+// blocking synchronous call once dispatched, with no way to interrupt it
+// mid-search. Without serializing here, playing through several moves
+// quickly would fire off that many separate searches back-to-back; the
+// worker queues them internally with no concept of "abandon the old one,"
+// so a burst of moves could easily queue up more total search time than
+// the 18s per-request timeout allows, which is exactly what was showing
+// up as repeated "[WASM] analyse timeout" failures. Every dispatch now
+// chains onto this promise, and re-checks staleness (myGen vs
+// _analysisGen) right before it would actually run — so a request that's
+// been superseded while waiting its turn gets silently skipped instead
+// of burning a full search on a position nobody's looking at anymore.
+var _wasmQueue = Promise.resolve();
 
 var analysisGame = new Chess();
 // Move-navigation state — mirrors play_multiplayer.html's fenHistory/viewingMove
@@ -2429,11 +2443,19 @@ function analysePosition() {
   function attemptEngine(retryCount) {
     if (myGen !== _analysisGen) return;  // superseded — nothing left to do here
     if (wasmEng && _wasmReady()) {
-      wasmEng._analysisInfoHandler = onInfo;
-      var analyseCall = typeof wasmEng.analyse === 'function'
-        ? wasmEng.analyse(fen, [], ANALYSIS_BUDGET_MS, 3)
-        : wasmEng.bestMove(fen, [], ANALYSIS_BUDGET_MS);
-      analyseCall
+      // Chain onto the shared queue rather than dispatching immediately —
+      // this is what actually prevents overlapping WASM searches. If
+      // several moves fire in quick succession, each one's dispatch waits
+      // its turn here; by the time an earlier, now-stale one's turn comes
+      // up, the myGen check below skips it entirely instead of burning a
+      // real search on it.
+      _wasmQueue = _wasmQueue.then(function() {
+        if (myGen !== _analysisGen) return;  // stale by the time its turn came up — skip, don't search
+        wasmEng._analysisInfoHandler = onInfo;
+        var analyseCall = typeof wasmEng.analyse === 'function'
+          ? wasmEng.analyse(fen, [], ANALYSIS_BUDGET_MS, 3)
+          : wasmEng.bestMove(fen, [], ANALYSIS_BUDGET_MS);
+        return analyseCall
         .then(function(move) { onDone(move); })
         .catch(function(e) {
           if (myGen !== _analysisGen) return;  // don't retry a request nothing needs anymore
@@ -2446,6 +2468,7 @@ function analysePosition() {
           setAnalysisStatus('⏳ Engine hiccup — retrying...');
           setTimeout(function() { attemptEngine(retryCount + 1); }, 1000);
         });
+      });
     } else if (window._wasmSupported) {
       // Engine is supported but not ready yet — whether the worker hasn't
       // finished starting, or the SenkabalaEngine script is still loading,
@@ -2979,7 +3002,7 @@ function closeMenuThenAuth() {
     <div class="username-card">
       <div class="username-title">One last thing</div>
       <div class="username-sub">Choose your username. This is permanent and cannot be changed.<br>3–20 characters — letters, numbers, underscores only.</div>
-      <input class="username-input" id="username-input" type="text"
+      <input class="username-input" id="username-input" type="text" name="chess-username" autocomplete="off"
         maxlength="20" placeholder="your_username"
         onkeydown="if(event.key==='Enter') submitUsername()" />
       <div class="username-error" id="username-error"></div>
@@ -3024,7 +3047,7 @@ function closeMenuThenAuth() {
   <div id="cc-messages" class="cc-messages"></div>
   <div id="cc-gate" class="cc-gate" style="display:none;"></div>
   <div id="cc-composer" class="cc-composer" style="display:none;">
-    <input id="cc-input" maxlength="50" placeholder="Say something…"
+    <input id="cc-input" name="chat-message" autocomplete="off" maxlength="50" placeholder="Say something…"
            oninput="ccUpdateCount()" onkeydown="if(event.key==='Enter')ccSend()">
     <button id="cc-send-btn" onclick="ccSend()">Send</button>
   </div>

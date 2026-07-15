@@ -2418,7 +2418,7 @@ function closeMenuThenAuth() {
     <div class="username-card">
       <div class="username-title">One last thing</div>
       <div class="username-sub">Choose your username. This is permanent and cannot be changed.<br>3–20 characters — letters, numbers, underscores only.</div>
-      <input class="username-input" id="username-input" type="text"
+      <input class="username-input" id="username-input" type="text" name="chess-username" autocomplete="off"
         maxlength="20" placeholder="your_username"
         onkeydown="if(event.key==='Enter') submitUsername()" />
       <div class="username-error" id="username-error"></div>
@@ -2492,7 +2492,7 @@ function closeMenuThenAuth() {
   <div id="cc-messages" class="cc-messages"></div>
   <div id="cc-gate" class="cc-gate" style="display:none;"></div>
   <div id="cc-composer" class="cc-composer" style="display:none;">
-    <input id="cc-input" maxlength="50" placeholder="Say something…"
+    <input id="cc-input" name="chat-message" autocomplete="off" maxlength="50" placeholder="Say something…"
            oninput="ccUpdateCount()" onkeydown="if(event.key==='Enter')ccSend()">
     <button id="cc-send-btn" onclick="ccSend()">Send</button>
   </div>

@@ -947,7 +947,7 @@ document.getElementById('lb-auth-overlay').addEventListener('click',function(e){
   <div id="cc-messages" class="cc-messages"></div>
   <div id="cc-gate" class="cc-gate" style="display:none;"></div>
   <div id="cc-composer" class="cc-composer" style="display:none;">
-    <input id="cc-input" maxlength="50" placeholder="Say something…"
+    <input id="cc-input" name="chat-message" autocomplete="off" maxlength="50" placeholder="Say something…"
            oninput="ccUpdateCount()" onkeydown="if(event.key==='Enter')ccSend()">
     <button id="cc-send-btn" onclick="ccSend()">Send</button>
   </div>

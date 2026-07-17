@@ -15,7 +15,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#262624">
+  <meta name="theme-color" content="#0a0a0a">
   <meta name="description" content="AfriChess continental and national ELO rankings — top players by time control.">
   <meta property="og:title" content="AfriChess Leaderboard">
   <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
@@ -644,7 +644,7 @@ function renderContinental(players, col) {
         <div class="td-player">
           <span class="td-flag">${FLAG(p.country)}</span>
           <div>
-            <div class="td-name ${isMe ? 'is-me' : ''}">${esc(p.username || 'Anonymous')}</div>
+            <div class="td-name ${isMe ? 'is-me' : ''}">${userLink(p.username)}</div>
             <div class="td-country">${COUNTRY_NAMES[p.country] || p.country || '—'}</div>
           </div>
         </div>
@@ -714,7 +714,7 @@ function renderByCountry(players, col) {
       rows += '<tr class="' + (isMe ? 'is-me' : '') + '">' +
         '<td class="td-rank ' + rc + '">' + medal + '</td>' +
         '<td><div class="td-player"><div>' +
-          '<div class="td-name' + (isMe ? ' is-me' : '') + '">' + esc(p.username || 'Anonymous') + '</div>' +
+          '<div class="td-name' + (isMe ? ' is-me' : '') + '">' + userLink(p.username) + '</div>' +
         '</div></div></td>' +
         '<td class="td-elo">' + (scorer(p) || '—') + '</td>' +
         '<td class="td-games">#' + p.globalRank + ' continental</td>' +
@@ -784,7 +784,7 @@ function renderAllTc(players, eloSumFn) {
       + '<td><div class="td-player">'
           + '<span class="td-flag">' + FLAG(p.country) + '</span>'
           + '<div>'
-            + '<div class="td-name' + (isMe ? ' is-me' : '') + '">' + esc(p.username || 'Anonymous') + '</div>'
+            + '<div class="td-name' + (isMe ? ' is-me' : '') + '">' + userLink(p.username) + '</div>'
             + '<div class="td-country">' + (COUNTRY_NAMES[p.country] || p.country || '—') + '</div>'
           + '</div>'
         + '</div></td>'
@@ -830,6 +830,12 @@ function toggleCountry(code) {
 
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Renders a username as a link to that player's public game history.
+function userLink(username) {
+  if (!username) return esc('Anonymous');
+  return '<a href="/history?u=' + encodeURIComponent(username) + '" style="color:inherit;text-decoration:none;" onclick="event.stopPropagation()">' + esc(username) + '</a>';
 }
 
 function toggleMobileNav() {
@@ -1165,7 +1171,7 @@ document.getElementById('lb-auth-overlay').addEventListener('click',function(e){
     box.innerHTML = ccLatestMessages.map(m => `
       <div class="cc-msg">
         <div class="cc-msg-head">
-          <span class="cc-msg-name">${ccEscape(m.username)}</span>
+          <span class="cc-msg-name">${userLink(m.username)}</span>
           ${m.is_admin ? '<span class="cc-msg-admin">ADMIN</span>' : `<span>${CC_FLAG(m.country)}</span>`}
           <span class="cc-msg-time">${ccTimeAgo(m.created_at)}</span>
         </div>

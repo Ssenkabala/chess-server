@@ -15,7 +15,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#262624">
+  <meta name="theme-color" content="#0a0a0a">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
@@ -875,6 +875,14 @@ const FLAG = code => code ? ({
   ZA:'🇿🇦',SS:'🇸🇸',SD:'🇸🇩',TZ:'🇹🇿',TG:'🇹🇬',TN:'🇹🇳',UG:'🇺🇬',ZM:'🇿🇲',ZW:'🇿🇼'
 }[code] || '🌍') : '🌍';
 
+function tEsc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function tUserLink(username) {
+  if (!username) return tEsc('Anonymous');
+  return '<a href="/history?u=' + encodeURIComponent(username) + '" style="color:inherit;text-decoration:none;" onclick="event.stopPropagation()">' + tEsc(username) + '</a>';
+}
+
 // Time control category per AfriChess standard
 // "5+3" → base=5 mins, increment=3s → total = 5*60+40*3 = 420s ≈ 7 min equivalent
 function tcCategory(tc) {
@@ -1369,7 +1377,7 @@ async function viewTournament(id) {
                 return `<div class="${classes}">
                   <div class="player-rank">${i+1}</div>
                   <div class="player-country">${FLAG(p.country)}</div>
-                  <div class="player-name">${p.username}${pauseIcon}</div>
+                  <div class="player-name">${tUserLink(p.username)}${pauseIcon}</div>
                   ${t.format === 'arena' && t.status !== 'upcoming' ? seqHTML(p.user_id) : ''}
                   ${t.format === 'arena' && t.status !== 'upcoming' ? streakHTML(p.user_id, p.consecutive_wins) : ''}
                   <div class="player-elo">${eloOf(p)}</div>
@@ -1445,7 +1453,7 @@ function startDetailPoll(id) {
           return `<div class="${classes}">
             <div class="player-rank">${i+1}</div>
             <div class="player-country">${FLAG(p.country)}</div>
-            <div class="player-name">${p.username}${pauseIcon}</div>
+            <div class="player-name">${tUserLink(p.username)}${pauseIcon}</div>
             ${t.format === 'arena' && t.status !== 'upcoming' ? seqHTML(p.user_id) : ''}
             ${t.format === 'arena' && t.status !== 'upcoming' ? streakHTML(p.user_id, p.consecutive_wins) : ''}
             <div class="player-elo">${eloOf2(p)}</div>
@@ -2200,6 +2208,11 @@ document.getElementById('t-auth-overlay').addEventListener('click', function(e){
     return d.innerHTML;
   }
 
+  function ccUserLink(username) {
+    if (!username) return ccEscape('Anonymous');
+    return '<a href="/history?u=' + encodeURIComponent(username) + '" style="color:inherit;text-decoration:none;" onclick="event.stopPropagation()">' + ccEscape(username) + '</a>';
+  }
+
   window.ccShowRulesModal = function() {
     document.getElementById('cc-rules-modal').style.display = 'flex';
   };
@@ -2269,7 +2282,7 @@ document.getElementById('t-auth-overlay').addEventListener('click', function(e){
     box.innerHTML = ccLatestMessages.map(m => `
       <div class="cc-msg">
         <div class="cc-msg-head">
-          <span class="cc-msg-name">${ccEscape(m.username)}</span>
+          <span class="cc-msg-name">${ccUserLink(m.username)}</span>
           ${m.is_admin ? '<span class="cc-msg-admin">ADMIN</span>' : `<span>${CC_FLAG(m.country)}</span>`}
           <span class="cc-msg-time">${ccTimeAgo(m.created_at)}</span>
         </div>

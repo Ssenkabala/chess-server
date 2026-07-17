@@ -28,7 +28,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#262624">
+  <meta name="theme-color" content="#0a0a0a">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
@@ -178,6 +178,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     .replay-header .rh-name { font-size:13px; color:var(--text); }
 
     .replay-controls { display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:center; }
+    .share-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:center; }
     .replay-btn { padding:7px 14px; background:transparent; color:var(--green);
       border:1px solid #4a9d7e33; font-size:15px; cursor:pointer; border-radius:2px;
       transition:all 0.15s; line-height:1; font-family:Georgia,serif; }
@@ -442,6 +443,9 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 }
 </style>
 
+<!-- Page title -->
+<div id="history-page-title" style="font-size:15px;letter-spacing:0.08em;color:#ece6da;margin:0 0 12px;text-transform:uppercase;"></div>
+
 <!-- W/L/D Summary -->
 <div class="summary-bar" id="summary-bar" style="display:none;">
   <div class="summary-stat wins">  <span id="stat-wins">0</span>Wins</div>
@@ -521,6 +525,13 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <button class="replay-btn sm" onclick="analyseCurrentPosition()">Analyse</button>
     </div>
 
+    <div class="share-row" id="share-row" style="display:none;width:100%;max-width:460px;margin-top:8px;">
+      <button class="replay-btn sm" onclick="shareCopyFen()">Copy FEN</button>
+      <button class="replay-btn sm" onclick="shareDownloadPgn()">Download PGN</button>
+      <button class="replay-btn sm" id="btn-share-gif" onclick="shareDownloadGif()">Download GIF</button>
+      <span id="share-status" style="font-size:11px;color:var(--muted);margin-left:6px;"></span>
+    </div>
+
     <div class="move-list-wrap" id="move-list-wrap" style="display:none;">
       <div class="move-list-label">Moves</div>
       <div class="move-list-grid" id="move-list-grid"></div>
@@ -568,23 +579,48 @@ let currentPage   = 1;
 const PAGE_SIZE   = 30;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-sb.auth.getSession().then(({ data }) => {
-  if (!data.session) {
-    setSignedOut();
-    showSignInPrompt();
+const _urlParams = new URLSearchParams(window.location.search);
+const _viewingUsername = _urlParams.get('u');   // e.g. history?u=Twix — viewing someone else's public games
+
+if (_viewingUsername) {
+  // Public view mode — works whether or not the visitor is signed in.
+  // Still wire up nav-user display for whoever's actually viewing.
+  sb.auth.getSession().then(({ data }) => {
+    if (data.session) setSignedIn(data.session.user); else setSignedOut();
+  });
+  loadPublicUserGames(_viewingUsername);
+} else {
+  sb.auth.getSession().then(({ data }) => {
+    document.getElementById('history-page-title').textContent = 'My Games';
+    if (!data.session) {
+      setSignedOut();
+      showSignInPrompt();
+      return;
+    }
+    const user = data.session.user;
+    setSignedIn(user);
+    loadGames(user.id);
+  });
+
+  // onAuthStateChange fires immediately on load with the existing session —
+  // guard against double-loading by checking if we already have games
+  sb.auth.onAuthStateChange((_event, session) => {
+    if (session && !allGames.length) { setSignedIn(session.user); loadGames(session.user.id); }
+    else if (!session) { setSignedOut(); showSignInPrompt(); }
+  });
+}
+
+async function loadPublicUserGames(username) {
+  document.getElementById('history-page-title').textContent = username + '\u2019s Games';
+  const { data: profile, error: pErr } = await sb
+    .from('profiles').select('user_id, username').eq('username', username).single();
+  if (pErr || !profile) {
+    document.getElementById('game-list').innerHTML =
+      '<div class="empty-state">No player found with that username.</div>';
     return;
   }
-  const user = data.session.user;
-  setSignedIn(user);
-  loadGames(user.id);
-});
-
-// onAuthStateChange fires immediately on load with the existing session —
-// guard against double-loading by checking if we already have games
-sb.auth.onAuthStateChange((_event, session) => {
-  if (session && !allGames.length) { setSignedIn(session.user); loadGames(session.user.id); }
-  else if (!session) { setSignedOut(); showSignInPrompt(); }
-});
+  loadGames(profile.user_id);
+}
 
 function setSignedIn(user) {
   sb.from('profiles').select('username').eq('user_id', user.id).single()
@@ -663,6 +699,20 @@ function formatOpponent(opp) {
   return opp;
 }
 
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Like formatOpponent, but wraps real human opponents (not bot labels) in a
+// link to their public game history.
+function formatOpponentLink(opp) {
+  if (opp && opp.startsWith('human:')) {
+    const username = opp.slice(6);
+    return '<a href="/history?u=' + encodeURIComponent(username) + '" style="color:inherit;text-decoration:none;">' + escHtml(username) + '</a>';
+  }
+  return formatOpponent(opp);
+}
+
 function isHumanGame(g) {
   return g.opponent && (g.opponent === 'human' || g.opponent.startsWith('human:'));
 }
@@ -682,7 +732,7 @@ async function loadGames(userId) {
   }
   if (!data || !data.length) {
     document.getElementById('game-list').innerHTML =
-      '<div class="empty-state">No games yet.<br>Play a game to see it here.</div>';
+      '<div class="empty-state">' + (_viewingUsername ? 'No games yet.' : 'No games yet.<br>Play a game to see it here.') + '</div>';
     return;
   }
 
@@ -746,7 +796,7 @@ function renderPage() {
     const win = g.result === g.player_color, draw = g.result === 'draw';
     const bCls  = win ? 'badge-win' : (draw ? 'badge-draw' : 'badge-loss');
     const bText = win ? 'W' : (draw ? 'D' : 'L');
-    const opp   = formatOpponent(g.opponent);
+    const opp   = formatOpponentLink(g.opponent);
     const date  = new Date(g.created_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
     const moves = (g.pgn.match(/\d+\./g)||[]).length;
 
@@ -875,12 +925,12 @@ function openReplay(id) {
   if (mobileBack) mobileBack.style.display = 'flex';
 
   // Show UI
-  ['replay-header-top','board-outer','replay-header-bot','replay-controls','move-list-wrap','pgn-wrap']
+  ['replay-header-top','board-outer','replay-header-bot','replay-controls','move-list-wrap','pgn-wrap','share-row']
     .forEach(i => document.getElementById(i).style.display = '');
   document.getElementById('replay-empty').style.display = 'none';
 
   // Labels
-  document.getElementById('rh-opponent').textContent = formatOpponent(g.opponent);
+  document.getElementById('rh-opponent').innerHTML = formatOpponentLink(g.opponent);
   document.getElementById('rh-me').textContent = 'You (' + (g.player_color||'white') + ')';
 
   // ELO change
@@ -1013,9 +1063,195 @@ function analyseCurrentPosition() {
     if (!m) break;
   }
   const fen = chess.fen();
-  // Navigate to play page analysis tab with current FEN
-  // The play page reads ?analyse=FEN on load and opens the analysis tab
-  window.location.href = '/play?analyse=' + encodeURIComponent(fen);
+  // Analysis now lives on its own page — this used to point at /play,
+  // left over from before that page was split out.
+  window.location.href = '/analysis?analyse=' + encodeURIComponent(fen);
+}
+
+function shareCopyFen() {
+  const chess = new Chess();
+  for (let i = 0; i < replayIdx; i++) {
+    const m = chess.move(replayMoves[i], { sloppy: true });
+    if (!m) break;
+  }
+  navigator.clipboard.writeText(chess.fen()).then(() => {
+    const el = document.getElementById('share-status');
+    el.textContent = 'FEN copied!';
+    setTimeout(() => { el.textContent = ''; }, 2000);
+  });
+}
+
+function shareDownloadPgn() {
+  const g = allGames.find(x => String(x.id) === String(activeGameId));
+  if (!g) return;
+  const opponent = formatOpponent(g.opponent);
+  const blob = new Blob([g.pgn], { type: 'application/x-chess-pgn' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'africhess-vs-' + opponent.replace(/[^a-z0-9]/gi, '') + '-' + g.id.slice(0, 8) + '.pgn';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GIF EXPORT — renders each position in the game onto a canvas
+//  and encodes them into an animated GIF via gif.js. Both gif.js
+//  and its worker script are loaded on demand (only when someone
+//  actually clicks Download GIF), not on every page load — this
+//  is a rarely-used feature and there's no reason to cost every
+//  visitor the extra ~30KB for it.
+// ═══════════════════════════════════════════════════════════════
+let _gifJsLoaded = false;
+let _gifWorkerBlobUrl = null;
+const GIF_SQUARE = 44;              // px per square in the rendered frame
+const GIF_BOARD_PX = GIF_SQUARE * 8;
+const _pieceImageCache = {};        // 'wK' etc -> Image, built from the SAME
+                                     // artwork the real board uses (no duplication)
+
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-dynsrc="' + src + '"]');
+    if (existing) { existing.addEventListener('load', resolve); if (existing._loaded) resolve(); return; }
+    const s = document.createElement('script');
+    s.src = src;
+    s.dataset.dynsrc = src;
+    s.onload = () => { s._loaded = true; resolve(); };
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function ensureGifJs() {
+  if (_gifJsLoaded) return;
+  await loadScriptOnce('https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.min.js');
+  // The worker script has a same-origin restriction in most browsers —
+  // fetching it and using a blob: URL is the standard workaround (a raw
+  // cross-origin CDN URL passed directly as workerScript fails silently
+  // or throws "Failed to construct 'Worker'" in practice).
+  const resp = await fetch('https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js');
+  const blob = await resp.blob();
+  _gifWorkerBlobUrl = URL.createObjectURL(blob);
+  _gifJsLoaded = true;
+}
+
+// Reads a piece's artwork from the SAME CSS rules the real board uses
+// (.cg-wrap piece.{role}.{color}), rather than embedding a second copy of
+// the same base64 SVGs anywhere in this file.
+function getPieceImage(role, color) {
+  const key = color[0] + role[0].toUpperCase();
+  if (_pieceImageCache[key]) return _pieceImageCache[key];
+  const wrap = document.createElement('div');
+  wrap.className = 'cg-wrap';
+  wrap.style.cssText = 'position:absolute;left:-9999px;top:-9999px;';
+  const el = document.createElement('piece');
+  el.className = role + ' ' + color;
+  wrap.appendChild(el);
+  document.body.appendChild(wrap);
+  const bgImage = getComputedStyle(el).backgroundImage;
+  document.body.removeChild(wrap);
+  const url = bgImage.slice(5, -2); // strip url("...")
+  const img = new Image();
+  const p = new Promise(res => { img.onload = res; });
+  img.src = url;
+  _pieceImageCache[key] = { img, ready: p };
+  return _pieceImageCache[key];
+}
+
+const GIF_ROLE_NAME = { p:'pawn', n:'knight', b:'bishop', r:'rook', q:'queen', k:'king' };
+
+async function renderFenToCanvas(fen, flip) {
+  const canvas = document.createElement('canvas');
+  canvas.width = GIF_BOARD_PX; canvas.height = GIF_BOARD_PX;
+  const ctx = canvas.getContext('2d');
+  const rows = fen.split(' ')[0].split('/');
+
+  for (let r = 0; r < 8; r++) {
+    for (let f = 0; f < 8; f++) {
+      const rank = flip ? r : 7 - r;
+      const file = flip ? 7 - f : f;
+      const isLight = (file + rank) % 2 === 1;
+      ctx.fillStyle = isLight ? '#f0d9b5' : '#c0ad90';
+      ctx.fillRect(f * GIF_SQUARE, r * GIF_SQUARE, GIF_SQUARE, GIF_SQUARE);
+    }
+  }
+
+  // Parse piece placement into a rank/file grid, draw onto the canvas
+  const pending = [];
+  for (let rankIdx = 0; rankIdx < 8; rankIdx++) {
+    let file = 0;
+    for (const ch of rows[rankIdx]) {
+      if (/[1-8]/.test(ch)) { file += parseInt(ch, 10); continue; }
+      const color = ch === ch.toUpperCase() ? 'white' : 'black';
+      const role = GIF_ROLE_NAME[ch.toLowerCase()];
+      const rank = 8 - rankIdx; // 8..1
+      const drawRow = flip ? rank - 1 : 8 - rank;
+      const drawCol = flip ? 7 - file : file;
+      const entry = getPieceImage(role, color);
+      pending.push(entry.ready.then(() => {
+        ctx.drawImage(entry.img, drawCol * GIF_SQUARE, drawRow * GIF_SQUARE, GIF_SQUARE, GIF_SQUARE);
+      }));
+      file++;
+    }
+  }
+  await Promise.all(pending);
+  return canvas;
+}
+
+async function shareDownloadGif() {
+  const statusEl = document.getElementById('share-status');
+  const btn = document.getElementById('btn-share-gif');
+  btn.disabled = true;
+  statusEl.textContent = 'Loading GIF encoder…';
+  try {
+    await ensureGifJs();
+  } catch (e) {
+    statusEl.textContent = 'Could not load GIF encoder — check connection.';
+    btn.disabled = false;
+    return;
+  }
+
+  const g = allGames.find(x => String(x.id) === String(activeGameId));
+  const flip = g && g.player_color === 'black';
+
+  statusEl.textContent = 'Rendering frames… 0%';
+  const gif = new GIF({ workers: 2, quality: 10, workerScript: _gifWorkerBlobUrl,
+                         width: GIF_BOARD_PX, height: GIF_BOARD_PX });
+
+  const chess = new Chess();
+  const fens = [chess.fen()];
+  for (const san of replayMoves) {
+    const m = chess.move(san, { sloppy: true });
+    if (!m) break;
+    fens.push(chess.fen());
+  }
+
+  for (let i = 0; i < fens.length; i++) {
+    const canvas = await renderFenToCanvas(fens[i], flip);
+    // Hold the final position longer so the outcome is readable
+    const delay = (i === fens.length - 1) ? 2000 : 700;
+    gif.addFrame(canvas, { delay });
+    statusEl.textContent = 'Rendering frames… ' + Math.round(((i + 1) / fens.length) * 100) + '%';
+  }
+
+  statusEl.textContent = 'Encoding GIF…';
+  gif.on('finished', function(blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const opponent = g ? formatOpponent(g.opponent) : 'game';
+    a.download = 'africhess-vs-' + opponent.replace(/[^a-z0-9]/gi, '') + '.gif';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    statusEl.textContent = 'Downloaded!';
+    btn.disabled = false;
+    setTimeout(() => { statusEl.textContent = ''; }, 2500);
+  });
+  gif.render();
 }
 
 function copyPGN() {
@@ -1267,6 +1503,11 @@ document.addEventListener('keydown', e => {
     return d.innerHTML;
   }
 
+  function ccUserLink(username) {
+    if (!username) return ccEscape('Anonymous');
+    return '<a href="/history?u=' + encodeURIComponent(username) + '" style="color:inherit;text-decoration:none;" onclick="event.stopPropagation()">' + ccEscape(username) + '</a>';
+  }
+
   window.ccShowRulesModal = function() {
     document.getElementById('cc-rules-modal').style.display = 'flex';
   };
@@ -1336,7 +1577,7 @@ document.addEventListener('keydown', e => {
     box.innerHTML = ccLatestMessages.map(m => `
       <div class="cc-msg">
         <div class="cc-msg-head">
-          <span class="cc-msg-name">${ccEscape(m.username)}</span>
+          <span class="cc-msg-name">${ccUserLink(m.username)}</span>
           ${m.is_admin ? '<span class="cc-msg-admin">ADMIN</span>' : `<span>${CC_FLAG(m.country)}</span>`}
           <span class="cc-msg-time">${ccTimeAgo(m.created_at)}</span>
         </div>

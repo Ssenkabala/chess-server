@@ -16,7 +16,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#262624">
+  <meta name="theme-color" content="#0a0a0a">
   <meta name="description" content="Play chess against AfriChess's custom 2050 ELO engine. Choose from 8 difficulty levels, white or black. Built for African players.">
   <meta property="og:title" content="AfriChess | Play vs Engine">
   <meta property="og:description" content="Play chess against AfriChess's 2050 ELO engine — 8 difficulty levels, white or black. Built for African players.">
@@ -2641,6 +2641,11 @@ function closeMenuThenAuth() {
     return d.innerHTML;
   }
 
+  function ccUserLink(username) {
+    if (!username) return ccEscape('Anonymous');
+    return '<a href="/history?u=' + encodeURIComponent(username) + '" style="color:inherit;text-decoration:none;" onclick="event.stopPropagation()">' + ccEscape(username) + '</a>';
+  }
+
   window.ccShowRulesModal = function() {
     document.getElementById('cc-rules-modal').style.display = 'flex';
   };
@@ -2710,7 +2715,7 @@ function closeMenuThenAuth() {
     box.innerHTML = ccLatestMessages.map(m => `
       <div class="cc-msg">
         <div class="cc-msg-head">
-          <span class="cc-msg-name">${ccEscape(m.username)}</span>
+          <span class="cc-msg-name">${ccUserLink(m.username)}</span>
           ${m.is_admin ? '<span class="cc-msg-admin">ADMIN</span>' : `<span>${CC_FLAG(m.country)}</span>`}
           <span class="cc-msg-time">${ccTimeAgo(m.created_at)}</span>
         </div>

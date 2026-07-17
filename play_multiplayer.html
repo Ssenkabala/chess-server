@@ -16,7 +16,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#262624">
+  <meta name="theme-color" content="#0a0a0a">
   <meta name="description" content="Play live chess against other players on AfriChess.">
   <meta property="og:title" content="AfriChess — Live Multiplayer">
   <meta property="og:image" content="https://www.africhess.org/android-chrome-512x512.png">
@@ -1984,6 +1984,11 @@ function startGameWsWatchdog() {
 function reconnectGameWs() {
   if (!gameId || !myColor || gameOver) return;
   showGameStatus('Connection lost — reconnecting…');
+  // Freeze the clock display rather than let it keep ticking on
+  // potentially-stale turn state for the duration of the gap — it
+  // resumes correctly once the reconnected socket gets a fresh
+  // 'clock' or 'move' message from the server.
+  stopClockTick();
   if (gameWs) {
     gameWs.onclose = null;   // don't let the old socket's onclose fire a
     gameWs.onerror = null;   // "connection lost" message over this one
@@ -2213,10 +2218,17 @@ function onGameMessage(e) {
   }
 
   if (msg.type === 'clock') {
-    // Server authoritative clock — resync and restart tick to prevent drift
+    // Server authoritative clock — resync and restart tick to prevent drift.
+    // Also resync myTurn here, not just the clock values: if a 'move'
+    // message was ever missed (e.g. during a brief reconnect gap), myTurn
+    // would otherwise stay stale until the next move arrives — which may
+    // never happen if it's the opponent's turn and they're the one who
+    // moved during the gap. This periodic sync is the self-correction path.
+    if (msg.turn != null) myTurn = msg.turn === myColor;
     clocks.white = msg.white;
     clocks.black = msg.black;
     renderClocks();
+    updateTurnIndicator();
     // Restart tick so it counts from the server-corrected value
     if (!gameOver) startClockTick();
   }

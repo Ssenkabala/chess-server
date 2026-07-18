@@ -736,8 +736,24 @@ async function loadGames(userId) {
     return;
   }
 
-  console.log('[history] Loaded', data.length, 'games');
-  allGames = data;
+  // Public viewers only see human games (multiplayer/tournament), never
+  // vs-engine practice games — this mirrors the "Public can view human
+  // games" RLS policy on the games table. Filtering here too rather than
+  // relying on the database alone means the UI is correct even before
+  // that policy is applied, or if a game somehow slips through.
+  let visibleData = data;
+  if (_viewingUsername) {
+    visibleData = data.filter(g => g.opponent && (g.opponent.startsWith('human:') || g.opponent === 'human'));
+    if (!visibleData.length) {
+      document.getElementById('game-list').innerHTML = '<div class="empty-state">No games yet.</div>';
+      allGames = [];
+      buildSummary();
+      return;
+    }
+  }
+
+  console.log('[history] Loaded', visibleData.length, 'games');
+  allGames = visibleData;
   buildSummary();
   applyFilter();
 }
@@ -931,7 +947,8 @@ function openReplay(id) {
 
   // Labels
   document.getElementById('rh-opponent').innerHTML = formatOpponentLink(g.opponent);
-  document.getElementById('rh-me').textContent = 'You (' + (g.player_color||'white') + ')';
+  document.getElementById('rh-me').textContent =
+    (_viewingUsername || 'You') + ' (' + (g.player_color||'white') + ')';
 
   // ELO change
   if (g.player_elo_before != null && g.player_elo_after != null) {
@@ -1108,6 +1125,7 @@ let _gifJsLoaded = false;
 let _gifWorkerBlobUrl = null;
 const GIF_SQUARE = 44;              // px per square in the rendered frame
 const GIF_BOARD_PX = GIF_SQUARE * 8;
+const GIF_FOOTER_PX = 40;           // branded footer strip height
 const _pieceImageCache = {};        // 'wK' etc -> Image, built from the SAME
                                      // artwork the real board uses (no duplication)
 
@@ -1164,7 +1182,7 @@ const GIF_ROLE_NAME = { p:'pawn', n:'knight', b:'bishop', r:'rook', q:'queen', k
 
 async function renderFenToCanvas(fen, flip) {
   const canvas = document.createElement('canvas');
-  canvas.width = GIF_BOARD_PX; canvas.height = GIF_BOARD_PX;
+  canvas.width = GIF_BOARD_PX; canvas.height = GIF_BOARD_PX + GIF_FOOTER_PX;
   const ctx = canvas.getContext('2d');
   const rows = fen.split(' ')[0].split('/');
 
@@ -1197,6 +1215,23 @@ async function renderFenToCanvas(fen, flip) {
     }
   }
   await Promise.all(pending);
+
+  // Branded footer — the whole point of a shareable GIF is that it
+  // promotes AfriChess wherever it ends up, so every frame carries it.
+  ctx.fillStyle = '#262624';
+  ctx.fillRect(0, GIF_BOARD_PX, GIF_BOARD_PX, GIF_FOOTER_PX);
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 20px Georgia, serif';
+  ctx.fillStyle = '#ece6da';
+  ctx.fillText('Afri', 14, GIF_BOARD_PX + GIF_FOOTER_PX / 2);
+  const afriWidth = ctx.measureText('Afri').width;
+  ctx.fillStyle = '#4a9d7e';
+  ctx.fillText('Chess', 14 + afriWidth, GIF_BOARD_PX + GIF_FOOTER_PX / 2);
+  ctx.font = '13px monospace';
+  ctx.fillStyle = '#8d8d8d';
+  ctx.textAlign = 'right';
+  ctx.fillText('africhess.org', GIF_BOARD_PX - 14, GIF_BOARD_PX + GIF_FOOTER_PX / 2);
+  ctx.textAlign = 'left';
   return canvas;
 }
 
@@ -1217,8 +1252,8 @@ async function shareDownloadGif() {
   const flip = g && g.player_color === 'black';
 
   statusEl.textContent = 'Rendering frames… 0%';
-  const gif = new GIF({ workers: 2, quality: 10, workerScript: _gifWorkerBlobUrl,
-                         width: GIF_BOARD_PX, height: GIF_BOARD_PX });
+  const gif = new GIF({ workers: 2, quality: 5, workerScript: _gifWorkerBlobUrl,
+                         width: GIF_BOARD_PX, height: GIF_BOARD_PX + GIF_FOOTER_PX });
 
   const chess = new Chess();
   const fens = [chess.fen()];

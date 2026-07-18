@@ -394,6 +394,18 @@ global.Chessground = Nr;
       color: var(--text);
       padding: 24px 16px;
       gap: 0;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+    }
+    /* Text inputs (login modal) need to stay normally selectable/editable —
+       the blanket protection above is for the game screen, not form fields. */
+    input, textarea {
+      -webkit-user-select: text;
+      -moz-user-select: text;
+      -ms-user-select: text;
+      user-select: text;
     }
 
     /* ── Nav (matches site-wide style) ── */
@@ -1444,6 +1456,32 @@ async function signOutUser() { await sb.auth.signOut(); window.location.reload()
 // ── Board resize (zoom CSS variable — mirrors Lichess approach) ───────────────
 var ZOOM_STORAGE = 'africhess.zoom';
 
+// Waits for #board to have a real, non-zero width before creating
+// Chessground — without this, a cold page load (styles/layout still
+// settling, the ---zoom CSS variable not yet applied) can hand
+// Chessground a zero-width container, which computes wrong internal
+// square coordinates: clicks land in the wrong place relative to what's
+// visually rendered once layout catches up a moment later. This is much
+// more likely on someone's very first game right after the page loads
+// than on a rematch, where the board was already correctly sized from
+// the previous game — matches the "bugs cluster on first games" pattern.
+// Same retry budget (~3s at 60fps) as the equivalent fix on watch.html.
+function initChessgroundWhenReady(config, attempt) {
+  attempt = attempt || 0;
+  const el = document.getElementById('board');
+  const rect = el.getBoundingClientRect();
+  if (rect.width < 10) {
+    if (attempt > 180) {
+      console.error('[multiplayer] board container never got a usable width:', rect);
+      cg = Chessground(el, config);  // better a possibly-misrendered board than none at all
+      return;
+    }
+    requestAnimationFrame(() => initChessgroundWhenReady(config, attempt + 1));
+    return;
+  }
+  cg = Chessground(el, config);
+}
+
 function initBoardZoom() {
   var saved = parseInt(localStorage.getItem(ZOOM_STORAGE) || '', 10);
   if (saved >= 0 && saved <= 100) {
@@ -2062,9 +2100,11 @@ function startGame() {
   if (savedZoom >= 0 && savedZoom <= 100)
     document.body.style.setProperty('---zoom', savedZoom.toString());
 
-  // Chessground init — board-wrap sized by CSS zoom variable, no JS sizing needed
+  // Chessground init — waits for #board to actually have a real width
+  // first (see initChessgroundWhenReady), rather than trusting the CSS
+  // zoom variable has already taken effect.
   if (cg) { cg.destroy(); cg = null; }
-  cg = Chessground(document.getElementById('board'), {
+  initChessgroundWhenReady({
     orientation: myColor,
     fen: 'start',
     turnColor: 'white',
@@ -2364,9 +2404,8 @@ function onGameMessage(e) {
     hideTakebackBar();
     resetClockDisplay();
 
-    const rwrap = document.getElementById('board-wrap');
     if (cg) { cg.destroy(); cg = null; }
-    cg = Chessground(document.getElementById('board'), {
+    initChessgroundWhenReady({
       orientation: myColor, fen: 'start', turnColor: 'white',
       movable: { color: myColor, free: false, dests: toDests(), events: { after: afterMove } },
       draggable: { enabled: true }, selectable: { enabled: true },

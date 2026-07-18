@@ -568,6 +568,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let allGames      = [];
+let _myUsername    = null;  // the signed-in viewer's own username, once known
 let filteredGames = [];
 let replayMoves   = [];
 let replayIdx     = 0;
@@ -626,6 +627,7 @@ function setSignedIn(user) {
   sb.from('profiles').select('username').eq('user_id', user.id).single()
     .then(({ data: p }) => {
       const name = p && p.username ? p.username : (user.email || 'Signed in');
+      _myUsername = p && p.username ? p.username : null;
       document.getElementById('nav-user').innerHTML = '<span style="color:#4a9d7e;font-size:12px;">' + name + '</span>';
     });
   document.getElementById('nav-signin-btn').style.display = 'none';
@@ -1102,11 +1104,12 @@ function shareDownloadPgn() {
   const g = allGames.find(x => String(x.id) === String(activeGameId));
   if (!g) return;
   const opponent = formatOpponent(g.opponent);
+  const owner = _viewingUsername || _myUsername || 'Player';
   const blob = new Blob([g.pgn], { type: 'application/x-chess-pgn' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'africhess-vs-' + opponent.replace(/[^a-z0-9]/gi, '') + '-' + g.id.slice(0, 8) + '.pgn';
+  a.download = owner.replace(/[^a-z0-9]/gi, '') + '-vs-' + opponent.replace(/[^a-z0-9]/gi, '') + '-' + g.id.slice(0, 8) + '.pgn';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -1123,9 +1126,9 @@ function shareDownloadPgn() {
 // ═══════════════════════════════════════════════════════════════
 let _gifJsLoaded = false;
 let _gifWorkerBlobUrl = null;
-const GIF_SQUARE = 44;              // px per square in the rendered frame
+const GIF_SQUARE = 64;              // px per square in the rendered frame — bumped from 44 for a sharper, less "misty" result
 const GIF_BOARD_PX = GIF_SQUARE * 8;
-const GIF_FOOTER_PX = 40;           // branded footer strip height
+const GIF_FOOTER_PX = 52;           // branded footer strip height, scaled up to match
 const _pieceImageCache = {};        // 'wK' etc -> Image, built from the SAME
                                      // artwork the real board uses (no duplication)
 
@@ -1221,16 +1224,16 @@ async function renderFenToCanvas(fen, flip) {
   ctx.fillStyle = '#262624';
   ctx.fillRect(0, GIF_BOARD_PX, GIF_BOARD_PX, GIF_FOOTER_PX);
   ctx.textBaseline = 'middle';
-  ctx.font = 'bold 20px Georgia, serif';
+  ctx.font = 'bold 26px Georgia, serif';
   ctx.fillStyle = '#ece6da';
-  ctx.fillText('Afri', 14, GIF_BOARD_PX + GIF_FOOTER_PX / 2);
+  ctx.fillText('Afri', 18, GIF_BOARD_PX + GIF_FOOTER_PX / 2);
   const afriWidth = ctx.measureText('Afri').width;
   ctx.fillStyle = '#4a9d7e';
-  ctx.fillText('Chess', 14 + afriWidth, GIF_BOARD_PX + GIF_FOOTER_PX / 2);
-  ctx.font = '13px monospace';
+  ctx.fillText('Chess', 18 + afriWidth, GIF_BOARD_PX + GIF_FOOTER_PX / 2);
+  ctx.font = '16px monospace';
   ctx.fillStyle = '#8d8d8d';
   ctx.textAlign = 'right';
-  ctx.fillText('africhess.org', GIF_BOARD_PX - 14, GIF_BOARD_PX + GIF_FOOTER_PX / 2);
+  ctx.fillText('africhess.org', GIF_BOARD_PX - 18, GIF_BOARD_PX + GIF_FOOTER_PX / 2);
   ctx.textAlign = 'left';
   return canvas;
 }
@@ -1252,7 +1255,7 @@ async function shareDownloadGif() {
   const flip = g && g.player_color === 'black';
 
   statusEl.textContent = 'Rendering frames… 0%';
-  const gif = new GIF({ workers: 2, quality: 5, workerScript: _gifWorkerBlobUrl,
+  const gif = new GIF({ workers: 2, quality: 1, workerScript: _gifWorkerBlobUrl,
                          width: GIF_BOARD_PX, height: GIF_BOARD_PX + GIF_FOOTER_PX });
 
   const chess = new Chess();
@@ -1277,7 +1280,8 @@ async function shareDownloadGif() {
     const a = document.createElement('a');
     a.href = url;
     const opponent = g ? formatOpponent(g.opponent) : 'game';
-    a.download = 'africhess-vs-' + opponent.replace(/[^a-z0-9]/gi, '') + '.gif';
+    const owner = _viewingUsername || _myUsername || 'Player';
+    a.download = owner.replace(/[^a-z0-9]/gi, '') + '-vs-' + opponent.replace(/[^a-z0-9]/gi, '') + '.gif';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

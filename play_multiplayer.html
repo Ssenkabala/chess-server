@@ -2816,15 +2816,35 @@ function showOverlay(result, reason) {
   // Still waits ~4s first for elo_update to actually arrive and update
   // myProfile before reading the rating to record — elo_update is sent
   // before gameover but can be delayed slightly, same as the original.
+  // Converts a UCI move list ("e2e4", "e7e5", ...) into a proper, standard
+  // PGN move string ("1. e4 e5 2. ..."). Replays each move on a fresh
+  // chess.js board to get its real SAN — this is the actual fix for the
+  // bug where saved multiplayer games were storing raw UCI tokens
+  // ("1. d2d4 e7e5") instead of real algebraic notation ("1. d4 e5"),
+  // which meant the stored PGN wasn't valid by any standard chess tool's
+  // definition. Same conversion approach already proven correct in
+  // history.html's parsePgnToMoves "Strategy 4".
+  function buildPgnFromUci(uciMoves) {
+    var chess = new Chess();
+    var pgn = '';
+    uciMoves.forEach(function(uci, i) {
+      if (!uci) return;
+      var move = chess.move({
+        from: uci.slice(0, 2),
+        to: uci.slice(2, 4),
+        promotion: uci[4] || 'q'
+      });
+      if (!move) return;  // shouldn't happen — moves are already server-validated
+      if (i % 2 === 0) pgn += (Math.floor(i / 2) + 1) + '. ';
+      pgn += move.san + ' ';
+    });
+    return pgn.trim();
+  }
+
   function saveMultiplayerGameToHistory(moveHistory) {
     moveHistory = moveHistory || multiMoveHistory;
     if (!(sb && currentUser && moveHistory.length > 0)) return Promise.resolve();
-    var pgn = '';
-    moveHistory.forEach(function(uci, i) {
-      if (i % 2 === 0) pgn += (Math.floor(i/2) + 1) + '. ';
-      pgn += uci + ' ';
-    });
-    var savedPgn    = pgn.trim();
+    var savedPgn    = buildPgnFromUci(moveHistory);
     var savedResult = result;
     var savedColor  = myColor;
     return new Promise(function(resolve) {

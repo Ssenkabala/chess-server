@@ -1001,7 +1001,7 @@ function openReplay(id) {
   requestAnimationFrame(() => requestAnimationFrame(initBoard));
 
   // Render move list and counter immediately (board loads async above)
-  renderMoveList(g.pgn);
+  renderMoveList(g);
   replayIdx = 0;
   updateControls();
 }
@@ -1027,7 +1027,7 @@ function updateControls() {
   document.getElementById('move-counter').textContent = replayIdx + ' / ' + replayMoves.length;
 }
 
-function renderMoveList(pgn) {
+function renderMoveList(g) {
   const grid = document.getElementById('move-list-grid');
   grid.innerHTML = '';
   for (let i = 0; i < replayMoves.length; i += 2) {
@@ -1045,7 +1045,9 @@ function renderMoveList(pgn) {
       grid.appendChild(sp);
     });
   }
-  document.getElementById('pgn-text').textContent = (pgn||'').replace(/\[.*?\]\s*/g,'').trim();
+  // Same reconstructed PGN as Download PGN uses — Copy PGN should never
+  // hand out the raw stored string, which may just be bare UCI coordinates.
+  document.getElementById('pgn-text').textContent = buildStandardPgn(g);
 }
 
 function highlightMove() {
@@ -1100,12 +1102,48 @@ function shareCopyFen() {
   });
 }
 
+// Some stored games have g.pgn as bare UCI coordinates with no headers
+// at all (e.g. "d2d4 e7e5 2. d4e5 ...") rather than a real PGN — that's
+// a data-quality issue at the source, not something fixable from here.
+// But replayMoves is already correctly-parsed SAN (parsePgnToMoves's
+// "Strategy 4" handles exactly this case), so reconstructing a proper
+// PGN from that plus known metadata gives a genuinely standards-compliant
+// file regardless of what shape the stored source data was in.
+function buildStandardPgn(g) {
+  const opponent = formatOpponent(g.opponent);
+  const owner = _viewingUsername || _myUsername || 'Player';
+  const isOwnerWhite = (g.player_color || 'white') === 'white';
+  const white = isOwnerWhite ? owner : opponent;
+  const black = isOwnerWhite ? opponent : owner;
+  const resultCode = g.result === 'draw' ? '1/2-1/2'
+    : (g.result === 'white' ? '1-0' : (g.result === 'black' ? '0-1' : '*'));
+  const date = g.created_at ? new Date(g.created_at).toISOString().slice(0, 10).replace(/-/g, '.') : '????.??.??';
+
+  let headers =
+    '[Event "AfriChess Game"]\n' +
+    '[Site "https://africhess.org"]\n' +
+    '[Date "' + date + '"]\n' +
+    '[White "' + white + '"]\n' +
+    '[Black "' + black + '"]\n' +
+    '[Result "' + resultCode + '"]\n\n';
+
+  let moveText = '';
+  for (let i = 0; i < replayMoves.length; i++) {
+    if (i % 2 === 0) moveText += (Math.floor(i / 2) + 1) + '. ';
+    moveText += replayMoves[i] + ' ';
+  }
+  moveText += resultCode;
+
+  return headers + moveText.trim() + '\n';
+}
+
 function shareDownloadPgn() {
   const g = allGames.find(x => String(x.id) === String(activeGameId));
   if (!g) return;
   const opponent = formatOpponent(g.opponent);
   const owner = _viewingUsername || _myUsername || 'Player';
-  const blob = new Blob([g.pgn], { type: 'application/x-chess-pgn' });
+  const properPgn = buildStandardPgn(g);
+  const blob = new Blob([properPgn], { type: 'application/x-chess-pgn' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -1161,8 +1199,14 @@ async function ensureGifJs() {
 // Reads a piece's artwork from the SAME CSS rules the real board uses
 // (.cg-wrap piece.{role}.{color}), rather than embedding a second copy of
 // the same base64 SVGs anywhere in this file.
+const GIF_ROLE_LETTER = { king:'K', queen:'Q', rook:'R', bishop:'B', knight:'N', pawn:'P' };
+
 function getPieceImage(role, color) {
-  const key = color[0] + role[0].toUpperCase();
+  // Must use proper chess notation letters, not role[0] — "king" and
+  // "knight" both start with 'k' in English, which was silently caching
+  // one piece's artwork under the other's key (knights get parsed first
+  // in a typical back rank, so kings were rendering as knights).
+  const key = color[0] + GIF_ROLE_LETTER[role];
   if (_pieceImageCache[key]) return _pieceImageCache[key];
   const wrap = document.createElement('div');
   wrap.className = 'cg-wrap';

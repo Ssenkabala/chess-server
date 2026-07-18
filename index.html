@@ -2118,6 +2118,7 @@ try {
 }
 
 let currentUser = null;
+let _myUsername = null;  // signed-in player's own username, once known — used for PGN headers
 let authMode    = 'signin'; // 'signin' | 'signup'
 
 
@@ -2152,6 +2153,7 @@ async function loadProfile(user) {
     .single();
 
   if (data) {
+    _myUsername = data.username;
     document.getElementById('user-info').innerHTML =
       '<span style="color:#4a9d7e">' + data.username + '</span>' +
       ' <span style="color:#444;font-size:11px;">' + data.elo + ' ELO</span>';
@@ -2313,13 +2315,29 @@ async function saveGame(pgn, result, playerColor) {
 
 // ── PGN builder from chess.js game ───────────────────────────
 function buildPGN(chessGame, result) {
-  // Rebuild PGN from tracked move history
+  var owner = _myUsername || 'Player';
+  var engineLabel = 'AfriChess Engine (' + (DIFF_LABELS[currentDifficulty] || 'Level ' + currentDifficulty) + ')';
+  var isOwnerWhite = playerColor === 'w';
+  var white = isOwnerWhite ? owner : engineLabel;
+  var black = isOwnerWhite ? engineLabel : owner;
+  var resultCode = result === 'draw' ? '1/2-1/2' : (result === 'white' ? '1-0' : (result === 'black' ? '0-1' : '*'));
+  var date = new Date().toISOString().slice(0, 10).replace(/-/g, '.');
+
+  var headers =
+    '[Event "AfriChess vs Engine"]\n' +
+    '[Site "https://africhess.org"]\n' +
+    '[Date "' + date + '"]\n' +
+    '[White "' + white + '"]\n' +
+    '[Black "' + black + '"]\n' +
+    '[Result "' + resultCode + '"]\n\n';
+
+  // Rebuild move text from tracked move history
   var pgn = '';
   moveHistory.forEach(function(san, i) {
     if (i % 2 === 0) pgn += (Math.floor(i/2) + 1) + '. ';
     pgn += san + ' ';
   });
-  return pgn.trim();
+  return headers + pgn.trim() + ' ' + resultCode;
 }
 
 // ── Init auth ─────────────────────────────────────────────────

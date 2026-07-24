@@ -2788,7 +2788,11 @@ function getCoaching() {
         highlightBestMove(data.best_move.slice(0,2), data.best_move.slice(2,4));
       }
       updateEvalBar(data.eval_pawns || evalPawns || 0);
-      parseAndRenderCoaching(data.coaching, data.best_move || bestMove, data.eval_pawns || evalPawns);
+      // Display uses proper algebraic notation (e.g. "Rg6"), not the raw
+      // UCI square-pair the engine and highlightBestMove() work with
+      // (e.g. "h6g6") — pv_san[0] is the SAN form of the same best move.
+      var bestMoveSan = (data.pv_san && data.pv_san[0]) || data.best_move || bestMove;
+      parseAndRenderCoaching(data.coaching, bestMoveSan, data.eval_pawns || evalPawns);
       setAnalysisStatus('Analysis complete.');
       document.getElementById('btn-coach').disabled = false;
     })
@@ -3200,12 +3204,14 @@ function closeMenuThenAuth() {
     <div class="auth-title" id="auth-title">Sign In</div>
     <div class="auth-subtitle">Save your games and track your progress.</div>
 
-    <input class="auth-input" type="email" id="auth-email" placeholder="Email address" />
-    <input class="auth-input" type="password" id="auth-password" placeholder="Password" />
+    <form id="auth-form" onsubmit="return false;">
+      <input class="auth-input" type="email" id="auth-email" name="email" autocomplete="username" placeholder="Email address" />
+      <input class="auth-input" type="password" id="auth-password" name="password" autocomplete="current-password" placeholder="Password" />
 
-    <div class="auth-error" id="auth-error"></div>
+      <div class="auth-error" id="auth-error"></div>
 
-    <button class="auth-btn" id="auth-submit-btn" onclick="handleAuth()">Sign In</button>
+      <button type="button" class="auth-btn" id="auth-submit-btn" onclick="handleAuth()">Sign In</button>
+    </form>
 
     <div class="auth-divider">or</div>
 

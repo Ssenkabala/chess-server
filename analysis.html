@@ -1435,24 +1435,11 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <!-- Coach card -->
     <div id="coach-card">
       <div class="coach-section">
-        <span class="coach-label">Assessment</span>
-        <span class="coach-text" id="c-assessment">—</span>
-      </div>
-      <div class="coach-section">
         <span class="coach-label">Best Move</span>
         <span class="coach-text" id="c-bestmove">—</span>
       </div>
-      <div class="coach-section" id="c-continuation-row" style="display:none;">
-        <span class="coach-label" style="color:#aaa;">Continuation</span>
-        <span class="coach-text" id="c-continuation" style="font-family:monospace;font-size:12px;color:#aaa;">—</span>
-      </div>
       <div class="coach-section">
-        <span class="coach-label">Plan</span>
-        <span class="coach-text" id="c-plan">—</span>
-      </div>
-      <div class="coach-section">
-        <span class="coach-label">Tip</span>
-        <span class="coach-text" id="c-tip">—</span>
+        <span class="coach-text" id="c-oneliner" style="font-size:14px;">—</span>
       </div>
     </div>
 
@@ -2855,46 +2842,13 @@ function getCoaching() {
 }
 
 function parseAndRenderCoaching(text, bestMove, evalPawns) {
-  // Extract sections from formatted coach response
-  var sections = { assessment: '', bestmove: '', plan: '', tip: '' };
+  // The backend now returns one short, direct sentence — no labeled
+  // sections to parse. Strip any stray labels if an older-style response
+  // ever slips through, so nothing ugly like "ASSESSMENT:" leaks into the UI.
+  var oneLiner = (text || '').replace(/^(ASSESSMENT|BEST MOVE|CONTINUATION|PLAN|TIP):\s*/i, '').trim();
 
-  var assessMatch = text.match(/ASSESSMENT:\s*(.+?)(?=BEST MOVE:|CONTINUATION:|PLAN:|TIP:|$)/si);
-  var bestMatch   = text.match(/BEST MOVE:\s*(.+?)(?=CONTINUATION:|PLAN:|TIP:|$)/si);
-  var contMatch   = text.match(/CONTINUATION:\s*(.+?)(?=PLAN:|TIP:|$)/si);
-  var planMatch   = text.match(/PLAN:\s*(.+?)(?=TIP:|$)/si);
-  var tipMatch    = text.match(/TIP:\s*(.+?)$/si);
-
-  if (assessMatch) sections.assessment    = assessMatch[1].trim();
-  if (bestMatch)   sections.bestmove      = bestMatch[1].trim();
-  if (contMatch)   sections.continuation  = contMatch[1].trim();
-  if (planMatch)   sections.plan          = planMatch[1].trim();
-  if (tipMatch)    sections.tip           = tipMatch[1].trim();
-
-  // Fallback: show raw text if parsing failed
-  if (!sections.assessment && !sections.bestmove) {
-    sections.assessment = text;
-  }
-
-  // Add eval to assessment
-  if (evalPawns !== undefined) {
-    var sign = evalPawns >= 0 ? '+' : '';
-    var evalStr = ' [Eval: ' + sign + evalPawns + ']';
-    sections.assessment = (sections.assessment || '') + evalStr;
-  }
-
-  document.getElementById('c-assessment').textContent = sections.assessment || '—';
-  document.getElementById('c-bestmove').textContent   = sections.bestmove   || (bestMove || '—');
-  // Continuation — show if present
-  var contEl  = document.getElementById('c-continuation');
-  var contRow = document.getElementById('c-continuation-row');
-  if (contEl && sections.continuation) {
-    contEl.textContent  = sections.continuation;
-    if (contRow) contRow.style.display = '';
-  } else if (contRow) {
-    contRow.style.display = 'none';
-  }
-  document.getElementById('c-plan').textContent       = sections.plan       || '—';
-  document.getElementById('c-tip').textContent        = sections.tip        || '—';
+  document.getElementById('c-bestmove').textContent = bestMove || '—';
+  document.getElementById('c-oneliner').textContent = oneLiner || '—';
 
   document.getElementById('coach-card').classList.add('visible');
 }
@@ -2920,7 +2874,7 @@ function clearBestMoveHighlight() {
 
 function resetCoachCard() {
   document.getElementById('coach-card').classList.remove('visible');
-  ['c-assessment','c-bestmove','c-continuation','c-plan','c-tip'].forEach(function(id) {
+  ['c-bestmove','c-oneliner'].forEach(function(id) {
     document.getElementById(id).textContent = '—';
   });
   document.getElementById('eval-label').textContent = '—';

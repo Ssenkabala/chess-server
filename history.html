@@ -1230,7 +1230,7 @@ const GIF_ROLE_NAME = { p:'pawn', n:'knight', b:'bishop', r:'rook', q:'queen', k
 async function renderFenToCanvas(fen, flip) {
   const canvas = document.createElement('canvas');
   canvas.width = GIF_BOARD_PX; canvas.height = GIF_BOARD_PX + GIF_FOOTER_PX;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const rows = fen.split(' ')[0].split('/');
 
   for (let r = 0; r < 8; r++) {

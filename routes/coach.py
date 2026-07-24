@@ -2,6 +2,14 @@
 Auto-extracted from the monolithic server.py during the modularization split.
 Every function/constant below is byte-identical to the original — only
 imports and (for route files) the @app. -> @router. decorator were changed.
+
+Prompt format updated: replaced the old 5-section (ASSESSMENT/BEST MOVE/
+CONTINUATION/PLAN/TIP) response format with a single short sentence,
+matching the terse, direct style Lichess and Chess.com use for move
+annotations. max_tokens reduced from 500 to 100 to match — that limit was
+originally sized for a 5-paragraph response and now just wastes latency
+and cost, plus acts as a safety cap if the model doesn't fully follow the
+shorter format.
 """
 
 import os, re, time, uuid, hmac, hashlib, asyncio, secrets, logging
@@ -30,6 +38,20 @@ from app_core.engine_pool import analyse_position
 from app_core.models import AnalyseRequest, CoachRequest, FreeCoachRequest
 from app_core.state import engine_semaphore
 from routes.profile import get_user_plan
+
+# Shared one-liner format instruction — used by both /coach and /coach-free
+# so the two endpoints can't drift into different styles over time.
+ONE_LINER_INSTRUCTION = """
+Respond with ONE short, direct sentence — the way Lichess or Chess.com
+annotates a move, not a full explanation. State the single most important
+reason plainly, ideally under 20 words. No labeled sections, no headers,
+no multiple paragraphs — just the sentence itself.
+
+If the engine found a forced mate the player missed, say so directly and
+name the mate length, e.g. "This misses a forced mate in 3 — Qxh7+ starts
+a mating attack."
+"""
+
 
 @router.post("/coach")
 def coach(req: CoachRequest, user=Depends(verify_key)):
@@ -80,21 +102,14 @@ This is not the engine's top choice. Briefly explain why {best_move} is better.
     if req.lesson_type:
         prompt += f"\nFocus your explanation on {req.lesson_type} principles.\n"
 
-    prompt += """
-Respond in this exact format:
-ASSESSMENT: (1 sentence on who stands better and why)
-BEST MOVE: (explain the engine's best move in plain English)
-CONTINUATION: (walk through the next 4-5 moves from the engine continuation, one short phrase per move)
-PLAN: (2-3 sentences on the strategic plan going forward)
-TIP: (one practical chess principle this position illustrates)
-"""
+    prompt += ONE_LINER_INSTRUCTION
 
     # 3. Call Claude
     try:
         ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         message = ai_client.messages.create(
             model="claude-opus-4-5",
-            max_tokens=500,
+            max_tokens=100,
             messages=[{"role": "user", "content": prompt}]
         )
         explanation = message.content[0].text
@@ -108,6 +123,7 @@ TIP: (one practical chess principle this position illustrates)
         "coaching": explanation,
         "tier": user["tier"]
     }
+
 
 @router.post("/coach-free")
 async def coach_free(req: FreeCoachRequest):
@@ -285,20 +301,13 @@ Do not invent moves or variations not in this list. Do not guess — use only th
     if req.pgn:
         prompt += f"\nGame moves so far: {req.pgn}\n"
 
-    prompt += """
-Respond in this exact format:
-ASSESSMENT: (1 sentence on who stands better and why)
-BEST MOVE: (explain the engine best move in plain English)
-CONTINUATION: (walk through the next 4-5 moves from the engine continuation provided, explaining the idea behind each move in one short phrase)
-PLAN: (2-3 sentences on the strategic plan going forward)
-TIP: (one practical chess principle this position illustrates)
-"""
+    prompt += ONE_LINER_INSTRUCTION
 
     try:
         ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         message = ai_client.messages.create(
             model="claude-opus-4-5",
-            max_tokens=500,
+            max_tokens=100,
             messages=[{"role": "user", "content": prompt}]
         )
         explanation = message.content[0].text
@@ -317,6 +326,7 @@ TIP: (one practical chess principle this position illustrates)
         "uses_today": uses_today + 1,
         "uses_remaining": max(0, daily_limit - (uses_today + 1)),
     }
+
 
 @router.post("/analyse-position")
 async def analyse_pos(req: AnalyseRequest):
@@ -337,6 +347,7 @@ async def analyse_pos(req: AnalyseRequest):
         print(f"analyse-position error: {traceback.format_exc()}", flush=True)
         raise HTTPException(500, f"Engine error: {e}")
 
+
 @router.get("/debug-coach")
 async def debug_coach():
     """Test engine analysis in isolation."""
@@ -350,6 +361,7 @@ async def debug_coach():
         return {"status": "ok", "analysis": analysis}
     except Exception as e:
         return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
+
 
 def debug_files():
     return {

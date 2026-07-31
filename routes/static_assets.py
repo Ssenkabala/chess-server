@@ -10,6 +10,13 @@ single cacheable file — the browser fetches it once and reuses it across
 every page instead of re-downloading and re-parsing ~30KB of identical JS on
 every navigation. watch.html is unaffected; it already loads chessground
 from jsDelivr's CDN rather than inlining it.
+
+Added /continental-chat.js: serves the Continental Chat widget, extracted out
+of the 8 pages that carried it inline (analysis.html, history.html,
+index.html, landing.html, leaderboard.html, profile.html, tournament.html,
+watch.html). Self-injects its own HTML and CSS into the page before running,
+so each including page now only needs a single <script src> tag instead of
+~13KB of duplicated markup, styling, and logic.
 """
 
 import os, re, time, uuid, hmac, hashlib, asyncio, secrets, logging
@@ -70,6 +77,10 @@ def serve_analysis_accuracy():
 @router.get("/chessground-bundle.js")
 def serve_chessground_bundle():
     return FileResponse("chessground-bundle.js", media_type="application/javascript")
+
+@router.get("/continental-chat.js")
+def serve_continental_chat():
+    return FileResponse("continental-chat.js", media_type="application/javascript")
 
 @router.get("/chess_pattern_bg.svg")
 def serve_chess_pattern_bg():

@@ -2,6 +2,14 @@
 Auto-extracted from the monolithic server.py during the modularization split.
 Every function/constant below is byte-identical to the original — only
 imports and (for route files) the @app. -> @router. decorator were changed.
+
+Added /chessground-bundle.js: serves the chessground board library, extracted
+out of index.html/analysis.html/play_multiplayer.html where it was previously
+inlined identically (byte-for-byte, confirmed via hash) in all three. Now a
+single cacheable file — the browser fetches it once and reuses it across
+every page instead of re-downloading and re-parsing ~30KB of identical JS on
+every navigation. watch.html is unaffected; it already loads chessground
+from jsDelivr's CDN rather than inlining it.
 """
 
 import os, re, time, uuid, hmac, hashlib, asyncio, secrets, logging
@@ -58,6 +66,10 @@ def serve_openings():
 @router.get("/analysis_accuracy.js")
 def serve_analysis_accuracy():
     return FileResponse("analysis_accuracy.js", media_type="application/javascript")
+
+@router.get("/chessground-bundle.js")
+def serve_chessground_bundle():
+    return FileResponse("chessground-bundle.js", media_type="application/javascript")
 
 @router.get("/chess_pattern_bg.svg")
 def serve_chess_pattern_bg():

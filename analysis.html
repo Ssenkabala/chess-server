@@ -2442,6 +2442,15 @@ function analysePosition() {
   }
 
   var fen = analysisGame.fen();
+  // Engine scores are relative to whoever's turn it is in this position
+  // ("mover's POV" — standard UCI convention), but every display (eval
+  // bar, candidate list, status text) needs them in a fixed, White's-
+  // absolute-perspective sign so the bar doesn't flip meaning depending
+  // on who's to move. Derived once, here, from the stable fen snapshot
+  // this whole analysis call is for — not from the live analysisGame
+  // object, which could have moved on by the time async engine messages
+  // arrive back.
+  var sideToMove = fen.split(' ')[1];
   var myGen = ++_analysisGen;  // this call's identity — see the comment on _analysisGen above
   setAnalysisStatus('⏳ Engine analysing...');
   document.getElementById('btn-coach').disabled = true;
@@ -2485,8 +2494,9 @@ function analysePosition() {
       if (mpv === 1) finalRealPv = pv;  // line 1 specifically feeds the cached result / Coach Me
       if (pv.length && infoLines[mpv]) {
         infoLines[mpv].pvLine = pv;
-        infoLines[mpv].cp     = msg.cp;
-        infoLines[mpv].mate   = msg.mate;
+        var flipped1 = (sideToMove === 'b') ? flipEval(msg.cp, msg.mate) : { cp: msg.cp, mate: msg.mate };
+        infoLines[mpv].cp     = flipped1.cp;
+        infoLines[mpv].mate   = flipped1.mate;
         renderCandidateRows(fen);
       }
       return;
@@ -2498,7 +2508,8 @@ function analysePosition() {
     var mpv    = msg.multipv || 1;
 
     if (mpv === 1 && pvMove) bestMoveInfo = pvMove;
-    infoLines[mpv] = { depth: depth, cp: msg.cp, mate: msg.mate, pvLine: pvLine, pvMove: pvMove };
+    var flipped2 = (sideToMove === 'b') ? flipEval(msg.cp, msg.mate) : { cp: msg.cp, mate: msg.mate };
+    infoLines[mpv] = { depth: depth, cp: flipped2.cp, mate: flipped2.mate, pvLine: pvLine, pvMove: pvMove };
 
     // Live depth feedback in the main status line — with a 30s budget now
     // in play (up from the old flat 5s), it matters more that progress is
